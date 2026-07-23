@@ -19,6 +19,7 @@ setup(
     entry_points={
         'console_scripts': [
             'dvl_node = robotx_graey_2026.api.navigation.dvl_node:main',
+            'dvl_ekf_bridge = robotx_graey_2026.api.navigation.dvl_ekf_bridge:main',
         ],
     },
 )
