@@ -23,6 +23,7 @@ setup(
         'console_scripts': [
             'led_node = robotx_graey_2026.api.led.led_node:main',
             'pixhawk_led_node = robotx_graey_2026.api.led.pixhawk_led_node:main',
+            'vn100_node = robotx_graey_2026.api.navigation.vn100_node:main',
             'dvl_node = robotx_graey_2026.api.navigation.dvl_node:main',
             'dvl_ekf_bridge = robotx_graey_2026.api.navigation.dvl_ekf_bridge:main',
         ],
