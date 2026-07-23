@@ -34,7 +34,8 @@ ssh graey@graey.local
 #     (Fathom-X powered, Ethernet -> adapter -> laptop, tether mated to penetrator)
 ssh graey@192.168.2.2
 
-If SSH warns "REMOTE HOST IDENTIFICATION HAS CHANGED" after a Jetson swap, clear the old key:  ssh-keygen -R 192.168.2.2
+If SSH warns "REMOTE HOST IDENTIFICATION HAS CHANGED" after a Jetson swap, clear the old key:
+ssh-keygen -R 192.168.2.2
 
 # 2. enter the container
 docker exec -it graey bash
