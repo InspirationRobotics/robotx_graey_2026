@@ -1,8 +1,18 @@
 #!/bin/bash
 # MAVProxy = ONLY owner of the Pixhawk USB port.
-# usage: ./start_mavproxy.sh [LAPTOP_IP]   (default 192.168.8.137)
+# usage: ./start_mavproxy.sh <LAPTOP_IP>   (tether = 192.168.2.1)
 # by-id path is stable; /dev/ttyACM* numbering changes when the Cube reboots.
 CUBE=/dev/serial/by-id/usb-Hex_ProfiCNC_CubeOrange_24002A000B51303231383439-if00
+
+if [ -z "$1" ]; then
+  echo "############################################################"
+  echo "WARNING: no laptop IP given - defaulting to 192.168.8.137"
+  echo "         (that is Chris's laptop on WiFi ONLY)"
+  echo "         If QGroundControl never connects, that is why."
+  echo "         Pass YOUR laptop IP:  ./start_mavproxy.sh <IP>"
+  echo "         Tether = 192.168.2.1"
+  echo "############################################################"
+fi
 LAPTOP=${1:-192.168.8.137}
 
 if [ ! -e "$CUBE" ]; then
