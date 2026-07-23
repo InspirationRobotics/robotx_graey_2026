@@ -27,8 +27,14 @@ pass a Proof of Readiness (prequalification) run.
 ## Quick start
 
 ```bash
-# 1. connect (WiFi)
+# 1a. connect over WiFi
 ssh graey@graey.local
+
+# 1b. or over tether: set laptop Ethernet to static 192.168.2.1, mask 255.255.255.0
+#     (Fathom-X powered, Ethernet -> adapter -> laptop, tether mated to penetrator)
+ssh graey@192.168.2.2
+
+If SSH warns "REMOTE HOST IDENTIFICATION HAS CHANGED" after a Jetson swap, clear the old key:  ssh-keygen -R 192.168.2.2
 
 # 2. enter the container
 docker exec -it graey bash
