@@ -25,4 +25,5 @@ mavproxy.py --master=$CUBE --baudrate=115200 \
   --out=udpout:$LAPTOP:14550 \
   --out=udpin:0.0.0.0:14551 \
   --out=udpin:0.0.0.0:14552 \
-  --out=udpin:0.0.0.0:14553
+  --out=udpin:0.0.0.0:14553 \
+  --out=udpin:0.0.0.0:14554

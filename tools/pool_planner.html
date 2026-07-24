@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Graey Pool Mission Planner</title>
+<style>
+  body { margin:0; font-family: Segoe UI, Arial, sans-serif; background:#14171c; color:#e8e8e8; }
+  #bar, #bar2 { padding:8px 14px; background:#1d2129; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  #bar2 { border-top:1px solid #2a2f3a; }
+  button { background:#2d3442; color:#e8e8e8; border:1px solid #444; border-radius:6px; padding:7px 13px; cursor:pointer; font-size:13.5px; }
+  button.active { background:#3a6ea5; border-color:#5b9bd5; }
+  button.good { background:#2e5d3a; border-color:#4a9; }
+  button:disabled { opacity:.4; cursor:default; }
+  label { font-size:13px; color:#aab; }
+  input[type=number] { width:64px; background:#20242c; color:#e8e8e8; border:1px solid #444; border-radius:4px; padding:5px; }
+  input[type=text] { width:120px; background:#20242c; color:#e8e8e8; border:1px solid #444; border-radius:4px; padding:5px; }
+  canvas { display:block; cursor:crosshair; }
+  #status { padding:7px 14px; font-size:13.5px; background:#181c22; color:#ffd479; min-height:18px; }
+  #live { padding:5px 14px; font-size:13px; background:#161a20; color:#7fd4ff; min-height:16px; font-family:Consolas, monospace; }
+  #out { margin:10px 14px; }
+  #cmd { width:100%; box-sizing:border-box; background:#0e1116; color:#9fdf9f; border:1px solid #333;
+         border-radius:6px; padding:10px; font-family:Consolas, monospace; font-size:12.5px; white-space:pre-wrap; }
+  #info { font-size:13px; color:#9ab; margin:6px 0; }
+  .hint { color:#778; font-size:12px; margin-top:6px; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <input type="file" id="file" accept="image/*">
+  <label>Known dist (m) <input type="number" id="calDist" value="5" step="0.5" min="0.1"></label>
+  <button id="bCal">1. Calibrate</button>
+  <button id="bStart">2. Start + heading</button>
+  <button id="bMarker">3. Marker</button>
+  <label>U-turn r (m) <input type="number" id="rad" value="1.0" step="0.25" min="0.25"></label>
+  <label>Depth (m) <input type="number" id="depth" value="0.5" step="0.1" min="0.2"></label>
+  <label>Gate (m) <input type="number" id="gate" value="0" step="0.5" min="0"></label>
+  <button id="bCopy" disabled>Copy command</button>
+</div>
+<div id="bar2">
+  <label>Jetson <input type="text" id="jip" value="192.168.2.2"></label>
+  <button id="bTrack">Connect live tracking</button>
+  <button id="bZero" disabled>Zero at start point</button>
+  <button id="bClear" disabled>Clear trail</button>
+  <span class="hint">scroll = zoom &nbsp;·&nbsp; drag = pan &nbsp;·&nbsp; click = place (in active mode)</span>
+</div>
+<div id="status">Load the pool image to begin.</div>
+<div id="live">live tracking: off</div>
+<canvas id="cv"></canvas>
+<div id="out">
+  <div id="info"></div>
+  <div id="cmd">command will appear here</div>
+  <div class="hint">In the water: place the sub at the blue dot, aim it along the blue arrow, then click
+  "Zero at start point" (with tracking connected) and run the command from MANUAL. The node does the GUIDED switch.</div>
+</div>
+
+<script>
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const statusEl = document.getElementById('status'), info = document.getElementById('info');
+const liveEl = document.getElementById('live'), cmdBox = document.getElementById('cmd');
+
+let img = null, mode = null, clicks = [];
+let mPerPx = null, calPts = null;            // image-pixel space
+let start = null, headingPt = null, marker = null;   // image-pixel space
+let view = { z: 1, ox: 0, oy: 0 };
+let mouseImg = null;                          // cursor in image coords
+let down = null, moved = false, viewAtDown = null;
+
+// live tracking state
+let polling = null, lastFix = null, origin = null, trail = [];
+
+function setStatus(t){ statusEl.textContent = t; }
+function setMode(m){
+  mode = m; clicks = [];
+  for (const [id, name] of [['bCal','cal'],['bStart','start'],['bMarker','marker']])
+    document.getElementById(id).classList.toggle('active', name === m);
+  draw();
+}
+
+document.getElementById('file').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  img = new Image();
+  img.onload = () => {
+    cv.width = window.innerWidth - 4;
+    cv.height = Math.max(420, window.innerHeight - 320);
+    const fit = Math.min(cv.width / img.width, cv.height / img.height);
+    view = { z: fit, ox: (cv.width - img.width*fit)/2, oy: (cv.height - img.height*fit)/2 };
+    draw();
+    setStatus('Image loaded. Calibrate: type the known distance, click "1. Calibrate", then click the two points it spans. Zoom in first for accuracy.');
+  };
+  img.src = URL.createObjectURL(f);
+});
+
+const i2s = p => ({ x: p.x*view.z + view.ox, y: p.y*view.z + view.oy });
+const s2i = p => ({ x: (p.x - view.ox)/view.z, y: (p.y - view.oy)/view.z });
+
+document.getElementById('bCal').onclick = () => { setMode('cal');
+  setStatus('CALIBRATE: click the two ends of the known distance (' + document.getElementById('calDist').value + ' m). Zoom in for precision.'); };
+document.getElementById('bStart').onclick = () => { setMode('start');
+  setStatus('START: click the start position, then click a point in the FACING direction (click FAR away for an accurate angle).'); };
+document.getElementById('bMarker').onclick = () => { setMode('marker');
+  setStatus('MARKER: click where the object will be.'); };
+
+cv.addEventListener('wheel', e => {
+  if (!img) return;
+  e.preventDefault();
+  const r = cv.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const f = e.deltaY < 0 ? 1.15 : 1/1.15;
+  const nz = Math.min(Math.max(view.z * f, 0.05), 40);
+  view.ox = mx - (mx - view.ox) * (nz / view.z);
+  view.oy = my - (my - view.oy) * (nz / view.z);
+  view.z = nz;
+  draw();
+}, { passive: false });
+
+cv.addEventListener('mousedown', e => {
+  const r = cv.getBoundingClientRect();
+  down = { x: e.clientX - r.left, y: e.clientY - r.top };
+  viewAtDown = { ...view };
+  moved = false;
+});
+cv.addEventListener('mousemove', e => {
+  const r = cv.getBoundingClientRect();
+  const p = { x: e.clientX - r.left, y: e.clientY - r.top };
+  mouseImg = s2i(p);
+  if (down) {
+    const dx = p.x - down.x, dy = p.y - down.y;
+    if (Math.abs(dx) + Math.abs(dy) > 5) moved = true;
+    if (moved) { view.ox = viewAtDown.ox + dx; view.oy = viewAtDown.oy + dy; }
+  }
+  draw();
+});
+cv.addEventListener('mouseup', e => {
+  const wasDrag = moved; down = null; moved = false;
+  if (wasDrag || !img || !mode) { draw(); return; }
+  const r = cv.getBoundingClientRect();
+  const p = s2i({ x: e.clientX - r.left, y: e.clientY - r.top });
+  clicks.push(p);
+
+  if (mode === 'cal' && clicks.length === 2) {
+    const m = parseFloat(document.getElementById('calDist').value);
+    if (m > 0) {
+      const px = Math.hypot(clicks[1].x - clicks[0].x, clicks[1].y - clicks[0].y);
+      mPerPx = m / px; calPts = [clicks[0], clicks[1]];
+      setStatus(`Scale: ${m} m over ${px.toFixed(1)} image px = ${mPerPx.toFixed(4)} m/px. Now 2. Start + heading.`);
+    } else setStatus('Type the known distance first, then recalibrate.');
+    setMode(null);
+  } else if (mode === 'start') {
+    if (clicks.length === 1) { start = p; headingPt = null; setStatus('Now click a point in the FACING direction — farther = more accurate.'); }
+    else {
+      headingPt = p; setMode(null);
+      setStatus(`Heading locked at ${screenHeadingDeg().toFixed(1)}° (image-up = 0°). Now 3. Marker.`);
+    }
+  } else if (mode === 'marker') {
+    marker = p; setMode(null); setStatus('Marker set. Command below.');
+  }
+  update();
+});
+
+function screenHeadingDeg(hp){
+  const h = hp || headingPt;
+  if (!start || !h) return 0;
+  return (Math.atan2(h.x - start.x, -(h.y - start.y)) * 180 / Math.PI + 360) % 360;
+}
+
+['rad','depth','gate'].forEach(id => document.getElementById(id).addEventListener('input', update));
+
+function missionFrame(){
+  if (!start || !headingPt || !mPerPx) return null;
+  let fx = headingPt.x - start.x, fy = headingPt.y - start.y;
+  const n = Math.hypot(fx, fy); if (n < 1e-6) return null;
+  fx /= n; fy /= n;
+  return { fx, fy, rx: -fy, ry: fx };
+}
+function markerFR(mf){
+  if (!mf || !marker) return null;
+  const mx = marker.x - start.x, my = marker.y - start.y;
+  return { fwd: (mx*mf.fx + my*mf.fy) * mPerPx, rgt: (mx*mf.rx + my*mf.ry) * mPerPx };
+}
+function m2i(f, r, mf){
+  const pxPerM = 1 / mPerPx;
+  return { x: start.x + (f*mf.fx + r*mf.rx) * pxPerM, y: start.y + (f*mf.fy + r*mf.ry) * pxPerM };
+}
+
+function update(){
+  draw();
+  const mf = missionFrame(), fr = markerFR(mf);
+  if (!fr) { cmdBox.textContent = 'command will appear here'; document.getElementById('bCopy').disabled = true; return; }
+  const rad = parseFloat(document.getElementById('rad').value) || 1.0;
+  const depth = parseFloat(document.getElementById('depth').value) || 0.5;
+  const gate = parseFloat(document.getElementById('gate').value) || 0;
+  info.textContent = `Marker: ${fr.fwd.toFixed(2)} m forward, ${fr.rgt.toFixed(2)} m right`
+    + ` (straight-line ${Math.hypot(fr.fwd, fr.rgt).toFixed(2)} m) · heading ${screenHeadingDeg().toFixed(1)}° on image`;
+  cmdBox.textContent = 'ros2 run robotx_graey_2026 prequal_mission --ros-args'
+    + ' -p dry_run:=false'
+    + ` -p depth:=${depth.toFixed(2)}`
+    + ' -p reach_thresh:=0.25'
+    + ` -p gate_forward:=${gate.toFixed(1)}`
+    + ` -p marker_forward:=${fr.fwd.toFixed(2)}`
+    + ` -p marker_right:=${fr.rgt.toFixed(2)}`
+    + ` -p uturn_radius:=${rad.toFixed(2)}`
+    + ' -p state_timeout:=45.0';
+  document.getElementById('bCopy').disabled = false;
+}
+document.getElementById('bCopy').onclick = () =>
+  navigator.clipboard.writeText(cmdBox.textContent).then(()=>setStatus('Command copied.'));
+
+// ---------------- live tracking ----------------
+document.getElementById('bTrack').onclick = () => {
+  if (polling) { clearInterval(polling); polling = null; lastFix = null;
+    document.getElementById('bTrack').textContent = 'Connect live tracking';
+    document.getElementById('bTrack').classList.remove('good');
+    liveEl.textContent = 'live tracking: off'; return; }
+  const ip = document.getElementById('jip').value.trim();
+  polling = setInterval(async () => {
+    try {
+      const r = await fetch(`http://${ip}:8081/pos`, { cache: 'no-store' });
+      const j = await r.json();
+      if (j.ok) {
+        lastFix = j;
+        document.getElementById('bZero').disabled = false;
+        if (origin) {
+          const dN = j.x - origin.x, dE = j.y - origin.y;
+          const c = Math.cos(origin.yaw), s = Math.sin(origin.yaw);
+          const f = dN*c + dE*s, rr = -dN*s + dE*c;
+          const last = trail[trail.length-1];
+          if (!last || Math.hypot(f-last.f, rr-last.r) > 0.03) trail.push({ f, r: rr });
+          liveEl.textContent = `sub: fwd ${f.toFixed(2)} m  right ${rr.toFixed(2)} m  depth ${j.z.toFixed(2)} m`
+            + `  hdg ${(j.yaw*180/Math.PI).toFixed(0)}°  (age ${j.age}s)`;
+        } else {
+          liveEl.textContent = `link OK — NED (${j.x.toFixed(2)}, ${j.y.toFixed(2)}, ${j.z.toFixed(2)})`
+            + ` hdg ${(j.yaw*180/Math.PI).toFixed(0)}° — place sub at start, aim it, then "Zero at start point"`;
+        }
+        draw();
+      }
+    } catch (e) { liveEl.textContent = `live tracking: no response from ${ip}:8081 — is pos_server.py running?`; }
+  }, 200);
+  document.getElementById('bTrack').textContent = 'Disconnect tracking';
+  document.getElementById('bTrack').classList.add('good');
+};
+
+document.getElementById('bZero').onclick = () => {
+  if (!lastFix) return;
+  origin = { x: lastFix.x, y: lastFix.y, yaw: lastFix.yaw };
+  trail = [];
+  document.getElementById('bClear').disabled = false;
+  setStatus('Origin zeroed — the sub is now drawn at the blue start dot. Run the mission command.');
+};
+document.getElementById('bClear').onclick = () => { trail = []; draw(); };
+
+// ---------------- drawing ----------------
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  if (!img) return;
+  ctx.drawImage(img, view.ox, view.oy, img.width*view.z, img.height*view.z);
+
+  if (calPts) { sline(calPts[0], calPts[1], '#ffd479', 2, [6,4]); sdot(calPts[0],'#ffd479',4); sdot(calPts[1],'#ffd479',4); }
+  for (const c of clicks) sdot(c, '#ffffff', 4);
+
+  // calibration live preview
+  if (mode === 'cal' && clicks.length === 1 && mouseImg && mPerPxNull()) {
+    sline(clicks[0], mouseImg, '#ffd479', 1.5, [4,4]);
+  }
+  // heading live preview
+  if (mode === 'start' && clicks.length === 1 && mouseImg) {
+    sline(clicks[0], mouseImg, '#4fc3f7', 2, [5,4]);
+    setStatus(`heading preview: ${screenHeadingDegFrom(clicks[0], mouseImg).toFixed(1)}° — click to lock`);
+  }
+
+  const mf = missionFrame();
+  if (start) sdot(start, '#4fc3f7', 7);
+  if (start && headingPt) {
+    const u = { x: headingPt.x - start.x, y: headingPt.y - start.y };
+    const n = Math.hypot(u.x,u.y) || 1;
+    sarrow(start, { x: start.x + u.x/n*(46/view.z), y: start.y + u.y/n*(46/view.z) }, '#4fc3f7');
+  }
+  if (marker) sdot(marker, '#ff7043', 7);
+
+  // planned path
+  const fr = markerFR(mf);
+  if (mf && fr) {
+    const rad = parseFloat(document.getElementById('rad').value) || 1.0;
+    const pts = [{f:0,r:0}, {f:fr.fwd, r:fr.rgt - rad}];
+    for (let i=0;i<=16;i++){
+      const a = -Math.PI/2 + Math.PI*i/16;
+      pts.push({ f: fr.fwd + rad*Math.cos(a), r: fr.rgt + rad*Math.sin(a) });
+    }
+    pts.push({f:0,r:0});
+    spath(pts.map(p => m2i(p.f, p.r, mf)), '#9fdf9f', 2.5);
+  }
+
+  // live trail + sub
+  if (mf && origin && trail.length) {
+    spath(trail.map(p => m2i(p.f, p.r, mf)), '#7fd4ff', 2);
+    const cur = trail[trail.length-1];
+    const pos = m2i(cur.f, cur.r, mf);
+    let h = 0;
+    if (lastFix) h = lastFix.yaw - origin.yaw;
+    const dir = { x: mf.fx*Math.cos(h) + mf.rx*Math.sin(h), y: mf.fy*Math.cos(h) + mf.ry*Math.sin(h) };
+    subMarker(pos, dir);
+  }
+}
+function mPerPxNull(){ return true; }
+function screenHeadingDegFrom(a, b){
+  return (Math.atan2(b.x - a.x, -(b.y - a.y)) * 180 / Math.PI + 360) % 360;
+}
+function sdot(p, c, rr=5){ const s = i2s(p);
+  ctx.beginPath(); ctx.arc(s.x,s.y,rr,0,7); ctx.fillStyle=c; ctx.fill();
+  ctx.strokeStyle='#000'; ctx.lineWidth=1.5; ctx.stroke(); }
+function sline(a,b,c,w,dash){ const s1=i2s(a), s2=i2s(b);
+  ctx.beginPath(); ctx.moveTo(s1.x,s1.y); ctx.lineTo(s2.x,s2.y);
+  ctx.strokeStyle=c; ctx.lineWidth=w; ctx.setLineDash(dash||[]); ctx.stroke(); ctx.setLineDash([]); }
+function spath(ptsImg, c, w){ ctx.beginPath();
+  ptsImg.forEach((p,i)=>{ const s=i2s(p); i? ctx.lineTo(s.x,s.y): ctx.moveTo(s.x,s.y); });
+  ctx.strokeStyle=c; ctx.lineWidth=w; ctx.setLineDash([]); ctx.stroke(); }
+function sarrow(a,b,c){ sline(a,b,c,3);
+  const s1=i2s(a), s2=i2s(b);
+  const ang = Math.atan2(s2.y-s1.y, s2.x-s1.x);
+  for (const off of [-0.5, 0.5]){
+    ctx.beginPath(); ctx.moveTo(s2.x, s2.y);
+    ctx.lineTo(s2.x - 14*Math.cos(ang+off), s2.y - 14*Math.sin(ang+off));
+    ctx.strokeStyle=c; ctx.lineWidth=3; ctx.stroke(); }
+}
+function subMarker(pImg, dirImg){
+  const s = i2s(pImg);
+  const a = Math.atan2(dirImg.y, dirImg.x);
+  ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(a);
+  ctx.beginPath(); ctx.moveTo(12,0); ctx.lineTo(-8,7); ctx.lineTo(-8,-7); ctx.closePath();
+  ctx.fillStyle='#ffb74d'; ctx.fill(); ctx.strokeStyle='#000'; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.restore();
+}
+</script>
+</body>
+</html>

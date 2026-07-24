@@ -60,7 +60,8 @@ firmware/LED/LED.ino       Arduino sketch for the status LED strip
 launch/core.launch.py      starts the LED + navigation nodes
 params/                    saved Pixhawk parameter backups
 scripts/                   start_mavproxy.sh, run_container.sh
-tools/                     oak_view.py (camera), serial_probe.py
+tools/                     oak_view.py, guided_goto.py, serial_probe.py,
+                           pos_server.py, pool_planner.html (mission planner + live map)
 robotx_graey_2026/api/
   led/                     led_node, pixhawk_led_node
   navigation/              dvl_node, vn100_node, nav_ekf_bridge, prequal_mission
@@ -83,9 +84,12 @@ moves). Set `dry_run:=false` only in the water.
 ## Status
 
 - Sensors, status LED, camera, MAVProxy/QGC link — working
-- VN-100 heading fused into the EKF — bench-validated
-- Prequal mission state machine — dry-run validated
-- In-water (pending): DVL position validation, GUIDED tuning, prequal run
+- VN-100 heading + DVL position fused into the EKF — validated in water
+- DEPTH_HOLD, POSHOLD, GUIDED waypoints — validated in water
+- Full autonomous prequal mission (dive, transit, U-turn, return, surface) — flown
+  successfully in the lab pool, planned by clicking on a pool photo (pool_planner.html)
+  with live position tracking drawn on the map
+- Pending: full-scale rehearsal + prequal video at the large pool
 
 ## Environment
 
