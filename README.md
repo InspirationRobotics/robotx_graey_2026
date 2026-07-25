@@ -24,7 +24,7 @@ pass a Proof of Readiness (prequalification) run.
 - **Perception:** Luxonis OAK-D W (forward). Status shown on a NeoPixel strip
   driven by an Arduino.
 
-## Quick start
+## Quick start (jetson password is same as previous years)
 
 ```bash
 # 1a. connect over WiFi
