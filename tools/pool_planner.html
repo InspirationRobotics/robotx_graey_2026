@@ -31,7 +31,7 @@
   <button id="bCal">1. Calibrate</button>
   <button id="bStart">2. Start + heading</button>
   <button id="bMarker">3. Marker</button>
-  <label>U-turn r (m) <input type="number" id="rad" value="1.0" step="0.25" min="0.25"></label>
+  <label>Orbit r (m) <input type="number" id="rad" value="0.75" step="0.25" min="0.25"></label>
   <label>Depth (m) <input type="number" id="depth" value="0.5" step="0.1" min="0.2"></label>
   <label>Gate (m) <input type="number" id="gate" value="0" step="0.5" min="0"></label>
   <button id="bCopy" disabled>Copy command</button>
@@ -67,6 +67,7 @@ let down = null, moved = false, viewAtDown = null;
 
 // live tracking state
 let polling = null, lastFix = null, origin = null, trail = [];
+let cvPole = null;          // {f, r} in mission frame — where CV says the pole is
 
 function setStatus(t){ statusEl.textContent = t; }
 function setMode(m){
@@ -191,14 +192,14 @@ function update(){
   const gate = parseFloat(document.getElementById('gate').value) || 0;
   info.textContent = `Marker: ${fr.fwd.toFixed(2)} m forward, ${fr.rgt.toFixed(2)} m right`
     + ` (straight-line ${Math.hypot(fr.fwd, fr.rgt).toFixed(2)} m) · heading ${screenHeadingDeg().toFixed(1)}° on image`;
-  cmdBox.textContent = 'ros2 run robotx_graey_2026 prequal_mission --ros-args'
+  cmdBox.textContent = 'ros2 run robotx_graey_2026 prequal_mission_cv --ros-args'
     + ' -p dry_run:=false'
     + ` -p depth:=${depth.toFixed(2)}`
     + ' -p reach_thresh:=0.25'
     + ` -p gate_forward:=${gate.toFixed(1)}`
     + ` -p marker_forward:=${fr.fwd.toFixed(2)}`
     + ` -p marker_right:=${fr.rgt.toFixed(2)}`
-    + ` -p uturn_radius:=${rad.toFixed(2)}`
+    + ` -p orbit_radius:=${rad.toFixed(2)}`
     + ' -p state_timeout:=45.0';
   document.getElementById('bCopy').disabled = false;
 }
@@ -220,13 +221,20 @@ document.getElementById('bTrack').onclick = () => {
         lastFix = j;
         document.getElementById('bZero').disabled = false;
         if (origin) {
-          const dN = j.x - origin.x, dE = j.y - origin.y;
           const c = Math.cos(origin.yaw), s = Math.sin(origin.yaw);
+          const dN = j.x - origin.x, dE = j.y - origin.y;
           const f = dN*c + dE*s, rr = -dN*s + dE*c;
           const last = trail[trail.length-1];
           if (!last || Math.hypot(f-last.f, rr-last.r) > 0.03) trail.push({ f, r: rr });
+          let extra = '';
+          if (j.pole_ok) {
+            const pN = j.pole_n - origin.x, pE = j.pole_e - origin.y;
+            cvPole = { f: pN*c + pE*s, r: -pN*s + pE*c };
+            extra = `   |   POLE fwd ${cvPole.f.toFixed(2)} right ${cvPole.r.toFixed(2)}`
+                  + ` (cam: ${j.pole_fwd.toFixed(2)} m, ${j.pole_right >= 0 ? '+' : ''}${j.pole_right.toFixed(2)} m)`;
+          }
           liveEl.textContent = `sub: fwd ${f.toFixed(2)} m  right ${rr.toFixed(2)} m  depth ${j.z.toFixed(2)} m`
-            + `  hdg ${(j.yaw*180/Math.PI).toFixed(0)}°  (age ${j.age}s)`;
+            + `  hdg ${(j.yaw*180/Math.PI).toFixed(0)}°  (age ${j.age}s)` + extra;
         } else {
           liveEl.textContent = `link OK — NED (${j.x.toFixed(2)}, ${j.y.toFixed(2)}, ${j.z.toFixed(2)})`
             + ` hdg ${(j.yaw*180/Math.PI).toFixed(0)}° — place sub at start, aim it, then "Zero at start point"`;
@@ -246,7 +254,7 @@ document.getElementById('bZero').onclick = () => {
   document.getElementById('bClear').disabled = false;
   setStatus('Origin zeroed — the sub is now drawn at the blue start dot. Run the mission command.');
 };
-document.getElementById('bClear').onclick = () => { trail = []; draw(); };
+document.getElementById('bClear').onclick = () => { trail = []; cvPole = null; draw(); };
 
 // ---------------- drawing ----------------
 function draw(){
@@ -276,17 +284,35 @@ function draw(){
   }
   if (marker) sdot(marker, '#ff7043', 7);
 
-  // planned path
+  // planned path(s): dim = your click, bright = CV-corrected (what it will actually fly)
   const fr = markerFR(mf);
   if (mf && fr) {
-    const rad = parseFloat(document.getElementById('rad').value) || 1.0;
-    const pts = [{f:0,r:0}, {f:fr.fwd, r:fr.rgt - rad}];
-    for (let i=0;i<=16;i++){
-      const a = -Math.PI/2 + Math.PI*i/16;
-      pts.push({ f: fr.fwd + rad*Math.cos(a), r: fr.rgt + rad*Math.sin(a) });
+    const rad = parseFloat(document.getElementById('rad').value) || 0.75;
+    const gate = parseFloat(document.getElementById('gate').value) || 0;
+    if (cvPole) {
+      spath(missionPath(fr.fwd, fr.rgt, rad, gate).map(p => m2i(p.f, p.r, mf)), '#4a7a4a', 1.5, [7,5]);
+      spath(missionPath(cvPole.f, cvPole.r, rad, gate).map(p => m2i(p.f, p.r, mf)), '#9fdf9f', 2.5);
+    } else {
+      spath(missionPath(fr.fwd, fr.rgt, rad, gate).map(p => m2i(p.f, p.r, mf)), '#9fdf9f', 2.5);
     }
-    pts.push({f:0,r:0});
-    spath(pts.map(p => m2i(p.f, p.r, mf)), '#9fdf9f', 2.5);
+  }
+
+  // CV pole fix: magenta ring, dashed correction line from your click
+  if (mf && origin && cvPole) {
+    const cp = m2i(cvPole.f, cvPole.r, mf), sp = i2s(cp);
+    if (marker) {
+      sline(marker, cp, '#ff4fd8', 1.5, [5,4]);
+      const fr0 = markerFR(mf);
+      if (fr0) {
+        const err = Math.hypot(cvPole.f - fr0.fwd, cvPole.r - fr0.rgt);
+        ctx.fillStyle = '#ff4fd8'; ctx.font = '13px Segoe UI';
+        ctx.fillText(`CV fix  (${err.toFixed(2)} m from your click)`, sp.x + 12, sp.y - 10);
+      }
+    }
+    ctx.beginPath(); ctx.arc(sp.x, sp.y, 9, 0, 7);
+    ctx.strokeStyle = '#ff4fd8'; ctx.lineWidth = 3; ctx.setLineDash([]); ctx.stroke();
+    ctx.beginPath(); ctx.arc(sp.x, sp.y, 3, 0, 7);
+    ctx.fillStyle = '#ff4fd8'; ctx.fill();
   }
 
   // live trail + sub
@@ -300,6 +326,23 @@ function draw(){
     subMarker(pos, dir);
   }
 }
+// mirrors prequal_mission_cv: gate -> approach (stops orbit_r short) -> full 360 orbit -> gate -> home
+function missionPath(mF, mR, rad, gate){
+  const pts = [{f:0, r:0}];
+  if (gate > 0) pts.push({f:gate, r:0});
+  const d = Math.hypot(mF, mR) || 1e-6;
+  const ux = mF/d, uy = mR/d;
+  const ap = { f: ux*Math.max(0, d-rad), r: uy*Math.max(0, d-rad) };
+  pts.push(ap);
+  const a0 = Math.atan2(ap.r - mR, ap.f - mF);
+  for (let i=0;i<=24;i++){
+    const a = a0 + 2*Math.PI*i/24;
+    pts.push({ f: mF + rad*Math.cos(a), r: mR + rad*Math.sin(a) });
+  }
+  if (gate > 0) pts.push({f:gate, r:0});
+  pts.push({f:0, r:0});
+  return pts;
+}
 function mPerPxNull(){ return true; }
 function screenHeadingDegFrom(a, b){
   return (Math.atan2(b.x - a.x, -(b.y - a.y)) * 180 / Math.PI + 360) % 360;
@@ -310,9 +353,9 @@ function sdot(p, c, rr=5){ const s = i2s(p);
 function sline(a,b,c,w,dash){ const s1=i2s(a), s2=i2s(b);
   ctx.beginPath(); ctx.moveTo(s1.x,s1.y); ctx.lineTo(s2.x,s2.y);
   ctx.strokeStyle=c; ctx.lineWidth=w; ctx.setLineDash(dash||[]); ctx.stroke(); ctx.setLineDash([]); }
-function spath(ptsImg, c, w){ ctx.beginPath();
+function spath(ptsImg, c, w, dash){ ctx.beginPath();
   ptsImg.forEach((p,i)=>{ const s=i2s(p); i? ctx.lineTo(s.x,s.y): ctx.moveTo(s.x,s.y); });
-  ctx.strokeStyle=c; ctx.lineWidth=w; ctx.setLineDash([]); ctx.stroke(); }
+  ctx.strokeStyle=c; ctx.lineWidth=w; ctx.setLineDash(dash||[]); ctx.stroke(); ctx.setLineDash([]); }
 function sarrow(a,b,c){ sline(a,b,c,3);
   const s1=i2s(a), s2=i2s(b);
   const ang = Math.atan2(s2.y-s1.y, s2.x-s1.x);
