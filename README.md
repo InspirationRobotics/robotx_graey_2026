@@ -41,7 +41,7 @@ ssh-keygen -R 192.168.2.2
 docker exec -it graey bash
 
 # 3. terminal 1 — MAVProxy (owns the Pixhawk; start it first)
-cd /root/robotx_ws
+cd /root/robotx_ws (use ~/robotx_ws if given Permission denied error when using /root)
 ./src/robotx_graey_2026/scripts/start_mavproxy.sh <YOUR_LAPTOP_IP>
 
 # 4. terminal 2 — the nav + status stack
