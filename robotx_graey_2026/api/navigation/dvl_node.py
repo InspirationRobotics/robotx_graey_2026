@@ -10,10 +10,11 @@ Auto-reconnects if the socket drops.
 import json
 import socket
 
-import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool, Float32
 from geometry_msgs.msg import TwistWithCovarianceStamped
+
+from robotx_graey_2026.api.node_util import run
 
 
 class DVLNode(Node):
@@ -21,13 +22,14 @@ class DVLNode(Node):
         super().__init__('dvl_node')
         self.declare_parameter('ip', '192.168.2.10')
         self.declare_parameter('port', 16171)
-        self.declare_parameter('scale', 1.0)   # old team used 1.15385 - verify before trusting
+        self.declare_parameter('scale', 1.0)        # measured 1.0 wet; RoboSub's 1.15385 does not apply
 
         self.ip = self.get_parameter('ip').value
         self.port = self.get_parameter('port').value
         self.scale = self.get_parameter('scale').value
 
-        self.pub_vel = self.create_publisher(TwistWithCovarianceStamped, '/graey/dvl/velocity', 10)
+        self.pub_vel = self.create_publisher(
+            TwistWithCovarianceStamped, '/graey/dvl/velocity', 10)
         self.pub_valid = self.create_publisher(Bool, '/graey/dvl/valid', 10)
         self.pub_alt = self.create_publisher(Float32, '/graey/dvl/altitude', 10)
 
@@ -37,9 +39,8 @@ class DVLNode(Node):
 
     def connect(self):
         try:
-            s = socket.create_connection((self.ip, self.port), timeout=5)
-            s.settimeout(0.1)
-            self.sock = s
+            self.sock = socket.create_connection((self.ip, self.port), timeout=5)
+            self.sock.settimeout(0.1)
             self.buf = b''
             self.get_logger().info(f'connected to DVL {self.ip}:{self.port}')
         except OSError as e:
@@ -77,7 +78,7 @@ class DVLNode(Node):
         except ValueError:
             return
         if 'vx' not in r:
-            return   # dead-reckoning report, not a velocity report
+            return                                  # dead-reckoning report, not velocity
 
         msg = TwistWithCovarianceStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
@@ -91,23 +92,9 @@ class DVLNode(Node):
                 for j in range(3):
                     msg.twist.covariance[i * 6 + j] = float(cov[i][j])
         self.pub_vel.publish(msg)
-
         self.pub_valid.publish(Bool(data=bool(r.get('velocity_valid', False))))
         self.pub_alt.publish(Float32(data=float(r.get('altitude', -1.0))))
 
 
 def main():
-    rclpy.init()
-    node = DVLNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
-
-
-if __name__ == '__main__':
-    main()
+    run(DVLNode)

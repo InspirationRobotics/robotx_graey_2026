@@ -6,15 +6,17 @@ Parses $VNYBA (yaw, pitch, roll, gravity-free body accel, angular rates) at
   /graey/vn100/imu      sensor_msgs/Imu
   /graey/vn100/heading  std_msgs/Float32   degrees, 0-360
 
-The unit is mounted UPSIDE DOWN on Graey (raw roll reads ~180), so set
-flip_180 true to rotate the reading into the vehicle body frame."""
+The unit is mounted UPSIDE DOWN on Graey (raw roll reads ~180), so flip_180
+rotates the reading into the vehicle body frame.
+"""
 import math
 
-import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32
 from sensor_msgs.msg import Imu
 import serial
+
+from robotx_graey_2026.api.node_util import run
 
 DEFAULT_PORT = '/dev/serial/by-id/usb-FTDI_USB-RS232_Cable_AV0K9DQE-if00-port0'
 
@@ -34,7 +36,7 @@ class VN100Node(Node):
         super().__init__('vn100_node')
         self.declare_parameter('port', DEFAULT_PORT)
         self.declare_parameter('baud', 115200)
-        self.declare_parameter('flip_180', True)
+        self.declare_parameter('flip_180', True)    # unit is mounted upside down
         self.declare_parameter('yaw_offset_deg', 0.0)
         self.port = self.get_parameter('port').value
         self.baud = self.get_parameter('baud').value
@@ -45,9 +47,9 @@ class VN100Node(Node):
         self.pub_hdg = self.create_publisher(Float32, '/graey/vn100/heading', 10)
         self.ser = None
         self.buf = b''
+        self.last_hdg = None
         self.create_timer(0.01, self.tick)
         self.create_timer(2.0, self.report)
-        self.last_hdg = None
 
     def report(self):
         self.get_logger().info(f'heading={self.last_hdg}')
@@ -71,14 +73,10 @@ class VN100Node(Node):
             self.parse(line.strip())
 
     def parse(self, line):
-        try:
-            txt = line.decode('ascii', 'ignore')
-        except ValueError:
-            return
+        txt = line.decode('ascii', 'ignore')
         if not txt.startswith('$VNYBA'):
             return
-        body = txt.split('*')[0]
-        f = body.split(',')
+        f = txt.split('*')[0].split(',')             # drop the checksum, then split fields
         if len(f) < 10:
             return
         try:
@@ -89,9 +87,7 @@ class VN100Node(Node):
             return
 
         if self.flip:
-            roll += 180.0
-            if roll > 180.0:
-                roll -= 360.0
+            roll = (roll + 180.0 + 180.0) % 360.0 - 180.0   # +180 wrapped to [-180,180]
             pitch = -pitch
             ay, az = -ay, -az
             gy, gz = -gy, -gz
@@ -110,17 +106,4 @@ class VN100Node(Node):
 
 
 def main():
-    rclpy.init()
-    node = VN100Node()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
-
-
-if __name__ == '__main__':
-    main()
+    run(VN100Node)
