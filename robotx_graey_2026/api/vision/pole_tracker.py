@@ -2,15 +2,15 @@
 """Red-pole tracker: OAK-D + YOLO11 -> filtered body-frame position.
 
 Publishes:
-  /graey/pole/visible   std_msgs/Bool             stable detection?
+  /graey/pole/visible   std_msgs/Bool               stable detection?
   /graey/pole           geometry_msgs/PointStamped  x=forward, y=right, z=0 (m)
 
-Detection flicker is absorbed by requiring the pole in HITS_NEEDED of the last
-WINDOW frames, and by median-filtering range/bearing over the recent history.
+Detection flicker is absorbed by requiring the pole in HITS of the last WINDOW
+frames, then median-filtering range and bearing over that history.
 
-Also serves a live debug view at http://<jetson-ip>:8080 and, when
-save_dir is set, writes a frame every save_period seconds while detecting -
-that pile of images is the retraining dataset for our real water/camera.
+Debug view at http://<jetson-ip>:8080. With save_dir set, writes a frame every
+save_period seconds while detecting - that pile is the retraining set from our
+own water and camera.
 """
 import os
 import threading
@@ -24,51 +24,10 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool
 from geometry_msgs.msg import PointStamped
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ultralytics import YOLO
 
-W, H = 640, 400
-frame_jpg = None
-jlock = threading.Lock()
-
-PAGE = b"""<html><head><title>Graey pole tracker</title></head>
-<body style="margin:0;background:#111;text-align:center">
-<img src="/stream" style="max-width:100%"></body></html>"""
-
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == '/':
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html')
-            self.send_header('Content-Length', str(len(PAGE)))
-            self.end_headers()
-            self.wfile.write(PAGE)
-            return
-        if self.path != '/stream':
-            self.send_error(404)
-            return
-        self.send_response(200)
-        self.send_header('Content-Type',
-                         'multipart/x-mixed-replace; boundary=FRAME')
-        self.end_headers()
-        try:
-            while True:
-                with jlock:
-                    d = frame_jpg
-                if d:
-                    self.wfile.write(b'--FRAME\r\n')
-                    self.send_header('Content-Type', 'image/jpeg')
-                    self.send_header('Content-Length', str(len(d)))
-                    self.end_headers()
-                    self.wfile.write(d)
-                    self.wfile.write(b'\r\n')
-                time.sleep(0.08)
-        except (ConnectionResetError, BrokenPipeError):
-            pass
-
-    def log_message(self, *a):
-        pass
+from robotx_graey_2026.api.node_util import run
+from robotx_graey_2026.api.vision import camera
 
 
 class PoleTracker(Node):
@@ -79,7 +38,7 @@ class PoleTracker(Node):
         p('target_class', 'red')
         p('conf', 0.4)
         p('window', 10)
-        p('hits_needed', 5)
+        p('hits_needed', 5)                         # N-of-WINDOW frames to call it stable
         p('save_dir', '')
         p('save_period', 0.5)
 
@@ -87,7 +46,6 @@ class PoleTracker(Node):
         self.model_path = g('model').value
         self.target = g('target_class').value
         self.conf = g('conf').value
-        self.window = g('window').value
         self.hits = g('hits_needed').value
         self.save_dir = g('save_dir').value
         self.save_period = g('save_period').value
@@ -97,91 +55,74 @@ class PoleTracker(Node):
         self.pub_vis = self.create_publisher(Bool, '/graey/pole/visible', 10)
         self.pub_pos = self.create_publisher(PointStamped, '/graey/pole', 10)
 
-        self.seen = deque(maxlen=self.window)
-        self.fwd = deque(maxlen=self.window)
-        self.rgt = deque(maxlen=self.window)
+        window = g('window').value
+        self.seen = deque(maxlen=window)
+        self.fwd = deque(maxlen=window)
+        self.rgt = deque(maxlen=window)
         self.last_save = 0.0
-        self.visible = False
         self.last_report = 0.0
+        self.visible = False
 
-        threading.Thread(target=self.camera_loop, daemon=True).start()
-        threading.Thread(target=lambda: ThreadingHTTPServer(
-            ('0.0.0.0', 8080), Handler).serve_forever(), daemon=True).start()
+        self.stop = threading.Event()
+        self.cam_thread = threading.Thread(target=self.camera_loop, daemon=True)
+        self.cam_thread.start()
+        camera.serve_mjpeg()
         self.get_logger().info('pole_tracker starting; debug view on :8080')
 
-    def camera_loop(self):
-        global frame_jpg
-        model = YOLO(self.model_path)
-        p = dai.Pipeline()
-        cam = p.createColorCamera()
-        cam.setBoardSocket(dai.CameraBoardSocket.CAM_A)
-        cam.setResolution(dai.ColorCameraProperties.SensorResolution.THE_800_P)
-        cam.setPreviewSize(W, H)
-        cam.setInterleaved(False)
-        cam.setFps(10)
-        mL = p.createMonoCamera()
-        mL.setBoardSocket(dai.CameraBoardSocket.CAM_B)
-        mL.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
-        mL.setFps(10)
-        mR = p.createMonoCamera()
-        mR.setBoardSocket(dai.CameraBoardSocket.CAM_C)
-        mR.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
-        mR.setFps(10)
-        st = p.createStereoDepth()
-        st.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
-        st.setLeftRightCheck(True)
-        st.setDepthAlign(dai.CameraBoardSocket.CAM_A)
-        st.setOutputSize(W, H)
-        mL.out.link(st.left)
-        mR.out.link(st.right)
-        xr = p.createXLinkOut()
-        xr.setStreamName('rgb')
-        cam.preview.link(xr.input)
-        xd = p.createXLinkOut()
-        xd.setStreamName('depth')
-        st.depth.link(xd.input)
+    def destroy_node(self):
+        """Let the camera thread finish its current inference and exit on its own.
 
-        with dai.Device(p) as dev:
+        Killing it mid-predict force-unwinds a thread parked inside torch's C++,
+        which ends in std::terminate and a 30 s hang on Ctrl-C.
+        """
+        self.stop.set()
+        self.cam_thread.join(timeout=5.0)
+        super().destroy_node()
+
+    def best_box(self, res):
+        """Highest-confidence box of the target class, or None."""
+        best = None
+        for b in res.boxes:
+            if res.names[int(b.cls[0])] != self.target:
+                continue
+            if best is None or float(b.conf[0]) > float(best.conf[0]):
+                best = b
+        return best
+
+    def camera_loop(self):
+        model = YOLO(self.model_path)
+        with dai.Device(camera.build_pipeline()) as dev:
             self.get_logger().info(f'OAK-D USB speed {dev.getUsbSpeed()}')
-            K = np.array(dev.readCalibration().getCameraIntrinsics(
-                dai.CameraBoardSocket.CAM_A, W, H))
-            fx, cx = K[0][0], K[0][2]
+            fx, cx = camera.intrinsics(dev)
             qr = dev.getOutputQueue('rgb', 4, False)
             qd = dev.getOutputQueue('depth', 4, False)
             depth = None
-            while rclpy.ok():
+            while rclpy.ok() and not self.stop.is_set():
                 d = qd.tryGet()
                 if d is not None:
                     depth = d.getFrame()
-                frame = qr.get().getCvFrame()
-                raw = frame.copy()
-                res = model.predict(frame, conf=self.conf, verbose=False, device=0)[0]
-
-                best = None
-                for b in res.boxes:
-                    if res.names[int(b.cls[0])] != self.target:
-                        continue
-                    if best is None or float(b.conf[0]) > float(best.conf[0]):
-                        best = b
+                pkt = qr.tryGet()
+                if pkt is None:
+                    time.sleep(0.005)               # never block - a blocking depthai
+                    continue                        # call cannot be interrupted
+                frame = pkt.getCvFrame()
+                raw = frame.copy()                  # the saved copy carries no overlay
+                best = self.best_box(
+                    model.predict(frame, conf=self.conf, verbose=False, device=0)[0])
 
                 hit = False
-                if best is not None and depth is not None:
-                    x1, y1, x2, y2 = map(int, best.xyxy[0].tolist())
-                    mx, my = (x1 + x2) // 2, (y1 + y2) // 2
-                    cw, ch = max(2, (x2 - x1) // 4), max(2, (y2 - y1) // 4)
-                    roi = depth[max(0, my - ch):my + ch, max(0, mx - cw):mx + cw]
-                    vals = roi[roi > 0]
-                    if vals.size > 20:
-                        z = float(np.median(vals)) / 1000.0
-                        if 0.2 < z < 20.0:
-                            hit = True
-                            self.fwd.append(z)
-                            self.rgt.append((mx - cx) * z / fx)
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+                if best is not None:
+                    box = list(map(int, best.xyxy[0].tolist()))
+                    rb = camera.range_bearing(depth, box, fx, cx) if depth is not None else None
+                    if rb:
+                        hit = True
+                        self.fwd.append(rb[0])
+                        self.rgt.append(rb[1])
+                    cv2.rectangle(frame, tuple(box[:2]), tuple(box[2:]), (0, 0, 255), 2)
                     lbl = f'{self.target} {float(best.conf[0]):.2f}'
                     if hit:
-                        lbl += f'  fwd {self.fwd[-1]:.2f}m  right {self.rgt[-1]:+.2f}m'
-                    cv2.putText(frame, lbl, (x1, max(15, y1 - 6)),
+                        lbl += f'  fwd {rb[0]:.2f}m  right {rb[1]:+.2f}m'
+                    cv2.putText(frame, lbl, (box[0], max(15, box[1] - 6)),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
                 self.seen.append(1 if hit else 0)
@@ -190,20 +131,15 @@ class PoleTracker(Node):
                 if self.save_dir and hit and time.time() - self.last_save > self.save_period:
                     self.last_save = time.time()
                     cv2.imwrite(os.path.join(
-                        self.save_dir, f'pole_{int(time.time()*1000)}.jpg'), raw)
-
-                ok, buf = cv2.imencode('.jpg', frame)
-                if ok:
-                    with jlock:
-                        frame_jpg = buf.tobytes()
+                        self.save_dir, f'pole_{int(time.time() * 1000)}.jpg'), raw)
+                camera.publish_frame(frame)
 
     def publish(self, frame):
         stable = sum(self.seen) >= self.hits
         self.pub_vis.publish(Bool(data=stable))
         txt = 'SEARCHING'
         if stable and self.fwd:
-            f = float(np.median(self.fwd))
-            r = float(np.median(self.rgt))
+            f, r = float(np.median(self.fwd)), float(np.median(self.rgt))
             m = PointStamped()
             m.header.stamp = self.get_clock().now().to_msg()
             m.header.frame_id = 'base_link'
@@ -214,7 +150,7 @@ class PoleTracker(Node):
                 self.last_report = time.time()
                 self.get_logger().info(txt)
         elif not stable:
-            self.fwd.clear()
+            self.fwd.clear()                        # do not median across a lost lock
             self.rgt.clear()
         if stable != self.visible:
             self.visible = stable
@@ -224,17 +160,4 @@ class PoleTracker(Node):
 
 
 def main():
-    rclpy.init()
-    node = PoleTracker()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
-
-
-if __name__ == '__main__':
-    main()
+    run(PoleTracker)
