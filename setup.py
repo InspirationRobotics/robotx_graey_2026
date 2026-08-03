@@ -28,6 +28,7 @@ setup(
             'nav_ekf_bridge = robotx_graey_2026.api.navigation.nav_ekf_bridge:main',
             'pos_server = robotx_graey_2026.api.navigation.pos_server:main',
             'pole_tracker = robotx_graey_2026.api.vision.pole_tracker:main',
+            'gui_node = robotx_graey_2026.api.gui.gui_node:main',
             'prequal_mission = robotx_graey_2026.api.navigation.prequal_mission:main',
             'prequal_mission_cv = robotx_graey_2026.api.navigation.prequal_mission_cv:main',
         ],

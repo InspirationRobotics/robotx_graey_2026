@@ -1,19 +1,15 @@
 #!/bin/bash
 # MAVProxy = ONLY owner of the Pixhawk USB port.
-# usage: ./start_mavproxy.sh <LAPTOP_IP>   (tether = 192.168.2.1)
+#
+#   ./start_mavproxy.sh            broadcast telemetry to every subnet we are on
+#   ./start_mavproxy.sh <IP>       send to one address instead (laptop on another subnet)
+#
+# Broadcasting means any laptop on the router or the tether sees Graey in
+# QGroundControl with no configuration. It also means any of them can SEND
+# commands - only ONE machine should have joystick input enabled.
+#
 # by-id path is stable; /dev/ttyACM* numbering changes when the Cube reboots.
 CUBE=/dev/serial/by-id/usb-Hex_ProfiCNC_CubeOrange_24002A000B51303231383439-if00
-
-if [ -z "$1" ]; then
-  echo "############################################################"
-  echo "WARNING: no laptop IP given - defaulting to 192.168.8.137"
-  echo "         (that is Chris's laptop on WiFi ONLY)"
-  echo "         If QGroundControl never connects, that is why."
-  echo "         Pass YOUR laptop IP:  ./start_mavproxy.sh <IP>"
-  echo "         Tether = 192.168.2.1"
-  echo "############################################################"
-fi
-LAPTOP=${1:-192.168.8.137}
 
 if [ ! -e "$CUBE" ]; then
   echo "Cube not found at $CUBE - is it powered / finished rebooting?"
@@ -21,9 +17,25 @@ if [ ! -e "$CUBE" ]; then
   exit 1
 fi
 
-mavproxy.py --master=$CUBE --baudrate=115200 \
-  --out=udpout:$LAPTOP:14550 \
+if [ -n "$1" ]; then
+  OUTS="--out=udpout:$1:14550"
+  echo "telemetry -> $1:14550"
+else                                    # one broadcast per live interface, so this
+  OUTS=""                               # works on tether only, WiFi only, or both
+  for BCAST in $(ip -o -4 addr show scope global | grep -v docker | awk '/brd/ {print $6}'); do
+    OUTS="$OUTS --out=udpbcast:$BCAST:14550"
+    echo "telemetry -> $BCAST:14550 (broadcast)"
+  done
+  [ -z "$OUTS" ] && echo "WARNING: no network interfaces up - QGC will not connect"
+fi
+
+[ -t 1 ] || DAEMON="--daemon"           # no terminal = running as a service
+
+mavproxy.py --master=$CUBE --baudrate=115200 $DAEMON \
+  --state-basedir=/root/robotx_ws/logs \
+  $OUTS \
   --out=udpin:0.0.0.0:14551 \
   --out=udpin:0.0.0.0:14552 \
   --out=udpin:0.0.0.0:14553 \
-  --out=udpin:0.0.0.0:14554
+  --out=udpin:0.0.0.0:14554 \
+  --out=udpin:0.0.0.0:14555

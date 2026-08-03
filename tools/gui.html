@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Graey Control</title>
+<style>
+  body { margin:0; font-family: Segoe UI, Arial, sans-serif; background:#14171c; color:#e8e8e8; }
+  #strip { display:flex; align-items:center; gap:26px; padding:10px 18px;
+           background:#10131a; border-bottom:1px solid #2a2f3a; font-size:14px; }
+  #strip .k { color:#778; font-size:12px; margin-right:6px; }
+  #strip .v { font-family:Consolas, monospace; }
+  #strip.stale { opacity:.45; }
+  #tabs { display:flex; background:#1d2129; border-bottom:1px solid #2a2f3a; }
+  #tabs button { background:none; border:none; color:#aab; padding:12px 22px; font-size:14px; cursor:pointer; }
+  #tabs button.on { color:#e8e8e8; background:#14171c; border-bottom:2px solid #5b9bd5; }
+  table { border-collapse:collapse; margin:18px; min-width:560px; }
+  td, th { padding:10px 16px; border-bottom:1px solid #2a2f3a; text-align:left; font-size:14px; }
+  th { color:#aab; font-weight:normal; }
+  .dot { display:inline-block; width:11px; height:11px; border-radius:50%; margin-right:8px;
+         vertical-align:-1px; }
+  .up { background:#4caf50; } .down { background:#555; } .part { background:#ffb74d; }
+  .red { background:#e53935; } .yellow { background:#fdd835; } .green { background:#4caf50; }
+  .sub { color:#667; font-size:12px; }
+  .mono { font-family:Consolas, monospace; }
+  button.act { background:#2d3442; color:#e8e8e8; border:1px solid #444; border-radius:6px;
+               padding:5px 16px; cursor:pointer; font-size:13px; }
+  button.act:hover { border-color:#5b9bd5; }
+  iframe { border:none; width:100%; height:calc(100vh - 90px); }
+  .note { margin:0 18px 18px; color:#778; font-size:12.5px; max-width:680px; line-height:1.5; }
+</style>
+</head>
+<body>
+
+<div id="strip">
+  <span><span class="k">STATUS</span><span class="dot down" id="sLed"></span><span class="v" id="sLedTxt">--</span></span>
+  <span><span class="k">ARM</span><span class="v" id="sArm">--</span></span>
+  <span><span class="k">MODE</span><span class="v" id="sMode">--</span></span>
+  <span><span class="k">DEPTH</span><span class="v" id="sDepth">--</span></span>
+  <span><span class="k">HDG</span><span class="v" id="sHdg">--</span></span>
+  <span><span class="k">DVL</span><span class="v" id="sDvl">--</span></span>
+  <span id="sMission" style="display:none;color:#ffb74d" class="v">MISSION RUNNING</span>
+</div>
+
+<div id="tabs">
+  <button class="on" onclick="show('nodes')">Nodes</button>
+  <button onclick="show('sensors')">Sensors</button>
+  <button onclick="show('camera')">Camera</button>
+  <button onclick="show('planner')">Mission planner</button>
+</div>
+
+<div id="nodes">
+  <table>
+    <thead><tr><th>Stack</th><th>State</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div class="note">MAVProxy is managed by systemd and restarts itself, so it is shown for
+  information only. A stack stopped here is <b>not</b> restarted by core.launch &mdash;
+  starting it again from this page runs it standalone until <code>graey-ros</code> is
+  restarted.</div>
+</div>
+
+<div id="sensors" style="display:none">
+  <table>
+    <thead><tr><th>Sensor</th><th>Reading</th><th>Last update</th></tr></thead>
+    <tbody id="srows"></tbody>
+  </table>
+  <div class="note">"Last update" is seconds since that source was last heard from.
+  A dash means it has never reported since the GUI started &mdash; check the matching
+  stack on the Nodes tab.</div>
+</div>
+
+<div id="camera" style="display:none">
+  <iframe id="cam" src="about:blank"></iframe>
+</div>
+
+<div id="planner" style="display:none"><iframe src="/planner"></iframe></div>
+
+<script>
+var TABS = ['nodes','sensors','camera','planner'];
+
+function show(t){
+  TABS.forEach(function(name){
+    document.getElementById(name).style.display = (name === t) ? '' : 'none';
+  });
+  document.querySelectorAll('#tabs button').forEach(function(b,i){
+    b.classList.toggle('on', TABS[i] === t);
+  });
+  if (t === 'camera'){                       // load only when looked at - the stream
+    var cam = document.getElementById('cam'); // is a live MJPEG connection
+    if (cam.src === 'about:blank') cam.src = 'http://' + location.hostname + ':8080/';
+  }
+}
+
+function age(a){ return (a < 0) ? '--' : a.toFixed(1) + ' s'; }
+
+// ---------------- status strip + sensors ----------------
+async function refreshStatus(){
+  try {
+    var s = await (await fetch('/api/status', {cache:'no-store'})).json();
+    var cls = { 'RED':'red', 'YELLOW':'yellow', 'GREEN':'green', 'off':'down' }[s.led] || 'down';
+    document.getElementById('sLed').className = 'dot ' + cls;
+    document.getElementById('sLedTxt').textContent = s.led;
+    document.getElementById('sArm').textContent   = s.armed ? 'ARMED' : 'disarmed';
+    document.getElementById('sMode').textContent  = s.mode;
+    document.getElementById('sDepth').textContent = s.depth.toFixed(2) + ' m';
+    document.getElementById('sHdg').textContent   =
+      (s.heading === null) ? '--' : s.heading.toFixed(1) + '°';
+    document.getElementById('sDvl').textContent   =
+      s.dvl_lock ? ('lock ' + s.altitude.toFixed(2) + ' m') : 'no lock';
+    document.getElementById('strip').classList.toggle('stale', s.mav_age < 0 || s.mav_age > 3);
+    document.getElementById('sMission').style.display = s.mission ? '' : 'none';
+
+    document.getElementById('srows').innerHTML = [
+      ['DVL A50',   s.dvl_lock ? ('bottom lock, ' + s.altitude.toFixed(2) + ' m altitude')
+                               : 'no bottom lock', s.dvl_age],
+      ['VN-100',    (s.heading === null) ? 'no data'
+                                         : (s.heading.toFixed(1) + '° heading'), s.hdg_age],
+      ['Depth (Bar30)', s.depth.toFixed(2) + ' m', s.mav_age],
+      ['Pixhawk',   (s.armed ? 'ARMED' : 'disarmed') + ', ' + s.mode, s.mav_age],
+      ['Status LED', s.led, s.led_age]
+    ].map(function(r){
+      return '<tr><td>' + r[0] + '</td><td class="mono">' + r[1]
+           + '</td><td class="mono">' + age(r[2]) + '</td></tr>';
+    }).join('');
+  } catch (e) { document.getElementById('strip').classList.add('stale'); }
+}
+
+// ---------------- node stacks ----------------
+function stateCell(g){
+  var cls = g.up === 0 ? 'down' : (g.up === g.total ? 'up' : 'part');
+  var text = g.up === 0 ? 'stopped'
+           : (g.up === g.total ? 'running' : 'partial ' + g.up + '/' + g.total);
+  return '<span class="dot ' + cls + '"></span>' + text;
+}
+
+function row(g, action){
+  return '<tr><td>' + g.label + '<div class="sub">' + g.nodes.join(', ') + '</div></td>'
+       + '<td>' + stateCell(g) + '</td><td>' + action + '</td></tr>';
+}
+
+async function refreshGroups(){
+  try {
+    var j = await (await fetch('/api/groups', {cache:'no-store'})).json();
+    var live = j.groups.map(function(g){
+      var what  = g.up === g.total ? 'stop' : 'start';
+      var label = g.up === g.total ? 'Stop' : 'Start';
+      return row(g, '<button class="act" onclick="act(\'' + what + '\',\'' + g.key
+                  + '\')">' + label + '</button>');
+    });
+    var ro = j.readonly.map(function(g){
+      return row(g, '<span style="color:#778">systemd</span>');
+    });
+    document.getElementById('rows').innerHTML = live.concat(ro).join('');
+  } catch (e) { /* server restarting - the next poll picks it up */ }
+}
+
+async function act(what, key){
+  await fetch('/api/' + what + '?group=' + key);
+  setTimeout(refreshGroups, 500);
+}
+
+refreshStatus(); setInterval(refreshStatus, 1000);
+refreshGroups(); setInterval(refreshGroups, 2000);
+</script>
+</body>
+</html>

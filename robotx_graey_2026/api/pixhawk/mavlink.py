@@ -24,6 +24,7 @@ GCS_TYPE = mavutil.mavlink.MAV_TYPE_GCS             # what we claim to be
 GCS_AUTOPILOT = mavutil.mavlink.MAV_AUTOPILOT_INVALID
 
 MODE_GUIDED = 4                                     # ArduSub custom mode number
+MODE_MANUAL = 19
 FRAME_LOCAL_NED = 1
 FRAME_LOCAL_FRD = 20
 FRAME_BODY_FRD = 12

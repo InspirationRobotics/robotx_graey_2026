@@ -22,6 +22,12 @@
          border-radius:6px; padding:10px; font-family:Consolas, monospace; font-size:12.5px; white-space:pre-wrap; }
   #info { font-size:13px; color:#9ab; margin:6px 0; }
   .hint { color:#778; font-size:12px; margin-top:6px; }
+  #runbar { display:flex; gap:10px; align-items:center; margin:12px 0 6px; }
+  button.danger { background:#5d2e2e; border-color:#a44; }
+  button.danger:hover { border-color:#e57373; }
+  #mlog { background:#0e1116; color:#9ab; border:1px solid #333; border-radius:6px;
+          padding:9px; font-family:Consolas, monospace; font-size:12px;
+          max-height:220px; overflow:auto; white-space:pre-wrap; margin:0; display:none; }
 </style>
 </head>
 <body>
@@ -41,6 +47,7 @@
   <button id="bTrack">Connect live tracking</button>
   <button id="bZero" disabled>Zero at start point</button>
   <button id="bClear" disabled>Clear trail</button>
+  <button id="bFit">Fit image</button>
   <span class="hint">scroll = zoom &nbsp;·&nbsp; drag = pan &nbsp;·&nbsp; click = place (in active mode)</span>
 </div>
 <div id="status">Load the pool image to begin.</div>
@@ -49,8 +56,16 @@
 <div id="out">
   <div id="info"></div>
   <div id="cmd">command will appear here</div>
+  <div id="runbar">
+    <button id="bDry" disabled>Dry run</button>
+    <button id="bRun" class="danger" disabled>RUN MISSION</button>
+    <button id="bStop" class="danger" disabled>STOP + DISARM</button>
+    <span id="runState" class="hint"></span>
+  </div>
+  <pre id="mlog"></pre>
   <div class="hint">In the water: place the sub at the blue dot, aim it along the blue arrow, then click
-  "Zero at start point" (with tracking connected) and run the command from MANUAL. The node does the GUIDED switch.</div>
+  "Zero at start point" (with tracking connected). Dry run first &mdash; it prints every waypoint and
+  never arms. RUN MISSION arms and moves the vehicle; the node does the GUIDED switch itself.</div>
 </div>
 
 <script>
@@ -77,19 +92,39 @@ function setMode(m){
   draw();
 }
 
-document.getElementById('file').addEventListener('change', e => {
-  const f = e.target.files[0]; if (!f) return;
+// Canvas pixel size must track the window. Doing this once at parse time gave a
+// tiny canvas inside the GUI iframe, which had not been laid out yet.
+function sizeCanvas(){
+  cv.width = Math.max(320, window.innerWidth - 4);
+  cv.height = Math.max(420, window.innerHeight - 320);
+}
+function fitView(){
+  sizeCanvas();
+  if (!img) return;
+  const f = Math.min(cv.width / img.width, cv.height / img.height);
+  view = { z: f, ox: (cv.width - img.width*f)/2, oy: (cv.height - img.height*f)/2 };
+  draw();
+}
+window.addEventListener('resize', () => { sizeCanvas(); draw(); });   // keep zoom/pan
+
+function loadImage(src, label){
   img = new Image();
   img.onload = () => {
-    cv.width = window.innerWidth - 4;
-    cv.height = Math.max(420, window.innerHeight - 320);
-    const fit = Math.min(cv.width / img.width, cv.height / img.height);
-    view = { z: fit, ox: (cv.width - img.width*fit)/2, oy: (cv.height - img.height*fit)/2 };
-    draw();
+    fitView();
     setStatus('Image loaded. Calibrate: type the known distance, click "1. Calibrate", then click the two points it spans. Zoom in first for accuracy.');
   };
-  img.src = URL.createObjectURL(f);
+  img.onerror = () => setStatus(label + ' not found — pick an image with the file chooser.');
+  img.src = src;
+}
+
+document.getElementById('file').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  loadImage(URL.createObjectURL(f), 'file');
 });
+
+document.getElementById('bFit').onclick = fitView;
+// wait for layout before the first fit, or the iframe reports the wrong size
+window.addEventListener('load', () => loadImage('pool.png', 'pool.png'));
 
 const i2s = p => ({ x: p.x*view.z + view.ox, y: p.y*view.z + view.oy });
 const s2i = p => ({ x: (p.x - view.ox)/view.z, y: (p.y - view.oy)/view.z });
@@ -186,7 +221,8 @@ function m2i(f, r, mf){
 function update(){
   draw();
   const mf = missionFrame(), fr = markerFR(mf);
-  if (!fr) { cmdBox.textContent = 'command will appear here'; document.getElementById('bCopy').disabled = true; return; }
+  if (!fr) { cmdBox.textContent = 'command will appear here';
+             document.getElementById('bCopy').disabled = true; return; }
   const rad = parseFloat(document.getElementById('rad').value) || 1.0;
   const depth = parseFloat(document.getElementById('depth').value) || 0.5;
   const gate = parseFloat(document.getElementById('gate').value) || 0;
@@ -205,6 +241,62 @@ function update(){
 }
 document.getElementById('bCopy').onclick = () =>
   navigator.clipboard.writeText(cmdBox.textContent).then(()=>setStatus('Command copied.'));
+
+// ---------------- run the mission from here ----------------
+// Only works when this page is served by gui_node (the GUI's Mission planner tab).
+// Opened straight off disk there is no API to talk to, and the buttons say so.
+//
+// The run buttons are owned entirely by the 1 Hz poll below and recomputed from
+// scratch each time - tracking mission state in a variable meant one missed
+// update left them stuck disabled forever.
+
+function missionQuery(dry){
+  const mf = missionFrame(), fr = markerFR(mf);
+  return 'dry=' + dry
+    + '&depth=' + (parseFloat(document.getElementById('depth').value) || 0.5)
+    + '&gate_forward=' + (parseFloat(document.getElementById('gate').value) || 0)
+    + '&marker_forward=' + fr.fwd.toFixed(2)
+    + '&marker_right=' + fr.rgt.toFixed(2)
+    + '&orbit_radius=' + (parseFloat(document.getElementById('rad').value) || 0.75)
+    + '&reach_thresh=0.25&state_timeout=45';
+}
+
+async function launch(dry){
+  if (!dry && !confirm('This ARMS Graey and moves it. Props clear? Kill switch in reach?'))
+    return;
+  try {
+    const r = await fetch('/api/mission/start?' + missionQuery(dry));
+    const j = await r.json();
+    setStatus(j.msg);
+    document.getElementById('mlog').style.display = 'block';
+  } catch (e) {
+    setStatus('No API — open this from the GUI (port 8090), not from a file on disk.');
+  }
+}
+
+document.getElementById('bDry').onclick = () => launch(true);
+document.getElementById('bRun').onclick = () => launch(false);
+document.getElementById('bStop').onclick = async () => {
+  const r = await fetch('/api/mission/stop');
+  setStatus((await r.json()).msg);
+};
+
+setInterval(async () => {
+  try {
+    const s = await (await fetch('/api/status', {cache:'no-store'})).json();
+    const canRun = !!markerFR(missionFrame());
+    document.getElementById('bDry').disabled  = !canRun || s.mission;
+    document.getElementById('bRun').disabled  = !canRun || s.mission;
+    document.getElementById('bStop').disabled = !s.mission;
+    document.getElementById('runState').textContent = s.mission ? 'mission running' : '';
+    if (document.getElementById('mlog').style.display === 'block') {
+      const log = document.getElementById('mlog');
+      const atEnd = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+      log.textContent = await (await fetch('/api/mission/log', {cache:'no-store'})).text();
+      if (atEnd) log.scrollTop = log.scrollHeight;      // follow unless scrolled up
+    }
+  } catch (e) { /* not served by the GUI, or it is restarting */ }
+}, 1000);
 
 // ---------------- live tracking ----------------
 document.getElementById('bTrack').onclick = () => {

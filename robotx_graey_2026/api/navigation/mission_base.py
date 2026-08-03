@@ -16,11 +16,12 @@ in the water.
 import math
 from enum import Enum
 
-import rclpy
+import os
+import sys
 from rclpy.node import Node
 from std_msgs.msg import Bool
 from robotx_graey_2026.api.navigation.frames import body_to_world
-from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED
+from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL
 
 RESEND_S = 3.0                                  # unchanged targets re-sent no faster than
                                                 # this: streaming restarts ArduSub's
@@ -208,8 +209,12 @@ class MissionBase(Node):
         elif self.state == S.DONE:
             self.auto_pub.publish(Bool(data=False))
             if self.dry:
-                self.get_logger().info('    [dry] DISARM')
+                self.get_logger().info('    [dry] DISARM + MANUAL')
             else:
-                self.link.disarm()
-            self.get_logger().info('MISSION COMPLETE - disarmed')
-            rclpy.shutdown()
+                self.link.disarm()                  # motors off BEFORE the setpoint
+                self.link.set_mode(MODE_MANUAL)     # stream stops, or GUIDED lurches
+            self.get_logger().info('MISSION COMPLETE - disarmed, MANUAL')
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(0)                             # rclpy.shutdown() from inside a
+                                                    # timer callback left it spinning
