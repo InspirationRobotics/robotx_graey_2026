@@ -25,8 +25,14 @@
   button.act { background:#2d3442; color:#e8e8e8; border:1px solid #444; border-radius:6px;
                padding:5px 16px; cursor:pointer; font-size:13px; }
   button.act:hover { border-color:#5b9bd5; }
+  button.danger { background:#5d2e2e; border-color:#a44; }
+  button.danger:hover { border-color:#e57373; }
   iframe { border:none; width:100%; height:calc(100vh - 90px); }
   .note { margin:0 18px 18px; color:#778; font-size:12.5px; max-width:680px; line-height:1.5; }
+  #logbox { margin:0 18px 18px; background:#0e1116; color:#9ab; border:1px solid #333;
+            border-radius:6px; padding:10px; font-family:Consolas, monospace;
+            font-size:12px; height:calc(100vh - 220px); overflow:auto;
+            white-space:pre-wrap; }
 </style>
 </head>
 <body>
@@ -46,6 +52,8 @@
   <button onclick="show('sensors')">Sensors</button>
   <button onclick="show('camera')">Camera</button>
   <button onclick="show('planner')">Mission planner</button>
+  <button onclick="show('logs')">Logs</button>
+  <button onclick="show('system')">System</button>
 </div>
 
 <div id="nodes">
@@ -75,8 +83,58 @@
 
 <div id="planner" style="display:none"><iframe src="/planner"></iframe></div>
 
+<div id="logs" style="display:none">
+  <div style="margin:14px 18px 8px; display:flex; gap:14px; align-items:center">
+    <label class="sub"><input type="checkbox" id="errOnly"> errors and warnings only</label>
+    <label class="sub"><input type="checkbox" id="follow" checked> follow</label>
+    <span class="sub" id="logMsg"></span>
+  </div>
+  <pre id="logbox"></pre>
+</div>
+
+<div id="system" style="display:none">
+  <div class="note" style="margin:18px; max-width:640px">
+    Powering the Jetson down properly matters &mdash; the SD card is the boot device,
+    and pulling batteries on a running filesystem is how you corrupt it.
+    <b>Always shut down from here before disconnecting anything.</b>
+  </div>
+  <div style="margin:18px; display:flex; gap:12px; align-items:center">
+    <button class="act danger" onclick="power('shutdown')">Shut down Jetson</button>
+    <button class="act danger" onclick="power('reboot')">Reboot Jetson</button>
+    <span id="pwrMsg" class="sub"></span>
+  </div>
+</div>
+
 <script>
-var TABS = ['nodes','sensors','camera','planner'];
+var TABS = ['nodes','sensors','camera','planner','logs','system'];
+
+// The log is only fetched while its tab is open - no point pulling 60 KB a second
+// across the tether to a div nobody is looking at.
+async function refreshLog(){
+  if (document.getElementById('logs').style.display === 'none') return;
+  try {
+    var errs = document.getElementById('errOnly').checked ? '1' : '0';
+    var txt = await (await fetch('/api/log?errors=' + errs, {cache:'no-store'})).text();
+    var box = document.getElementById('logbox');
+    box.textContent = txt;
+    if (document.getElementById('follow').checked) box.scrollTop = box.scrollHeight;
+    document.getElementById('logMsg').textContent = '';
+  } catch (e) {
+    document.getElementById('logMsg').textContent = 'could not read the log';
+  }
+}
+
+async function power(what){
+  if (!confirm(what.toUpperCase() + ' the Jetson?\n\n'
+             + 'Graey will stop responding. Wait for the lights to go out before '
+             + 'disconnecting any batteries.')) return;
+  try {
+    var j = await (await fetch('/api/power?do=' + what)).json();
+    document.getElementById('pwrMsg').textContent = j.msg;
+  } catch (e) {
+    document.getElementById('pwrMsg').textContent = 'request failed - is gui_node running?';
+  }
+}
 
 function show(t){
   TABS.forEach(function(name){
@@ -159,8 +217,11 @@ async function act(what, key){
   setTimeout(refreshGroups, 500);
 }
 
+document.getElementById('errOnly').onchange = refreshLog;
+
 refreshStatus(); setInterval(refreshStatus, 1000);
 refreshGroups(); setInterval(refreshGroups, 2000);
+setInterval(refreshLog, 2000);
 </script>
 </body>
 </html>

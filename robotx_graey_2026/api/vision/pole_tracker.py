@@ -148,7 +148,7 @@ class PoleTracker(Node):
             txt = f'LOCK  fwd {f:.2f}m  right {r:+.2f}m'
             if time.time() - self.last_report > 1.0:
                 self.last_report = time.time()
-                self.get_logger().info(txt)
+                self.get_logger().debug(txt)
         elif not stable:
             self.fwd.clear()                        # do not median across a lost lock
             self.rgt.clear()

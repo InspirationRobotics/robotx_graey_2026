@@ -52,7 +52,7 @@ class VN100Node(Node):
         self.create_timer(2.0, self.report)
 
     def report(self):
-        self.get_logger().info(f'heading={self.last_hdg}')
+        self.get_logger().debug(f'heading={self.last_hdg}')
 
     def tick(self):
         if self.ser is None:

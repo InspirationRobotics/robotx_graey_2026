@@ -54,6 +54,14 @@ MISSION_PARAMS = {'depth': (0.0, 10.0),
                   'reach_thresh': (0.05, 2.0),
                   'state_timeout': (5.0, 300.0)}
 
+# The GUI runs in a container and cannot shut the Jetson down. It drops a file in
+# the bind mount instead; systemd .path units on the host watch for these and act.
+REQUESTS = {'shutdown': '/root/robotx_ws/logs/shutdown.request',
+            'reboot': '/root/robotx_ws/logs/reboot.request'}
+
+ROS_LOG = '/root/robotx_ws/logs/graey-ros.log'
+NOISY = (b'ERROR', b'WARN', b'Traceback', b'Error', b'error')
+
 web_dir = '/root/robotx_ws/src/robotx_graey_2026/tools'
 link = None                                     # set by GuiNode, used to disarm on stop
 
@@ -80,6 +88,14 @@ def pids_for(name):
         if any(p == name or p.endswith('/' + name) for p in parts):
             found.append(int(entry))
     return found
+
+
+def tail(path, nbytes=60000):
+    """Last chunk of a file without reading all of it - these grow unbounded."""
+    with open(path, 'rb') as f:
+        f.seek(0, 2)
+        f.seek(max(0, f.tell() - nbytes))
+        return f.read().split(b'\n')[1:]        # drop the partial first line
 
 
 def describe(key, label, execs):
@@ -162,6 +178,32 @@ class Handler(BaseHTTPRequestHandler):
                 'groups': [describe(k, lbl, ex) for k, (lbl, ex) in GROUPS.items()],
                 'readonly': [describe(k, lbl, ex) for k, (lbl, ex) in READ_ONLY.items()],
             }).encode(), 'application/json')
+            return
+
+        if u.path == '/api/log':
+            try:
+                lines = tail(ROS_LOG)
+            except OSError:
+                lines = [b'no log yet - graey-ros writes it on start']
+            if parse_qs(u.query).get('errors', ['0'])[0] == '1':
+                lines = [ln for ln in lines if any(k in ln for k in NOISY)] \
+                        or [b'(no warnings or errors)']
+            self.reply(200, b'\n'.join(lines[-250:]), 'text/plain')
+            return
+
+        if u.path == '/api/power':
+            what = parse_qs(u.query).get('do', [''])[0]
+            if what not in REQUESTS:
+                self.send_error(400, 'unknown power action')
+                return
+            os.makedirs(os.path.dirname(REQUESTS[what]), exist_ok=True)
+            with open(REQUESTS[what], 'w') as f:
+                f.write(str(time.time()))
+            self.reply(200, json.dumps(
+                {'ok': True, 'msg': what + ' requested - the Jetson acts within a few '
+                                           'seconds. Wait for the lights to go out before '
+                                           'disconnecting batteries.'}).encode(),
+                'application/json')
             return
 
         if u.path == '/api/mission/log':

@@ -72,7 +72,7 @@ class NavEKFBridge(Node):
         self.create_timer(2.0, self.report)
 
     def report(self):
-        self.get_logger().info(
+        self.get_logger().debug(
             f'att={self.have_att} dvl_valid={self.valid} sent={self.sent} '
             f'pos=({self.pos[0]:.2f},{self.pos[1]:.2f},{self.pos[2]:.2f})')
 
