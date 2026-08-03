@@ -16,7 +16,7 @@ from geometry_msgs.msg import PointStamped
 
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.navigation.mission_base import MissionBase, S
-
+from robotx_graey_2026.api.navigation.frames import body_to_world
 
 class PrequalCV(MissionBase):
     def __init__(self):
@@ -45,10 +45,9 @@ class PrequalCV(MissionBase):
                 or self.cur_yaw is None
                 or self.state not in (S.TO_GATE, S.TO_MARKER)):
             return
-        c, s = math.cos(self.cur_yaw), math.sin(self.cur_yaw)
         f, r = msg.point.x, msg.point.y
         first = self.pole_ned is None
-        self.pole_ned = (self.cur[0] + f * c - r * s, self.cur[1] + f * s + r * c)
+        self.pole_ned = body_to_world(self.cur[0], self.cur[1], self.cur_yaw, f, r)
         if first:
             self.get_logger().info(
                 f'*** CV LOCK: pole at NED ({self.pole_ned[0]:.2f},'

@@ -19,7 +19,7 @@ from enum import Enum
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Bool
-
+from robotx_graey_2026.api.navigation.frames import body_to_world
 from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED
 
 RESEND_S = 3.0                                  # unchanged targets re-sent no faster than
@@ -105,9 +105,7 @@ class MissionBase(Node):
         self.state_t0 = self.now()
 
     def fr_to_ned(self, forward, right):
-        c, s = math.cos(self.start_yaw), math.sin(self.start_yaw)
-        return (self.start_x + forward * c - right * s,
-                self.start_y + forward * s + right * c)
+        return body_to_world(self.start_x, self.start_y, self.start_yaw, forward, right)
 
     def goto_ned(self, n, e, down, yaw, label):
         tgt = (n, e, down, yaw)

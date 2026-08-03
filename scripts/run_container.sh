@@ -5,7 +5,6 @@ docker run -dit --name graey \
   --runtime nvidia \
   --privileged \
   --net=host \
-  -v /dev/bus/usb:/dev/bus/usb \
   -v /dev:/dev \
   -v /home/graey/robotx_ws:/root/robotx_ws \
   --restart unless-stopped \

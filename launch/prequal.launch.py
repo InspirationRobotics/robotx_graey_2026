@@ -17,19 +17,17 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, IncludeLaunchDescription
+from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
 PKG = 'robotx_graey_2026'
-POS_SERVER = '/root/robotx_ws/src/robotx_graey_2026/tools/pos_server.py'
 
 
 def generate_launch_description():
     core = os.path.join(get_package_share_directory(PKG), 'launch', 'core.launch.py')
     return LaunchDescription([
         IncludeLaunchDescription(PythonLaunchDescriptionSource(core)),
-        Node(package=PKG, executable='pole_tracker', name='pole_tracker',
-             output='screen'),
-        ExecuteProcess(cmd=['python3', POS_SERVER], output='screen'),
+        Node(package=PKG, executable='pole_tracker', name='pole_tracker', output='screen'),
+        Node(package=PKG, executable='pos_server', name='pos_server', output='screen'),
     ])
