@@ -60,6 +60,7 @@
     <button id="bDry" disabled>Dry run</button>
     <button id="bRun" class="danger" disabled>RUN MISSION</button>
     <button id="bStop" class="danger" disabled>STOP + DISARM</button>
+    <label class="hint"><input type="checkbox" id="rcStart"> wait for RC button (SE)</label>
     <span id="runState" class="hint"></span>
   </div>
   <pre id="mlog"></pre>
@@ -258,11 +259,15 @@ function missionQuery(dry){
     + '&marker_forward=' + fr.fwd.toFixed(2)
     + '&marker_right=' + fr.rgt.toFixed(2)
     + '&orbit_radius=' + (parseFloat(document.getElementById('rad').value) || 0.75)
-    + '&reach_thresh=0.25&state_timeout=45';
+    + '&reach_thresh=0.25&state_timeout=45'
+    + '&rc_start=' + (document.getElementById('rcStart').checked ? 'true' : 'false');
 }
 
 async function launch(dry){
-  if (!dry && !confirm('This ARMS Graey and moves it. Props clear? Kill switch in reach?'))
+  var rc = document.getElementById('rcStart').checked;
+  if (!dry && !confirm('This ARMS Graey'
+        + (rc ? ' once you press SE on the transmitter.' : ' and moves it immediately.')
+        + '\n\nProps clear? Kill switch in reach?'))
     return;
   try {
     const r = await fetch('/api/mission/start?' + missionQuery(dry));

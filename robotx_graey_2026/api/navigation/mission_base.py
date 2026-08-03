@@ -21,7 +21,8 @@ import sys
 from rclpy.node import Node
 from std_msgs.msg import Bool
 from robotx_graey_2026.api.navigation.frames import body_to_world
-from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL
+from robotx_graey_2026.api.pixhawk.mavlink import (
+    Link, MODE_GUIDED, MODE_MANUAL, mavutil)
 
 RESEND_S = 3.0                                  # unchanged targets re-sent no faster than
                                                 # this: streaming restarts ArduSub's
@@ -29,6 +30,7 @@ RESEND_S = 3.0                                  # unchanged targets re-sent no f
 
 
 class S(Enum):
+    WAIT_RC = 10                                # only entered when rc_start is true
     WAIT_NAV = 0
     ARM = 1
     DIVE = 2
@@ -54,6 +56,10 @@ class MissionBase(Node):
         p('reach_thresh', 0.25)                 # 0.4 exceeded the dive delta and self-completed
         p('state_timeout', 60.0)
         p('sim_reach_time', 2.0)
+        p('rc_start', False)                    # true = sit and wait for the RC button
+        p('rc_start_channel', 9)                # SE, momentary - cannot be left latched
+        p('rc_abort_channel', 7)                # SC
+        p('rc_high', 1700)                      # PWM above this counts as pressed
         self.declare_extra_parameters()
 
         g = self.get_parameter
@@ -65,12 +71,23 @@ class MissionBase(Node):
         self.thresh = g('reach_thresh').value
         self.timeout = g('state_timeout').value
         self.sim_reach = g('sim_reach_time').value
+        self.rc_wait = g('rc_start').value
+        self.rc_start_ch = g('rc_start_channel').value
+        self.rc_abort_ch = g('rc_abort_channel').value
+        self.rc_high = g('rc_high').value
         self.read_extra_parameters()
 
         self.link = Link(g('mavlink').value, component, self.get_logger())
-        self.get_logger().info(f'dry_run={self.dry}')
+        self.get_logger().info(f'dry_run={self.dry} rc_start={self.rc_wait}')
 
-        self.state = S.WAIT_NAV
+        # A switch already up when we start must not count. Both channels have to be
+        # seen LOW once before they will fire - otherwise a latched abort switch
+        # blocks every mission, and a held start button retriggers immediately.
+        self.rc = {}
+        self.start_armed = False
+        self.abort_armed = False
+
+        self.state = S.WAIT_RC if self.rc_wait else S.WAIT_NAV
         self.state_t0 = self.now()
         self.start_x = self.start_y = self.start_yaw = 0.0
         self.cur = None
@@ -82,6 +99,15 @@ class MissionBase(Node):
         self.auto_pub = self.create_publisher(Bool, '/graey/autonomy_active', 10)
         self.create_timer(0.1, self.pump_mavlink)
         self.create_timer(0.25, self.tick)
+        self.create_timer(5.0, self.request_rc)
+        self.request_rc()
+
+    def request_rc(self):
+        """ArduPilot only streams RC_CHANNELS if something asks. Repeated because
+        MAVProxy may not be up yet when we start, and the request is one packet."""
+        if not self.dry:
+            self.link.command(mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL,
+                              mavutil.mavlink.MAVLINK_MSG_ID_RC_CHANNELS, 100000)
 
     # ---------- subclass hooks ----------
     def declare_extra_parameters(self):
@@ -144,12 +170,33 @@ class MissionBase(Node):
                 self.cur = (m.x, m.y, m.z)
             elif kind == 'ATTITUDE':
                 self.cur_yaw = m.yaw
+            elif kind == 'RC_CHANNELS':
+                for ch in (self.rc_start_ch, self.rc_abort_ch):
+                    self.rc[ch] = getattr(m, f'chan{ch}_raw', 0)
+                if self.rc[self.rc_start_ch] < self.rc_high:
+                    self.start_armed = True     # seen low, so a press now is real
+                if self.rc[self.rc_abort_ch] < self.rc_high:
+                    self.abort_armed = True
         self.link.drain(handle)
+
+    def rc_pressed(self, channel, armed):
+        return armed and self.rc.get(channel, 0) > self.rc_high
 
     # ---------- state machine ----------
     def tick(self):
+        if self.state == S.WAIT_RC:             # idle on deck, nothing published
+            if self.rc_pressed(self.rc_start_ch, self.start_armed):
+                self.get_logger().info('RC START pressed')
+                self.enter(S.WAIT_NAV)
+            return
+
         if self.state != S.DONE:
             self.auto_pub.publish(Bool(data=True))
+
+        if (self.state != S.DONE
+                and self.rc_pressed(self.rc_abort_ch, self.abort_armed)):
+            self.get_logger().warn('RC ABORT - disarming')
+            self.enter(S.DONE)                  # DONE disarms, sets MANUAL, exits
 
         if (self.state not in (S.WAIT_NAV, S.DONE)
                 and self.now() - self.state_t0 > self.timeout):

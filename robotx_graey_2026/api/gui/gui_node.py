@@ -120,8 +120,10 @@ def mission_start(query):
     if pids_for(MISSION):
         return False, 'a mission is already running'
     dry = query.get('dry', ['true'])[0] == 'true'
+    rc = query.get('rc_start', ['false'])[0] == 'true'
     argv = ['ros2', 'run', 'robotx_graey_2026', MISSION, '--ros-args',
-            '-p', 'dry_run:=' + ('true' if dry else 'false')]
+            '-p', 'dry_run:=' + ('true' if dry else 'false'),
+            '-p', 'rc_start:=' + ('true' if rc else 'false')]
     for name, (lo, hi) in MISSION_PARAMS.items():
         raw = query.get(name)
         if not raw:
@@ -135,6 +137,8 @@ def mission_start(query):
     os.makedirs(os.path.dirname(MISSION_LOG), exist_ok=True)
     log = open(MISSION_LOG, 'wb')
     subprocess.Popen(argv, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    if rc:
+        return True, 'armed and waiting - press SE on the transmitter to start'
     return True, ('dry run started' if dry else 'MISSION STARTED')
 
 
