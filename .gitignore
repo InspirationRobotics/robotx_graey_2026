@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 *.tlog
 *.tlog.raw
+.cache/
+__pycache__/
+*.pyc
