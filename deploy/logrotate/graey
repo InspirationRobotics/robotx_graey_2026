@@ -1,0 +1,17 @@
+/home/graey/robotx_ws/logs/graey-ros.log {
+    size 5M
+    rotate 3
+    compress
+    missingok
+    notifempty
+    copytruncate
+}
+
+/home/graey/robotx_ws/logs/mav.tlog /home/graey/robotx_ws/logs/mav.tlog.raw {
+    size 20M
+    rotate 2
+    compress
+    missingok
+    notifempty
+    copytruncate
+}

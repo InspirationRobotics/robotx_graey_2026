@@ -30,15 +30,19 @@ from std_msgs.msg import Int32, Bool, Float32
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.pixhawk.mavlink import Link, mavutil
 
+CAMERA = 'pole_tracker'                         # the CV mission is blind without it
+
 GROUPS = {                                      # key: (label, executables)
     'led':     ('LED stack',        ['led_node', 'pixhawk_led_node']),
     'nav':     ('Nav / EKF stack',  ['dvl_node', 'vn100_node', 'nav_ekf_bridge']),
-    'camera':  ('Camera tracker',   ['pole_tracker']),
+    'camera':  ('Camera tracker',   [CAMERA]),
     'planner': ('Planner feed',     ['pos_server']),
 }                                               # gui_node is deliberately absent -
                                                 # stopping it would kill this page
 READ_ONLY = {'mavproxy': ('MAVProxy', ['mavproxy.py'])}   # systemd owns it
-FILES = {'/': 'gui.html', '/planner': 'pool_planner.html', '/pool.png': 'pool.png'}
+FILES = {'/': 'gui.html', '/planner': 'pool_planner.html',
+         '/pool.png': 'pool.png',                   # lab pool
+         '/neighbor_pool.png': 'neighbor_pool.png'}  # prequal venue, scaled off satellite
 TYPES = {'.html': 'text/html', '.png': 'image/png'}
 LED_NAMES = {0: 'off', 1: 'RED', 2: 'YELLOW', 3: 'GREEN'}
 
@@ -51,7 +55,9 @@ MISSION_PARAMS = {'depth': (0.0, 10.0),
                   'marker_forward': (-50.0, 50.0),
                   'marker_right': (-50.0, 50.0),
                   'orbit_radius': (0.25, 10.0),
+                  'orbit_speed': (0.05, 1.0),
                   'reach_thresh': (0.05, 2.0),
+                  'cv_blind': (0.0, 60.0),
                   'state_timeout': (5.0, 300.0)}
 
 # The GUI runs in a container and cannot shut the Jetson down. It drops a file in
@@ -90,6 +96,11 @@ def pids_for(name):
     return found
 
 
+def spawn(argv, out=subprocess.DEVNULL):
+    """Start something detached, so it outlives the request that asked for it."""
+    subprocess.Popen(argv, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
+
+
 def tail(path, nbytes=60000):
     """Last chunk of a file without reading all of it - these grow unbounded."""
     with open(path, 'rb') as f:
@@ -116,14 +127,32 @@ def status():
 
 
 def mission_start(query):
-    """Build argv from clamped floats. Returns (ok, message)."""
+    """Build argv from clamped floats. Returns (ok, message).
+
+    The mission is only a CV mission while pole_tracker is up. Without it the
+    node never sees /graey/pole, quietly flies the planner coordinates and still
+    reports success - so a wet run is refused until the camera is actually
+    running. A dry run starts it and carries on, which warms the model up during
+    exactly the minute you spend reading waypoints. Untick "use CV" in the planner
+    and none of that applies: the mission is then deliberately dead-reckoned.
+    """
     if pids_for(MISSION):
         return False, 'a mission is already running'
     dry = query.get('dry', ['true'])[0] == 'true'
     rc = query.get('rc_start', ['false'])[0] == 'true'
+    cv = query.get('use_cv', ['true'])[0] == 'true'
+
+    cv_up = bool(pids_for(CAMERA))
+    if cv and not cv_up:
+        spawn(['ros2', 'run', 'robotx_graey_2026', CAMERA])
+        if not dry:
+            return False, (CAMERA + ' was not running - started it. Wait for the Camera '
+                           'tab to show video, then run again.')
+
     argv = ['ros2', 'run', 'robotx_graey_2026', MISSION, '--ros-args',
             '-p', 'dry_run:=' + ('true' if dry else 'false'),
-            '-p', 'rc_start:=' + ('true' if rc else 'false')]
+            '-p', 'rc_start:=' + ('true' if rc else 'false'),
+            '-p', 'use_cv:=' + ('true' if cv else 'false')]
     for name, (lo, hi) in MISSION_PARAMS.items():
         raw = query.get(name)
         if not raw:
@@ -135,11 +164,12 @@ def mission_start(query):
         value = max(lo, min(hi, value))         # clamp, never reject silently
         argv += ['-p', name + ':=' + str(value)]   # str(float) keeps ROS's DOUBLE type
     os.makedirs(os.path.dirname(MISSION_LOG), exist_ok=True)
-    log = open(MISSION_LOG, 'wb')
-    subprocess.Popen(argv, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    spawn(argv, open(MISSION_LOG, 'wb'))
     if rc:
         return True, 'armed and waiting - press SE on the transmitter to start'
-    return True, ('dry run started' if dry else 'MISSION STARTED')
+    if dry:
+        return True, 'dry run started' + ('' if cv_up or not cv else ' - camera starting too')
+    return True, 'MISSION STARTED'
 
 
 def mission_stop():
@@ -238,10 +268,7 @@ class Handler(BaseHTTPRequestHandler):
                     for pid in pids_for(name):
                         os.kill(pid, signal.SIGTERM)
                 elif not pids_for(name):        # start is a no-op if already up
-                    subprocess.Popen(['ros2', 'run', 'robotx_graey_2026', name],
-                                     stdout=subprocess.DEVNULL,
-                                     stderr=subprocess.DEVNULL,
-                                     start_new_session=True)
+                    spawn(['ros2', 'run', 'robotx_graey_2026', name])
             self.reply(200, b'{"ok":true}', 'application/json')
             return
 

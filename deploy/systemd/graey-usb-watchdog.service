@@ -1,0 +1,6 @@
+[Unit]
+Description=Reset the USB hub when the Cube fails to enumerate
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/graey-usb-watchdog.sh

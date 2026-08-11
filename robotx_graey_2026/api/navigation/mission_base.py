@@ -14,6 +14,7 @@ never arms, never changes mode, never sends setpoints. Set dry_run:=false only
 in the water.
 """
 import math
+import time
 from enum import Enum
 
 import os
@@ -27,6 +28,9 @@ from robotx_graey_2026.api.pixhawk.mavlink import (
 RESEND_S = 3.0                                  # unchanged targets re-sent no faster than
                                                 # this: streaming restarts ArduSub's
                                                 # trajectory planner and the sub crawls
+DIVE_THRESH = 0.10                              # DIVE arrival, on depth alone - see reached_depth
+DRY_LOG_S = 1.0                                 # streamed targets logged this often in dry run
+GUIDED_NAME = 'GUIDED'                          # HEARTBEAT reports a NAME, not MODE_GUIDED's 4
 
 
 class S(Enum):
@@ -53,12 +57,17 @@ class MissionBase(Node):
         p('gate_forward', 4.0)
         p('marker_forward', 13.0)
         p('marker_right', 0.0)
-        p('reach_thresh', 0.25)                 # 0.4 exceeded the dive delta and self-completed
+        p('reach_thresh', 0.10)                 # 0.4 exceeded the dive delta and self-completed;
+                                                # 0.25 let the orbit hand over a quarter metre
+                                                # inside the ring, which the orbit inherited
         p('state_timeout', 60.0)
         p('sim_reach_time', 2.0)
         p('rc_start', False)                    # true = sit and wait for the RC button
+        # BOTH must be above CH8. MANUAL_CONTROL from a joystick pins RC1-8, so an
+        # abort on CH7 reads the override instead of the switch and is silently dead
+        # for as long as QGC has a joystick connected.
         p('rc_start_channel', 9)                # SE, momentary - cannot be left latched
-        p('rc_abort_channel', 7)                # SC
+        p('rc_abort_channel', 8)               # SA, INVERTED in EdgeTX so down = kill
         p('rc_high', 1700)                      # PWM above this counts as pressed
         self.declare_extra_parameters()
 
@@ -86,12 +95,16 @@ class MissionBase(Node):
         self.rc = {}
         self.start_armed = False
         self.abort_armed = False
+        self.mode = None                        # the Cube's flight mode, from HEARTBEAT
+        self.saw_guided = False                 # ... and whether we ever got GUIDED
 
         self.state = S.WAIT_RC if self.rc_wait else S.WAIT_NAV
         self.state_t0 = self.now()
         self.start_x = self.start_y = self.start_yaw = 0.0
         self.cur = None
         self.cur_yaw = None
+        self.yaw_rate = 0.0                     # rad/s; a CV sighting taken mid-turn is stale
+        self.vel = None
         self.target = None
         self.last_send_t = 0.0
         self.step = 0                           # waypoint index within MANEUVER
@@ -155,6 +168,24 @@ class MissionBase(Node):
         n, e = self.fr_to_ned(forward, right)
         self.goto_ned(n, e, down, self.start_yaw, label)
 
+    def stream_posvel(self, n, e, down, vn, ve, yaw_rate, label):
+        """A target that keeps moving, sent EVERY tick on purpose.
+
+        No change gate, unlike goto_ned - Link.goto_posvel() reaches ArduSub's
+        streaming setpoint interface rather than wp_nav's S-curve, so a high rate
+        is what it wants. Heading is a RATE here, not an angle. The dry-run print
+        is throttled because 4 Hz would bury the log.
+        """
+        self.target = (n, e, down, self.cur_yaw or 0.0)
+        if self.dry:
+            if self.now() - self.last_send_t > DRY_LOG_S:
+                self.last_send_t = self.now()
+                self.get_logger().info(
+                    f'    [dry] {label}: NED=({n:.2f},{e:.2f},{down:.2f}) '
+                    f'v=({vn:+.2f},{ve:+.2f}) yawrate={math.degrees(yaw_rate):+.0f}/s')
+            return
+        self.link.goto_posvel(n, e, down, vn, ve, 0.0, yaw_rate)
+
     def reached(self):
         if self.dry:
             return self.now() - self.state_t0 > self.sim_reach
@@ -162,14 +193,44 @@ class MissionBase(Node):
             return False
         return math.dist(self.cur, self.target[:3]) < self.thresh
 
+    def reached_depth(self):
+        """DIVE only. reached() measures 3D distance, but on the dive the
+        horizontal error is already zero, so the whole of reach_thresh is spent
+        on depth: a 0.35 m descent 'arrives' at 0.20 m and the sub sets off for
+        the marker half submerged. Depth gets its own tighter tolerance."""
+        if self.dry:
+            return self.now() - self.state_t0 > self.sim_reach
+        if self.cur is None or self.target is None:
+            return False
+        return abs(self.cur[2] - self.target[2]) < DIVE_THRESH
+
+    def lag(self):
+        """Horizontal distance behind the streamed target. A swept target waits
+        on this so it cannot run away from the vehicle."""
+        if self.cur is None or self.target is None:
+            return 0.0
+        return math.hypot(self.cur[0] - self.target[0], self.cur[1] - self.target[1])
+
+    def speed(self):
+        """Horizontal ground speed from the EKF. Zero until velocity arrives, so a
+        caller gating on it degrades to the old distance-only behaviour rather
+        than stalling."""
+        if self.vel is None:
+            return 0.0
+        return math.hypot(self.vel[0], self.vel[1])
+
     def pump_mavlink(self):
         self.link.heartbeat()
 
         def handle(kind, m):
             if kind == 'LOCAL_POSITION_NED':
                 self.cur = (m.x, m.y, m.z)
+                self.vel = (m.vx, m.vy, m.vz)
             elif kind == 'ATTITUDE':
                 self.cur_yaw = m.yaw
+                self.yaw_rate = m.yawspeed
+            elif kind == 'HEARTBEAT' and m.get_srcComponent() == 1:
+                self.mode = self.link.mav.flightmode
             elif kind == 'RC_CHANNELS':
                 for ch in (self.rc_start_ch, self.rc_abort_ch):
                     self.rc[ch] = getattr(m, f'chan{ch}_raw', 0)
@@ -198,10 +259,33 @@ class MissionBase(Node):
             self.get_logger().warn('RC ABORT - disarming')
             self.enter(S.DONE)                  # DONE disarms, sets MANUAL, exits
 
+        # A human changing flight mode takes the vehicle, and the mission must let go.
+        # Without this the node kept streaming GUIDED setpoints underneath the pilot,
+        # and kept publishing autonomy_active - so the LEDs stayed GREEN while someone
+        # drove manually, which is the opposite of what the state indicator is for.
+        #
+        # Exits WITHOUT disarming, unlike every other exit here: the pilot is driving
+        # and taking their thrusters away mid-manoeuvre would be worse than the bug.
+        # WAIT_RC is excluded so the sub can be driven into position while a mission
+        # sits armed and waiting on SE.
+        if self.state not in (S.WAIT_RC, S.WAIT_NAV, S.ARM, S.DONE):
+            if self.mode == GUIDED_NAME:
+                self.saw_guided = True
+            elif self.saw_guided:
+                self.get_logger().warn(
+                    f'mode changed to {self.mode} - pilot has the vehicle, mission out')
+                self.auto_pub.publish(Bool(data=False))   # LEDs to yellow at once
+                sys.stdout.flush()
+                sys.stderr.flush()
+                time.sleep(0.25)                # let that publish actually leave
+                os._exit(0)
+
         if (self.state not in (S.WAIT_NAV, S.DONE)
                 and self.now() - self.state_t0 > self.timeout):
-            self.get_logger().warn(f'{self.state.name} timed out -> SURFACE')
-            self.enter(S.SURFACE)
+            nxt = S.DONE if self.state == S.SURFACE else S.SURFACE
+            self.get_logger().warn(f'{self.state.name} timed out -> {nxt.name}')
+            self.enter(nxt)                     # a stuck SURFACE must disarm, not re-enter
+                                                # itself and reset its own clock forever
 
         if self.state == S.WAIT_NAV:
             if self.dry or (self.cur is not None and self.cur_yaw is not None):
@@ -224,7 +308,7 @@ class MissionBase(Node):
 
         elif self.state == S.DIVE:
             self.goto(0.0, 0.0, self.depth, 'dive')
-            if self.reached():
+            if self.reached_depth():
                 self.enter(S.TO_GATE)
 
         elif self.state == S.TO_GATE:

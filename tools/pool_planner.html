@@ -37,9 +37,13 @@
   <button id="bCal">1. Calibrate</button>
   <button id="bStart">2. Start + heading</button>
   <button id="bMarker">3. Marker</button>
-  <label>Orbit r (m) <input type="number" id="rad" value="0.75" step="0.25" min="0.25"></label>
+  <label>Orbit r (m) <input type="number" id="rad" value="0.83" step="0.01" min="0.25"></label>
   <label>Depth (m) <input type="number" id="depth" value="0.5" step="0.1" min="0.2"></label>
   <label>Gate (m) <input type="number" id="gate" value="0" step="0.5" min="0"></label>
+  <label>Reach (m) <input type="number" id="reach" value="0.10" step="0.05" min="0.05"></label>
+  <label>Orbit v (m/s) <input type="number" id="ospeed" value="0.20" step="0.05" min="0.05"></label>
+  <label>CV blind (s) <input type="number" id="cvblind" value="5" step="1" min="0" max="60"></label>
+  <label>Timeout (s) <input type="number" id="stimeout" value="60" step="5" min="5" max="300"></label>
   <button id="bCopy" disabled>Copy command</button>
 </div>
 <div id="bar2">
@@ -47,6 +51,7 @@
   <button id="bTrack">Connect live tracking</button>
   <button id="bZero" disabled>Zero at start point</button>
   <button id="bClear" disabled>Clear trail</button>
+  <button id="bPool">Pool: lab</button>
   <button id="bFit">Fit image</button>
   <span class="hint">scroll = zoom &nbsp;·&nbsp; drag = pan &nbsp;·&nbsp; click = place (in active mode)</span>
 </div>
@@ -61,6 +66,7 @@
     <button id="bRun" class="danger" disabled>RUN MISSION</button>
     <button id="bStop" class="danger" disabled>STOP + DISARM</button>
     <label class="hint"><input type="checkbox" id="rcStart"> wait for RC button (SE)</label>
+    <label class="hint"><input type="checkbox" id="useCv" checked> use CV</label>
     <span id="runState" class="hint"></span>
   </div>
   <pre id="mlog"></pre>
@@ -112,20 +118,62 @@ function loadImage(src, label){
   img = new Image();
   img.onload = () => {
     fitView();
-    setStatus('Image loaded. Calibrate: type the known distance, click "1. Calibrate", then click the two points it spans. Zoom in first for accuracy.');
+    setStatus(mPerPx
+      ? `${label} loaded, calibration restored (${mPerPx.toFixed(4)} m/px). Re-click any point to change it.`
+      : 'Image loaded. Calibrate: type the known distance, click "1. Calibrate", then click the two points it spans. Zoom in first for accuracy.');
   };
   img.onerror = () => setStatus(label + ' not found — pick an image with the file chooser.');
   img.src = src;
 }
 
+// Scale, start, heading and marker are all IMAGE-pixel coordinates, so they are
+// meaningless against a different picture. loadImage leaves them untouched, which
+// would silently carry the lab pool's m/px onto the neighbour's pool and build a
+// mission from the wrong scale. Each image keeps its own set instead, restored on the
+// way back, so switching venues costs no re-calibration.
+const POOLS = ['pool.png', 'neighbor_pool.png'];
+const POOL_NAMES = { 'pool.png': 'lab', 'neighbor_pool.png': 'neighbor' };
+let poolSrc = POOLS[0];
+const savedCal = {};
+
+function stashCal(){
+  savedCal[poolSrc] = { mPerPx, calPts, start, headingPt, marker };
+}
+function restoreCal(key){
+  const s = savedCal[key] || {};
+  mPerPx = s.mPerPx || null; calPts = s.calPts || null;
+  start = s.start || null; headingPt = s.headingPt || null; marker = s.marker || null;
+}
+function showPool(){
+  const b = document.getElementById('bPool');
+  b.textContent = 'Pool: ' + (POOL_NAMES[poolSrc] || 'file');
+  b.classList.toggle('good', poolSrc !== POOLS[0]);   // highlight when off the default
+}
+// key names the saved calibration, src is what the browser actually fetches - they
+// differ for a chooser file, whose object URL is new on every pick.
+function usePool(key, src, label){
+  stashCal();
+  poolSrc = key;
+  restoreCal(key);
+  setMode(null);
+  showPool();
+  loadImage(src, label);
+  update();
+}
+
+document.getElementById('bPool').onclick = () => {
+  const next = poolSrc === POOLS[1] ? POOLS[0] : POOLS[1];
+  usePool(next, next, next);
+};
+
 document.getElementById('file').addEventListener('change', e => {
   const f = e.target.files[0]; if (!f) return;
-  loadImage(URL.createObjectURL(f), 'file');
+  usePool('file', URL.createObjectURL(f), 'file');
 });
 
 document.getElementById('bFit').onclick = fitView;
 // wait for layout before the first fit, or the iframe reports the wrong size
-window.addEventListener('load', () => loadImage('pool.png', 'pool.png'));
+window.addEventListener('load', () => { showPool(); loadImage(POOLS[0], POOLS[0]); });
 
 const i2s = p => ({ x: p.x*view.z + view.ox, y: p.y*view.z + view.oy });
 const s2i = p => ({ x: (p.x - view.ox)/view.z, y: (p.y - view.oy)/view.z });
@@ -200,7 +248,12 @@ function screenHeadingDeg(hp){
   return (Math.atan2(h.x - start.x, -(h.y - start.y)) * 180 / Math.PI + 360) % 360;
 }
 
-['rad','depth','gate'].forEach(id => document.getElementById(id).addEventListener('input', update));
+// Live tracking follows however you reached this page. Hardcoded to the tether IP it
+// would silently fail whenever the page was opened as graey.local:8090 over WiFi.
+if (location.hostname) document.getElementById('jip').value = location.hostname;
+
+['rad','depth','gate','reach','ospeed','cvblind','stimeout','useCv'].forEach(
+  id => document.getElementById(id).addEventListener('input', update));
 
 function missionFrame(){
   if (!start || !headingPt || !mPerPx) return null;
@@ -227,17 +280,24 @@ function update(){
   const rad = parseFloat(document.getElementById('rad').value) || 1.0;
   const depth = parseFloat(document.getElementById('depth').value) || 0.5;
   const gate = parseFloat(document.getElementById('gate').value) || 0;
+  const reach = parseFloat(document.getElementById('reach').value) || 0.10;
+  const ospeed = parseFloat(document.getElementById('ospeed').value) || 0.20;
+  const stimeout = parseFloat(document.getElementById('stimeout').value) || 60;
+  const cvblind = parseFloat(document.getElementById('cvblind').value) || 0;
   info.textContent = `Marker: ${fr.fwd.toFixed(2)} m forward, ${fr.rgt.toFixed(2)} m right`
     + ` (straight-line ${Math.hypot(fr.fwd, fr.rgt).toFixed(2)} m) · heading ${screenHeadingDeg().toFixed(1)}° on image`;
   cmdBox.textContent = 'ros2 run robotx_graey_2026 prequal_mission_cv --ros-args'
     + ' -p dry_run:=false'
     + ` -p depth:=${depth.toFixed(2)}`
-    + ' -p reach_thresh:=0.25'
+    + ` -p reach_thresh:=${reach.toFixed(2)}`
     + ` -p gate_forward:=${gate.toFixed(1)}`
     + ` -p marker_forward:=${fr.fwd.toFixed(2)}`
     + ` -p marker_right:=${fr.rgt.toFixed(2)}`
     + ` -p orbit_radius:=${rad.toFixed(2)}`
-    + ' -p state_timeout:=45.0';
+    + ` -p orbit_speed:=${ospeed.toFixed(2)}`
+    + ` -p use_cv:=${document.getElementById('useCv').checked}`
+    + ` -p cv_blind:=${cvblind.toFixed(1)}`
+    + ` -p state_timeout:=${stimeout.toFixed(1)}`;
   document.getElementById('bCopy').disabled = false;
 }
 document.getElementById('bCopy').onclick = () =>
@@ -258,8 +318,12 @@ function missionQuery(dry){
     + '&gate_forward=' + (parseFloat(document.getElementById('gate').value) || 0)
     + '&marker_forward=' + fr.fwd.toFixed(2)
     + '&marker_right=' + fr.rgt.toFixed(2)
-    + '&orbit_radius=' + (parseFloat(document.getElementById('rad').value) || 0.75)
-    + '&reach_thresh=0.25&state_timeout=45'
+    + '&orbit_radius=' + (parseFloat(document.getElementById('rad').value) || 0.83)
+    + '&reach_thresh=' + (parseFloat(document.getElementById('reach').value) || 0.10)
+    + '&orbit_speed=' + (parseFloat(document.getElementById('ospeed').value) || 0.20)
+    + '&cv_blind=' + (parseFloat(document.getElementById('cvblind').value) || 0)
+    + '&state_timeout=' + (parseFloat(document.getElementById('stimeout').value) || 60)
+    + '&use_cv=' + (document.getElementById('useCv').checked ? 'true' : 'false')
     + '&rc_start=' + (document.getElementById('rcStart').checked ? 'true' : 'false');
 }
 
@@ -384,7 +448,7 @@ function draw(){
   // planned path(s): dim = your click, bright = CV-corrected (what it will actually fly)
   const fr = markerFR(mf);
   if (mf && fr) {
-    const rad = parseFloat(document.getElementById('rad').value) || 0.75;
+    const rad = parseFloat(document.getElementById('rad').value) || 0.83;
     const gate = parseFloat(document.getElementById('gate').value) || 0;
     if (cvPole) {
       spath(missionPath(fr.fwd, fr.rgt, rad, gate).map(p => m2i(p.f, p.r, mf)), '#4a7a4a', 1.5, [7,5]);

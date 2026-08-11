@@ -1,0 +1,9 @@
+[Unit]
+Description=Shut down Graey on request from the GUI
+
+[Service]
+Type=oneshot
+# Delete the request FIRST - if it survived the shutdown, the path unit would
+# fire again on the next boot and power the Jetson straight back off.
+ExecStart=/bin/rm -f /home/graey/robotx_ws/logs/shutdown.request
+ExecStart=/sbin/shutdown -h now

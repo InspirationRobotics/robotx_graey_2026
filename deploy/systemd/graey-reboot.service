@@ -1,0 +1,7 @@
+[Unit]
+Description=Reboot Graey on request from the GUI
+
+[Service]
+Type=oneshot
+ExecStart=/bin/rm -f /home/graey/robotx_ws/logs/reboot.request
+ExecStart=/sbin/shutdown -r now

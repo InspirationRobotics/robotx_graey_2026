@@ -1,10 +1,18 @@
+# ROS 2 / colcon build output
 build/
 install/
 log/
+
+# Python
 __pycache__/
 *.pyc
+
+# MAVProxy telemetry logs
 *.tlog
 *.tlog.raw
 .cache/
-__pycache__/
-*.pyc
+
+# editor and shell leftovers
+*.bak*
+*.save
+*~

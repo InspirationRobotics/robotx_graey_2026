@@ -1,0 +1,15 @@
+[Unit]
+Description=Graey MAVProxy - sole owner of the Cube serial port
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+ExecStartPre=/usr/bin/docker start graey
+ExecStart=/usr/bin/docker exec graey /root/robotx_ws/src/robotx_graey_2026/scripts/start_mavproxy.sh
+ExecStop=-/usr/bin/docker exec graey pkill -f mavproxy.py
+
+[Install]
+WantedBy=multi-user.target

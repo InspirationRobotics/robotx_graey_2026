@@ -8,9 +8,15 @@ Publishes:
 Detection flicker is absorbed by requiring the pole in HITS of the last WINDOW
 frames, then median-filtering range and bearing over that history.
 
+range_scale corrects the stereo range for refraction - the camera is calibrated
+in air but looks through a flat port into water, so raw depth reads short. See
+the comment where it is applied; it must NOT be pushed into range_bearing().
+
 Debug view at http://<jetson-ip>:8080. With save_dir set, writes a frame every
-save_period seconds while detecting - that pile is the retraining set from our
-own water and camera.
+save_period seconds - that pile is the retraining set from our own water and
+camera. By default it only saves frames it DETECTED in, which is useless when
+detection is the thing being fixed; save_all captures the misses too. Files are
+tagged hit_ or miss_, and the miss_ ones are the set worth labelling.
 """
 import os
 import threading
@@ -34,21 +40,28 @@ class PoleTracker(Node):
     def __init__(self):
         super().__init__('pole_tracker')
         p = self.declare_parameter
-        p('model', '/root/robotx_ws/src/robotx_graey_2026/models/bestPoles724.pt')
-        p('target_class', 'red')
+        p('model', '/root/robotx_ws/src/robotx_graey_2026/models/'
+                   'pole_daynight_640x360_v2.pt')
+        p('target_class', 'pole')               # MUST match the model's own class name;
+                                                # a mismatch detects then silently drops
+                                                # everything. Models before 8/4 use 'red'.
         p('conf', 0.4)
         p('window', 10)
-        p('hits_needed', 5)                         # N-of-WINDOW frames to call it stable
+        p('hits_needed', 5)                     # N-of-WINDOW frames to call it stable
+        p('range_scale', 1.18)                  # refraction correction, measured in water
         p('save_dir', '')
         p('save_period', 0.5)
+        p('save_all', False)                    # save misses too, not just detections
 
         g = self.get_parameter
         self.model_path = g('model').value
         self.target = g('target_class').value
         self.conf = g('conf').value
         self.hits = g('hits_needed').value
+        self.range_scale = g('range_scale').value
         self.save_dir = g('save_dir').value
         self.save_period = g('save_period').value
+        self.save_all = g('save_all').value
         if self.save_dir:
             os.makedirs(self.save_dir, exist_ok=True)
 
@@ -67,7 +80,8 @@ class PoleTracker(Node):
         self.cam_thread = threading.Thread(target=self.camera_loop, daemon=True)
         self.cam_thread.start()
         camera.serve_mjpeg()
-        self.get_logger().info('pole_tracker starting; debug view on :8080')
+        self.get_logger().info(
+            f'pole_tracker starting; range_scale {self.range_scale}; view on :8080')
 
     def destroy_node(self):
         """Let the camera thread finish its current inference and exit on its own.
@@ -116,22 +130,30 @@ class PoleTracker(Node):
                     rb = camera.range_bearing(depth, box, fx, cx) if depth is not None else None
                     if rb:
                         hit = True
-                        self.fwd.append(rb[0])
-                        self.rgt.append(rb[1])
+                        # FORWARD ONLY. Refraction through the flat port scales the
+                        # apparent ANGLE by the same factor it scales depth, and
+                        # range_bearing computes bearing as (mx-cx)*z/fx - so those two
+                        # errors already cancel and the lateral value is correct as-is.
+                        # Scaling z inside range_bearing would break a good number.
+                        fwd, rgt = rb[0] * self.range_scale, rb[1]
+                        self.fwd.append(fwd)
+                        self.rgt.append(rgt)
                     cv2.rectangle(frame, tuple(box[:2]), tuple(box[2:]), (0, 0, 255), 2)
                     lbl = f'{self.target} {float(best.conf[0]):.2f}'
                     if hit:
-                        lbl += f'  fwd {rb[0]:.2f}m  right {rb[1]:+.2f}m'
+                        lbl += f'  fwd {fwd:.2f}m  right {rgt:+.2f}m'
                     cv2.putText(frame, lbl, (box[0], max(15, box[1] - 6)),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
                 self.seen.append(1 if hit else 0)
                 self.publish(frame)
 
-                if self.save_dir and hit and time.time() - self.last_save > self.save_period:
+                if (self.save_dir and (hit or self.save_all)
+                        and time.time() - self.last_save > self.save_period):
                     self.last_save = time.time()
+                    tag = 'hit' if hit else 'miss'   # miss_ frames are the retraining value
                     cv2.imwrite(os.path.join(
-                        self.save_dir, f'pole_{int(time.time() * 1000)}.jpg'), raw)
+                        self.save_dir, f'{tag}_{int(time.time() * 1000)}.jpg'), raw)
                 camera.publish_frame(frame)
 
     def publish(self, frame):

@@ -9,6 +9,11 @@ Sends MAVLink ODOMETRY at a fixed 20 Hz carrying:
 Attitude is sent every tick as long as the VN-100 is publishing, independent of
 the DVL. On a dry bench (no DVL / no bottom lock) position stays at the origin
 and velocity is zero, but heading still tracks - that is the yaw bench test.
+
+self.pos is the only accumulated state in the navigation chain, so THIS NODE MUST
+NOT DIE. Restarting it snaps the dead-reckoned position back to the origin and
+teleports the EKF's external-nav source by however far it had travelled. That is
+why Link reconnects on ECONNREFUSED rather than letting the exception out.
 """
 import math
 
@@ -18,10 +23,7 @@ from geometry_msgs.msg import TwistWithCovarianceStamped
 from sensor_msgs.msg import Imu
 
 from robotx_graey_2026.api.node_util import run
-from robotx_graey_2026.api.pixhawk.mavlink import (
-    Link, FRAME_LOCAL_FRD, FRAME_BODY_FRD, EST_VIO)
-
-COV_UNKNOWN = [float('nan')] + [0.0] * 20           # leading NaN = "covariance unknown"
+from robotx_graey_2026.api.pixhawk.mavlink import Link
 
 
 def quat_mul(a, b):
@@ -53,7 +55,6 @@ class NavEKFBridge(Node):
         self.declare_parameter('yaw_offset_deg', 0.0)   # frame alignment, not a calibration
         self.yaw_off = self.get_parameter('yaw_offset_deg').value
         self.link = Link(self.get_parameter('mavlink').value, 197, self.get_logger())
-        self.tx = self.link.mav.mav                     # raw sender - ODOMETRY has no helper
 
         self.q = (1.0, 0.0, 0.0, 0.0)
         self.rates = (0.0, 0.0, 0.0)
@@ -101,11 +102,7 @@ class NavEKFBridge(Node):
         if not self.have_att:
             return
         v = self.vb if self.valid else (0.0, 0.0, 0.0)
-        self.tx.odometry_send(
-            0, FRAME_LOCAL_FRD, FRAME_BODY_FRD,
-            self.pos[0], self.pos[1], self.pos[2], list(self.q),
-            v[0], v[1], v[2], self.rates[0], self.rates[1], self.rates[2],
-            COV_UNKNOWN, COV_UNKNOWN, 0, EST_VIO)
+        self.link.odometry(self.pos, self.q, v, self.rates)
         self.sent += 1
 
 

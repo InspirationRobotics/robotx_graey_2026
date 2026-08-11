@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch for a shutdown request from the Graey GUI
+
+[Path]
+PathExists=/home/graey/robotx_ws/logs/shutdown.request
+
+[Install]
+WantedBy=multi-user.target

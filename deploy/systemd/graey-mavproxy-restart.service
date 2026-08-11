@@ -1,0 +1,6 @@
+[Unit]
+Description=Restart Graey MAVProxy after the Cube re-enumerates
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl restart graey-mavproxy.service

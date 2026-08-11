@@ -12,7 +12,15 @@ import cv2
 import depthai as dai
 import numpy as np
 
-W, H = 640, 400
+# 16:9 ON PURPOSE, and it is worth ~5 degrees of view. The IMX378 does not support
+# THE_800_P, so depthai falls back to a 1920x1080 ISP. Preview keeps aspect ratio by
+# default, so a 16:10 preview like 640x400 gets its WIDTH centre-cropped by 10% and
+# the vehicle flies at about 63.5 deg HFOV instead of the lens's 69. Matching the ISP
+# aspect uses the full sensor width for nothing. Horizontal stops there - 69 deg is
+# the lens, and the OAK-D W that had 150 deg is dead. The remaining view is VERTICAL:
+# a 4:3 sensor mode would give 55 deg instead of 42, but needs setIspScale to avoid
+# the NvMap exhaustion in documentation section 4.7.
+W, H = 640, 360
 
 _frame = None
 _lock = threading.Lock()

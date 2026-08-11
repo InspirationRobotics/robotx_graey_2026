@@ -1,0 +1,4 @@
+# The Cube re-enumerating leaves MAVProxy holding a dead fd. It stays alive, so
+# systemd never notices. SYSTEMD_WANTS, not RUN+= - udev kills long-lived children
+# and calling systemctl directly from a rule fails silently.
+ACTION=="add", SUBSYSTEM=="tty", ENV{ID_SERIAL}=="Hex_ProfiCNC_CubeOrange_24002A000B51303231383439", ENV{ID_USB_INTERFACE_NUM}=="00", TAG+="systemd", ENV{SYSTEMD_WANTS}="graey-mavproxy-restart.service"

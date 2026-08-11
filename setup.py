@@ -23,6 +23,7 @@ setup(
         'console_scripts': [
             'led_node = robotx_graey_2026.api.led.led_node:main',
             'pixhawk_led_node = robotx_graey_2026.api.led.pixhawk_led_node:main',
+            'kill_switch = robotx_graey_2026.api.pixhawk.kill_switch:main',
             'dvl_node = robotx_graey_2026.api.navigation.dvl_node:main',
             'vn100_node = robotx_graey_2026.api.navigation.vn100_node:main',
             'nav_ekf_bridge = robotx_graey_2026.api.navigation.nav_ekf_bridge:main',
@@ -31,6 +32,7 @@ setup(
             'gui_node = robotx_graey_2026.api.gui.gui_node:main',
             'prequal_mission = robotx_graey_2026.api.navigation.prequal_mission:main',
             'prequal_mission_cv = robotx_graey_2026.api.navigation.prequal_mission_cv:main',
+            'demo_mission = robotx_graey_2026.api.navigation.demo_mission:main',
         ],
     },
 )

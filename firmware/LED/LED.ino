@@ -5,6 +5,12 @@
 //   '0' off   '1' RED (emergency motor off)   '2' YELLOW (manual)   '3' GREEN (autonomous)
 // If no command arrives for COMMS_TIMEOUT_MS the strip flashes red/off, so a dead
 // Jetson can never leave a stale GREEN showing on the prequal video.
+//
+// D7 outranks all of it, same as Crusader's sketch. The emergency motor-off relay
+// feeds it whenever it is cutting thruster power, and handbook 5.3.2 requires the
+// state indicator to go RED when the vehicle is killed. Nothing on the serial link
+// can infer that: the Cube runs off the other battery and stays armed straight
+// through a kill, so pixhawk_led_node would happily keep sending GREEN.
 
 #include <Adafruit_NeoPixel.h>
 
@@ -12,6 +18,7 @@
 #define NUM_PIXELS      8
 #define BRIGHTNESS      150
 #define COMMS_TIMEOUT_MS 3000
+#define OVERRIDE_PIN    7       // D7 override input, HIGH = thrusters killed
 
 Adafruit_NeoPixel pixels(NUM_PIXELS, LED_PIN, NEO_GRBW + NEO_KHZ800);
 
@@ -27,6 +34,7 @@ void fill(uint8_t r, uint8_t g, uint8_t b, uint8_t w) {
 
 void setup() {
   Serial.begin(115200);
+  pinMode(OVERRIDE_PIN, INPUT);   // plain INPUT - the divider's lower leg is the pull-down
   pixels.begin();
   pixels.setBrightness(BRIGHTNESS);
   fill(255, 0, 0, 0);             // RED until told otherwise
@@ -34,6 +42,9 @@ void setup() {
 }
 
 void loop() {
+  // Read serial BEFORE the override, so a kill longer than COMMS_TIMEOUT_MS does not
+  // leave lastCmdMs stale and flash red for a moment once the switch is re-seated.
+  // Reading does not touch the strip, so the override still outranks it.
   while (Serial.available()) {
     char c = Serial.read();
     if (c == '0' || c == '1' || c == '2' || c == '3') {
@@ -41,6 +52,13 @@ void loop() {
       lastCmdMs = millis();
       Serial.println(state);      // echo so the host can confirm the link
     }
+  }
+
+  // ---------- D7 Override ----------
+  // Ahead of every colour decision, the comms-timeout flash included: killed is killed.
+  if (digitalRead(OVERRIDE_PIN) == HIGH) {
+    fill(255, 0, 0, 0);
+    return;
   }
 
   if (millis() - lastCmdMs > COMMS_TIMEOUT_MS) {
