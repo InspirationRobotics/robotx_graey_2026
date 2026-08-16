@@ -18,13 +18,13 @@ if [ ! -e "$CUBE" ]; then
 fi
 
 if [ -n "$1" ]; then
-  OUTS="--out=udpout:$1:14550"
-  echo "telemetry -> $1:14550"
+  OUTS="--out=udpout:$1:14560"
+  echo "telemetry -> $1:14560"
 else                                    # one broadcast per live interface, so this
   OUTS=""                               # works on tether only, WiFi only, or both
   for BCAST in $(ip -o -4 addr show scope global | grep -v docker | awk '/brd/ {print $6}'); do
-    OUTS="$OUTS --out=udpbcast:$BCAST:14550"
-    echo "telemetry -> $BCAST:14550 (broadcast)"
+    OUTS="$OUTS --out=udpbcast:$BCAST:14560"
+    echo "telemetry -> $BCAST:14560 (broadcast)"
   done
   [ -z "$OUTS" ] && echo "WARNING: no network interfaces up - QGC will not connect"
 fi
