@@ -117,6 +117,10 @@ class KillSwitch(Node):
         self.heartbeat_ready = False
         self.heartbeat_reported = None
 
+        self.fc_heartbeat_timeout_s = 2.0
+        self.fc_heartbeat_t = 0.0
+        self.fc_heartbeat_lost = False
+        
         self.create_subscription(Bool, '/graey/autonomy_active', self.on_auto, 10)
         self.create_timer(1.0, self.link.heartbeat)
         self.create_timer(5.0, self.request_rc)
@@ -172,11 +176,17 @@ class KillSwitch(Node):
 
             elif (kind == 'HEARTBEAT' and message.get_srcSystem() == 1
                     and message.get_srcComponent() == 1):
+                self.fc_heartbeat_t = self.now()
                 self.armed = bool(message.base_mode
                                   & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
                 self.mode = self.link.mav.flightmode
 
         self.link.drain(handle)
+
+    def fc_heartbeat_alive(self):
+        if self.fc_heartbeat_t == 0.0 or (self.now() - self.fc_heartbeat_timeout_s) <= self.fc_heartbeat_t:
+            return True
+        return False
 
     def heartbeat_alive(self, rc_messages_fresh):
         if not rc_messages_fresh or not self.heartbeat_ready:
@@ -209,6 +219,7 @@ class KillSwitch(Node):
         rc_messages_fresh = self.now() - self.rc_t <= RC_MESSAGE_STALE_S
         heartbeat_alive = self.heartbeat_alive(rc_messages_fresh)
         self.report_heartbeat(heartbeat_alive)
+        self.fc_heartbeat_lost = not self.fc_heartbeat_alive()
 
         if self.pilot_failsafe(heartbeat_alive):
             return
@@ -220,6 +231,8 @@ class KillSwitch(Node):
             self.do_kill(kill_pwm)
         if self.killed:
             return
+
+     
 
         arm_pwm = self.rc.get(self.arm_ch, 0)
         if not valid(arm_pwm):
@@ -297,7 +310,7 @@ class KillSwitch(Node):
                             and self.mode not in AUTO_MODES
                             and self.now() > self.auto_until)
 
-        if pilot_controlled and heartbeat_failed and not self.tripped:
+        if pilot_controlled and heartbeat_failed and not self.tripped and self.fc_heartbeat_lost:
             self.tripped = True
             self.get_logger().error(
                 'PILOT FAILSAFE - transmitter heartbeat lost '
