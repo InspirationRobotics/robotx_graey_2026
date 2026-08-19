@@ -103,10 +103,27 @@
     <button class="act danger" onclick="power('reboot')">Reboot Jetson</button>
     <span id="pwrMsg" class="sub"></span>
   </div>
+
+  <div style="margin:0 18px; border-top:1px solid #2a2f3a"></div>
+
+  <div class="note" style="margin:18px; max-width:640px">
+    The 8x8 status panel draws well over an amp on solid red, which is wasted power
+    on the bench &mdash; nobody needs to read the status colour from a metre away.
+    Turning it off here darkens the panel and stops <code>pixhawk_led_node</code>;
+    nothing else about the vehicle changes.
+    <b>Turn it back on before any run that has to show status.</b>
+    The Arduino's D7 kill input still outranks this: while that is high the panel
+    is red whatever we send it.
+  </div>
+  <div style="margin:18px; display:flex; gap:12px; align-items:center">
+    <button class="act" id="ledBtn" onclick="ledToggle()">Turn status LED off</button>
+    <span id="ledMsg" class="sub"></span>
+  </div>
 </div>
 
 <script>
 var TABS = ['nodes','sensors','camera','planner','logs','system'];
+var ledOff = false;                          // mirrored from /api/status
 
 // The log is only fetched while its tab is open - no point pulling 60 KB a second
 // across the tether to a div nobody is looking at.
@@ -122,6 +139,19 @@ async function refreshLog(){
   } catch (e) {
     document.getElementById('logMsg').textContent = 'could not read the log';
   }
+}
+
+async function ledToggle(){
+  var btn = document.getElementById('ledBtn');
+  btn.disabled = true;                         // the off path waits for a node to die
+  document.getElementById('ledMsg').textContent = 'working...';
+  try {
+    var j = await (await fetch('/api/led?do=' + (ledOff ? 'on' : 'off'))).json();
+    document.getElementById('ledMsg').textContent = j.msg;
+  } catch (e) {
+    document.getElementById('ledMsg').textContent = 'request failed - is gui_node running?';
+  }
+  btn.disabled = false;
 }
 
 async function power(what){
@@ -157,7 +187,10 @@ async function refreshStatus(){
     var s = await (await fetch('/api/status', {cache:'no-store'})).json();
     var cls = { 'RED':'red', 'YELLOW':'yellow', 'GREEN':'green', 'off':'down' }[s.led] || 'down';
     document.getElementById('sLed').className = 'dot ' + cls;
-    document.getElementById('sLedTxt').textContent = s.led;
+    document.getElementById('sLedTxt').textContent = s.led + (s.led_off ? ' (held off)' : '');
+    ledOff = s.led_off;
+    document.getElementById('ledBtn').textContent =
+      ledOff ? 'Turn status LED back on' : 'Turn status LED off';
     document.getElementById('sArm').textContent   = s.armed ? 'ARMED' : 'disarmed';
     document.getElementById('sMode').textContent  = s.mode;
     document.getElementById('sDepth').textContent = s.depth.toFixed(2) + ' m';

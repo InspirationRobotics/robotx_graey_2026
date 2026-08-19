@@ -45,6 +45,8 @@ FILES = {'/': 'gui.html', '/planner': 'pool_planner.html',
          '/neighbor_pool.png': 'neighbor_pool.png'}  # prequal venue, scaled off satellite
 TYPES = {'.html': 'text/html', '.png': 'image/png'}
 LED_NAMES = {0: 'off', 1: 'RED', 2: 'YELLOW', 3: 'GREEN'}
+LED_DRIVER = 'led_node'                         # the only writer of the serial port
+LED_SOURCE = 'pixhawk_led_node'                 # decides the colour, 5 Hz
 
 MISSION = 'prequal_mission_cv'
 MISSION_LOG = '/root/robotx_ws/logs/mission.log'
@@ -70,6 +72,7 @@ NOISY = (b'ERROR', b'WARN', b'Traceback', b'Error', b'error')
 
 web_dir = '/root/robotx_ws/src/robotx_graey_2026/tools'
 link = None                                     # set by GuiNode, used to disarm on stop
+led_off = False                                 # True while this page holds the panel dark
 
 # Timestamps are absolute; the API reports them as an age so the page can grey
 # out anything that has gone quiet.
@@ -118,12 +121,64 @@ def status():
     now = time.time()
     seen = lambda t: round(now - t, 1) if t else -1
     return {'led': LED_NAMES.get(tel['led'], '--'), 'led_age': seen(tel['led_t']),
+            'led_off': led_off,
             'armed': tel['armed'], 'mode': tel['mode'], 'mav_age': seen(tel['mav_t']),
             'depth': round(tel['depth'], 2),
             'dvl_lock': tel['dvl_lock'], 'altitude': round(tel['altitude'], 2),
             'dvl_age': seen(tel['dvl_t']),
             'heading': tel['heading'], 'hdg_age': seen(tel['hdg_t']),
             'mission': bool(pids_for(MISSION))}
+
+
+def kill_exec(name):
+    """SIGTERM, escalate, and report whether it is really gone.
+
+    Same reason as mission_stop: rclpy's own SIGTERM handler calls
+    rclpy.shutdown(), which does not reliably end a spinning node.
+    """
+    def signal_all(sig):
+        for pid in pids_for(name):
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass                            # exited between the scan and the kill
+    signal_all(signal.SIGTERM)
+    for _ in range(10):
+        if not pids_for(name):
+            return True
+        time.sleep(0.1)
+    signal_all(signal.SIGKILL)
+    time.sleep(0.2)
+    return not pids_for(name)
+
+
+def led_blackout(on):
+    """Hold the 8x8 panel dark, or hand it back to the status logic.
+
+    64 WS2812B at BRIGHTNESS 255 is over an amp on solid red, which is worth
+    saving on the bench where nobody is reading the status colour from across a
+    pond. Returns (ok, message).
+
+    LED_SOURCE has to be stopped rather than just talked over - it publishes the
+    real status at 5 Hz and would fight us into a flicker.
+
+    LED_DRIVER has to stay up, and is started here if it is down. It is the only
+    thing that writes the serial port, and the sketch holds its last colour
+    forever (COMMS_TIMEOUT_MS is 0), so a stack that is merely stopped leaves the
+    panel lit at whatever it was showing.
+    """
+    global led_off
+    if not on:
+        led_off = False
+        if not pids_for(LED_SOURCE):
+            spawn(['ros2', 'run', 'robotx_graey_2026', LED_SOURCE])
+        return True, 'status LED back under ' + LED_SOURCE
+    if not kill_exec(LED_SOURCE):
+        return False, 'could not stop ' + LED_SOURCE + ' - panel left as it is'
+    if not pids_for(LED_DRIVER):
+        spawn(['ros2', 'run', 'robotx_graey_2026', LED_DRIVER])
+    led_off = True
+    return True, 'status LED off - the panel goes dark within a second'
 
 
 def mission_start(query):
@@ -240,6 +295,16 @@ class Handler(BaseHTTPRequestHandler):
                 'application/json')
             return
 
+        if u.path == '/api/led':
+            what = parse_qs(u.query).get('do', [''])[0]
+            if what not in ('off', 'on'):
+                self.send_error(400, 'unknown led action')
+                return
+            ok, msg = led_blackout(what == 'off')
+            self.reply(200 if ok else 409,
+                       json.dumps({'ok': ok, 'msg': msg}).encode(), 'application/json')
+            return
+
         if u.path == '/api/mission/log':
             try:
                 with open(MISSION_LOG, 'rb') as f:
@@ -298,16 +363,38 @@ class GuiNode(Node):
 
         self.link = link = Link(self.get_parameter('mavlink').value, 195,
                                 self.get_logger())
+        self.led_pub = self.create_publisher(Int32, '/graey/led_state', 10)
+        self.led_checked = 0.0
         self.create_subscription(Int32, '/graey/led_state', self.on_led, 10)
         self.create_subscription(Bool, '/graey/dvl/valid', self.on_dvl, 10)
         self.create_subscription(Float32, '/graey/dvl/altitude', self.on_alt, 10)
         self.create_subscription(Float32, '/graey/vn100/heading', self.on_hdg, 10)
         self.create_timer(1.0, self.link.heartbeat)
         self.create_timer(0.1, self.pump)
+        self.create_timer(0.2, self.hold_led)
 
         threading.Thread(target=lambda: ThreadingHTTPServer(
             ('0.0.0.0', port), Handler).serve_forever(), daemon=True).start()
         self.get_logger().info('GUI on http://0.0.0.0:' + str(port))
+
+    def hold_led(self):
+        """Keep saying 'off' - led_node falls back to RED after a second of silence.
+
+        If LED_SOURCE is running again - the Nodes tab can start it, and so can a
+        graey-ros restart - it owns the panel: release rather than fight it at
+        5 Hz. That check is a /proc scan, so it runs every 2 s, not every tick.
+        """
+        global led_off
+        if not led_off:
+            return
+        now = time.time()
+        if now - self.led_checked > 2.0:
+            self.led_checked = now
+            if pids_for(LED_SOURCE):
+                led_off = False
+                self.get_logger().info(LED_SOURCE + ' is back - releasing the LED')
+                return
+        self.led_pub.publish(Int32(data=0))
 
     def on_led(self, m):
         tel['led'], tel['led_t'] = m.data, time.time()

@@ -7,7 +7,7 @@
 //   D7 -> override input. HIGH = forced RED, outranks everything.
 //
 // Serial @115200, one ASCII char per command:
-//   '1' RED   '2' YELLOW   '3' GREEN
+//   '0' off   '1' RED   '2' YELLOW   '3' GREEN
 // Before the first command arrives, the panel flashes RED at a 2 s interval.
 
 #include <Adafruit_NeoPixel.h>
