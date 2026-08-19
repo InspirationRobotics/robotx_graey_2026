@@ -93,6 +93,7 @@ void loop() {
 
   // ---------- commanded state ----------
   switch (state) {
+    case '0': fill(0,   0,   0); break;   // off
     case '1': fill(255, 0,   0); break;   // red
     case '2': fill(255, 170, 0); break;   // yellow
     case '3': fill(0,   255, 0); break;   // green
