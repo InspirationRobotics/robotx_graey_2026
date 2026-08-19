@@ -146,10 +146,16 @@ async function ledToggle(){
   btn.disabled = true;                         // the off path waits for a node to die
   document.getElementById('ledMsg').textContent = 'working...';
   try {
-    var j = await (await fetch('/api/led?do=' + (ledOff ? 'on' : 'off'))).json();
+    var r = await fetch('/api/led?do=' + (ledOff ? 'on' : 'off'));
+    // 409 is a real answer from led_blackout and carries JSON. Anything else that
+    // is not ok has an HTML body, and calling .json() on it blamed a dead gui_node
+    // when the process was fine and merely predated /api/led - report the code.
+    if (!r.ok && r.status !== 409) throw new Error('HTTP ' + r.status + (r.status === 404
+      ? ' - this page is newer than gui_node; colcon build and restart graey-ros' : ''));
+    var j = await r.json();
     document.getElementById('ledMsg').textContent = j.msg;
   } catch (e) {
-    document.getElementById('ledMsg').textContent = 'request failed - is gui_node running?';
+    document.getElementById('ledMsg').textContent = 'LED request failed: ' + e.message;
   }
   btn.disabled = false;
 }
