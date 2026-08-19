@@ -62,7 +62,7 @@ void loop() {
   // Read serial first. Reading does not touch the panel, so the override still wins.
   while (Serial.available()) {
     char c = Serial.read();
-    if (c == '1' || c == '2' || c == '3') {
+    if (c == '0' || c == '1' || c == '2' || c == '3') {
       state = c;
       haveCmd = true;
       lastCmdMs = millis();
