@@ -112,6 +112,37 @@ check_true("progressed past search",
 check_true("reached follow", FOLLOW in seen_states,
            f"states: {sorted(set(seen_states))}")
 
+# ------------------------------------------------- Action -> NED conversion
+# The geometry that turns a Driver decision into a setpoint. Wrong signs here
+# send the sub the opposite way from the one the detector asked for, and that
+# is not something you want to discover in the water.
+print("\n--- action to NED target ---")
+try:
+    import math as _m
+    from tools.sonar_follow import MAX_STEP_M, action_to_target
+    from robotx_graey_2026.api.sonar.driver import Action, FORWARD, HOLD, STRAFE, YAW_BY
+
+    def near(got, want):
+        return all(abs(a - b) <= 1e-6 for a, b in zip(got, want))
+
+    check_true("forward, heading north -> +north",
+               near(action_to_target(Action(FORWARD, 1.0), 0, 0, 2, 0.0), (1, 0, 2, 0)))
+    check_true("strafe starboard, heading north -> +east",
+               near(action_to_target(Action(STRAFE, 1.0), 0, 0, 2, 0.0), (0, 1, 2, 0)))
+    check_true("strafe starboard, heading east -> -north",
+               near(action_to_target(Action(STRAFE, 1.0), 0, 0, 2, _m.pi / 2),
+                    (-1, 0, 2, _m.pi / 2)))
+    check_true("yaw_by 90 turns without translating",
+               near(action_to_target(Action(YAW_BY, 90.0), 5, 5, 2, 0.0),
+                    (5, 5, 2, _m.pi / 2)))
+    check_true("oversized step is clamped",
+               near(action_to_target(Action(FORWARD, 5.0), 0, 0, 2, 0.0),
+                    (MAX_STEP_M, 0, 2, 0)))
+    check_true("depth is never altered",
+               action_to_target(Action(HOLD), 0, 0, 7.5, 0.0)[2] == 7.5)
+except ImportError as exc:
+    print(f"SKIP  action->NED checks ({exc}) - pymavlink not installed")
+
 # ---------------------------------------------------------------- rendering
 print("\n--- rendering ---")
 img = render(p, driver.memory, state=driver.state)

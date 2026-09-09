@@ -1,0 +1,199 @@
+#!/usr/bin/env python3
+"""Sonar search-and-approach: let the state machine drive the sub.
+
+    python3 tools/sonar_follow.py --udp 127.0.0.1:9092            # DRY RUN
+    python3 tools/sonar_follow.py --udp 127.0.0.1:9092 --live     # actually moves
+
+SAFETY, copied from mission_base.py because the reasoning is the same: dry run
+is the DEFAULT. It prints every target it would command and sends nothing. Pass
+--live only in the water, with the e-stop in reach.
+
+This never arms and never changes mode. Put the vehicle in GUIDED and ARM it
+yourself in QGroundControl first, exactly as tools/guided_goto.py expects. A
+script that can arm the sub is a script that can arm the sub by accident.
+
+HOW IT CONNECTS
+    The Driver emits body-frame moves - FORWARD 0.5 m, STRAFE -0.4 m, YAW_BY 45
+    deg - and frames.body_to_world(n, e, yaw, forward, right) takes exactly
+    those units. So each Action becomes one NED target and goes out through the
+    same Link.goto_ned() that guided_goto.py uses. There is no translation layer
+    worth the name; that is the point of the Driver returning Actions instead of
+    touching the vehicle itself.
+
+WHY THE SLOW CADENCE IS FINE
+    Link.goto_posvel's docstring warns that goto_ned() must not be sent faster
+    than every few seconds, because wp_nav resets its S-curve on every message
+    and the sub never leaves its acceleration phase. A sweep takes about nine
+    seconds, so one new target per sweep sits naturally inside that limit. The
+    RESEND_S gate below is the same one mission_base uses, for the same reason.
+
+WHAT THIS STILL DOES NOT PROVE
+    A pole is not a pipeline. ORIENT and FOLLOW judge alignment by how far the
+    span COLLAPSES when you turn, and a vertical pole looks the same from every
+    heading - so those states cannot be validated against one. Expect SEARCH and
+    APPROACH to be meaningful here and the rest to be theatre.
+
+Needs the workspace sourced, or PYTHONPATH=. from the repo root.
+"""
+import argparse
+import math
+import sys
+import time
+
+from robotx_graey_2026.api.navigation.frames import body_to_world
+from robotx_graey_2026.api.pixhawk.mavlink import Link
+from robotx_graey_2026.api.sonar import settings as S
+from robotx_graey_2026.api.sonar import webview
+from robotx_graey_2026.api.sonar.detect import perceive
+from robotx_graey_2026.api.sonar.driver import (
+    Driver, FINISHED, FORWARD, HOLD, STRAFE, YAW_BY, YAW_TO)
+from robotx_graey_2026.api.sonar.sweep import Sonar
+from robotx_graey_2026.api.sonar.viewer import render
+
+RESEND_S = 3.0          # matches mission_base: unchanged targets go no faster
+POSE_TIMEOUT_S = 5.0
+MAX_STEP_M = 1.0        # refuse to command a jump bigger than this, whatever
+                        # the Driver asks for. A detector bug should not become
+                        # a three-metre lunge.
+
+
+def refresh_pose(link, pose, timeout=POSE_TIMEOUT_S):
+    """Drain MAVLink until we have a fresh position and attitude."""
+    def handle(kind, m):
+        if kind == 'LOCAL_POSITION_NED':
+            pose['pos'] = (m.x, m.y, m.z)
+        elif kind == 'ATTITUDE':
+            pose['yaw'] = m.yaw
+
+    t0 = time.time()
+    pose['pos'] = pose['yaw'] = None
+    while (pose['pos'] is None or pose['yaw'] is None) and time.time() - t0 < timeout:
+        link.heartbeat()                    # MAVProxy will not route to us first
+        link.drain(handle)
+        time.sleep(0.05)
+    return pose['pos'] is not None and pose['yaw'] is not None
+
+
+def action_to_target(action, n, e, down, yaw):
+    """One Action -> (north, east, down, yaw) target. None means 'no move'.
+
+    Depth is passed straight through. This tool does not change depth, so a
+    detector that goes wrong cannot drive the sub into the bottom.
+    """
+    if action.kind == FORWARD:
+        step = max(-MAX_STEP_M, min(MAX_STEP_M, action.value))
+        tn, te = body_to_world(n, e, yaw, step, 0.0)
+        return tn, te, down, yaw
+    if action.kind == STRAFE:
+        step = max(-MAX_STEP_M, min(MAX_STEP_M, action.value))
+        tn, te = body_to_world(n, e, yaw, 0.0, step)
+        return tn, te, down, yaw
+    if action.kind == YAW_BY:
+        return n, e, down, yaw + math.radians(action.value)
+    if action.kind == YAW_TO:
+        return n, e, down, math.radians(action.value)
+    if action.kind == HOLD:
+        return n, e, down, yaw
+    return None
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--udp", help="host:port of pingproxy, e.g. 127.0.0.1:9092")
+    p.add_argument("--device", help="serial by-id path, if not using pingproxy")
+    p.add_argument("--mavlink", default="udpout:127.0.0.1:14553")
+    p.add_argument("--down-gradian", type=int, default=S.DOWN_GRADIAN)
+    p.add_argument("--threshold", type=int, default=S.DETECT["threshold"])
+    p.add_argument("--no-floor", action="store_true",
+                   help="skip the floor. Right at short range, where the bottom "
+                        "is beyond the sweep and the detector would mistake the "
+                        "target for it.")
+    p.add_argument("--live", action="store_true",
+                   help="ACTUALLY SEND setpoints. Without this it only prints.")
+    p.add_argument("--web", action="store_true", help="radar view on :8081")
+    p.add_argument("--port", type=int, default=8081)
+    p.add_argument("--max-sweeps", type=int, default=40,
+                   help="stop after this many sweeps, whatever the state")
+    args = p.parse_args()
+
+    udp = None
+    if args.udp:
+        host, port = args.udp.split(":")
+        udp = (host, int(port))
+
+    sonar = Sonar(device=args.device, udp=udp, down_gradian=args.down_gradian)
+    link = Link(args.mavlink, 191)
+    pose = {'pos': None, 'yaw': None}
+
+    if not refresh_pose(link, pose):
+        sys.exit("no position/attitude - is MAVProxy running?")
+
+    driver = Driver(profile=S.PIPELINE_PROFILE,
+                    start_heading_deg=math.degrees(pose['yaw']))
+    if args.web:
+        webview.serve(args.port)
+        print(f"[INFO] view on http://0.0.0.0:{args.port}")
+
+    mode = "LIVE - SENDING SETPOINTS" if args.live else "DRY RUN - sending nothing"
+    print(f"[INFO] {mode}")
+    if args.live:
+        print("[INFO] vehicle must already be in GUIDED and ARMED")
+
+    tuning = {"threshold": args.threshold}
+    target = None
+    last_send = 0.0
+
+    for i in range(args.max_sweeps):
+        if not refresh_pose(link, pose):
+            print("[WARN] lost position - holding")
+            continue
+        n, e, down = pose['pos']
+        yaw = pose['yaw']
+        heading_deg = math.degrees(yaw) % 360.0
+
+        state = driver.state
+        sweep = sonar.sweep_for_state(driver.sweep_state(), heading_deg)
+        per = perceive(sweep, profile=S.PIPELINE_PROFILE, tuning=tuning,
+                       require_floor=not args.no_floor)
+        action = driver.tick(per, heading_deg)
+
+        print(f"\n[{i}] {state} -> {driver.state}  hdg {heading_deg:.0f}  "
+              f"{len(per.candidates)} blobs")
+        print(f"    {action.kind} "
+              f"{'' if action.value is None else f'{action.value:+.2f}'}: {action.why}")
+
+        if args.web:
+            webview.publish(render(per, driver.memory, state=driver.state))
+
+        if action.kind == FINISHED:
+            print("[INFO] driver reports finished")
+            break
+
+        tgt = action_to_target(action, n, e, down, yaw)
+        if tgt is None:
+            continue
+        tn, te, td, tyaw = tgt
+
+        # The same change gate mission_base uses: an unchanged target re-sent too
+        # often restarts ArduSub's trajectory planner and the sub crawls.
+        changed = (target is None
+                   or any(abs(a - b) > 0.01 for a, b in zip((tn, te, td), target[:3]))
+                   or abs(tyaw - target[3]) > 0.02)
+        target = (tn, te, td, tyaw)
+
+        if not args.live:
+            print(f"    [dry] NED=({tn:.2f},{te:.2f},{td:.2f}) "
+                  f"yaw={math.degrees(tyaw):.0f}")
+            continue
+        if not changed and time.time() - last_send < RESEND_S:
+            continue
+        last_send = time.time()
+        link.goto_ned(tn, te, td, tyaw)
+        print(f"    sent NED=({tn:.2f},{te:.2f},{td:.2f}) "
+              f"yaw={math.degrees(tyaw):.0f}")
+
+    print("\n[INFO] done. Switch to POSHOLD in QGroundControl before disarming.")
+
+
+if __name__ == "__main__":
+    main()
