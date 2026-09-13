@@ -121,11 +121,18 @@ class Sonar:
         self.metres_per_bin = max_range_m / n
         self._configured_range = max_range_m
 
-    def sweep(self, start_deg, end_deg, step_deg, max_range_m, heading_deg=None):
+    def sweep(self, start_deg, end_deg, step_deg, max_range_m, heading_deg=None,
+              on_ping=None):
         """Sweep an arc of the scan plane and return a Sweep.
 
         Angles are in our convention; they get converted to gradians here so
         nothing downstream ever has to think about the hardware's units.
+
+        on_ping(partial) is called as the head moves, with a Sweep holding only
+        what has been measured so far. A full sweep takes many seconds - the
+        motor step dominates, not the sound - so a display that waits for the
+        whole thing looks frozen. The partial is a real Sweep, so a viewer needs
+        no special case for it.
         """
         self._configure_range(max_range_m)
 
@@ -146,6 +153,10 @@ class Sonar:
             if len(row) < self.n_samples:
                 row = np.pad(row, (0, self.n_samples - len(row)))
             rows.append(row[: self.n_samples])
+
+            if on_ping is not None:
+                on_ping(Sweep(np.vstack(rows), angles[:len(rows)],
+                              self.metres_per_bin, heading_deg))
 
         image = np.vstack(rows) if rows else np.zeros((0, 1), dtype=np.uint8)
         return Sweep(image, angles, self.metres_per_bin, heading_deg)

@@ -112,10 +112,19 @@ def main():
     down_gradian = args.down_gradian
     tuning = {"threshold": args.threshold}
 
+    # A sweep takes many seconds, so publish partial frames while the head is
+    # still moving. Without this the browser shows one frozen picture and you
+    # cannot tell a working sonar from a stalled one.
+    def live(partial):
+        per = perceive(partial, profile=None, tuning=tuning, floor=None,
+                       require_floor=False)
+        webview.publish(render(per, None, state=f"SCANNING  down={down_gradian}"))
+
     while True:
         sonar.down_gradian = down_gradian
         t0 = time.time()
-        sweep = sonar.sweep(args.start, args.end, args.step, args.range)
+        sweep = sonar.sweep(args.start, args.end, args.step, args.range,
+                            on_ping=live if args.web else None)
         floor = Floor.from_known_depth(args.assume_floor) if args.assume_floor else None
 
         # No profile: measure everything, judge nothing. This is discovery mode,
