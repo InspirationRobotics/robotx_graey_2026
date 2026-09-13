@@ -6,9 +6,18 @@ happens you can tell straight away whether it is a perception problem or a
 decision problem.
 
 Nothing is stretched to fill space. A thing 3 m away is drawn at the 3 m ring,
-an arc that was never swept stays empty, and each return is drawn one beam step
-wide - not inflated into a round dot, which would make objects look bigger than
-they are.
+and an arc that was never swept stays empty rather than being filled in with a
+guess.
+
+EVERY sample is painted, not just the bright ones. An earlier version drew only
+samples above a threshold, and worse, it used a DIFFERENT threshold from the one
+the detector uses - so a blob could be circled in a part of the picture that had
+been left black, which is impossible to interpret. Weak returns now show as the
+cold end of the colour map, exactly as they do in Ping Viewer.
+
+The whole sweep is warped from polar to cartesian in one operation instead of
+drawing an arc per sample. That is what makes it continuous rather than speckled,
+and it is also far faster.
 
 Angles follow the package convention: 0 right, 90 up, 180 left, 270 down.
 """
@@ -30,8 +39,17 @@ BEST = (90, 255, 150)
 BLIND = (150, 170, 255)
 FLOORC = (120, 110, 200)
 
+# TURBO runs blue -> cyan -> green -> yellow -> red, which is close to what Ping
+# Viewer uses. INFERNO was the old choice and its low end is near-black, so a
+# weak return was indistinguishable from water and everything legible came out
+# orange.
 _LUT = cv2.applyColorMap(np.arange(256, dtype=np.uint8).reshape(-1, 1),
-                         cv2.COLORMAP_INFERNO).reshape(-1, 3)
+                         cv2.COLORMAP_TURBO).reshape(-1, 3)
+
+# Rows in the polar buffer before warping. 1440 is a quarter degree per row,
+# which is finer than the 2 degree beam step, so the warp never has to invent
+# detail the sonar did not measure.
+_POLAR_ROWS = 1440
 
 
 def render(perception, memory=None, state="", radar_size=520, panel_w=580):
@@ -53,22 +71,11 @@ def _radar(p, size):
         return canvas
 
     max_range = sweep.col_to_range_m(sweep.image.shape[1])
-    ppm = (size / 2.0 - margin) / max_range
-    cv2.circle(canvas, (c, c), int(size / 2 - margin), FACE, -1)
+    radius = int(size / 2 - margin)
+    ppm = radius / max_range
+    cv2.circle(canvas, (c, c), radius, FACE, -1)
 
-    # returns, one arc per sample, each one beam step wide
-    floor_noise = max(40, int(sweep.image.mean() + 2.0 * sweep.image.std()))
-    rows, cols = np.where(sweep.image >= floor_noise)
-    step = max(sweep.step_deg, 0.9)
-    for row, col in zip(rows, cols):
-        r_px = sweep.col_to_range_m(col) * ppm
-        if r_px < 2 or r_px > size / 2 - margin:
-            continue
-        ang = sweep.row_to_angle_deg(row)
-        shade = tuple(int(v) for v in _LUT[int(sweep.image[row, col])])
-        # screen angles run clockwise from east, ours run anticlockwise
-        a0 = -ang - step / 2.0
-        cv2.ellipse(canvas, (c, c), (int(r_px), int(r_px)), 0, a0, a0 + step, shade, 2)
+    _paint_returns(canvas, sweep, c, radius)
 
     # range rings
     ring = 1.0 if max_range <= 6 else 2.0
@@ -110,6 +117,50 @@ def _radar(p, size):
     cv2.line(canvas, (c, c - 6), (c, c + 6), INK, 1)
     cv2.line(canvas, (c - 6, c), (c + 6, c), INK, 1)
     return canvas
+
+
+def _paint_returns(canvas, sweep, centre, radius):
+    """Warp the whole sweep from polar to cartesian in one operation.
+
+    sweep.image IS already a polar image - rows are scan angles, columns are
+    range bins - so the only work is resampling it onto a full circle at a fixed
+    angular pitch and handing it to OpenCV.
+
+    OpenCV measures its polar angle clockwise from the +x axis, because image y
+    runs downward. Our angles run anticlockwise from the same axis, so the row
+    index is computed from -angle. Getting this backwards mirrors the picture,
+    which is easy to miss on a symmetric scene, so there is a check for it in
+    sonar_check.py.
+    """
+    n_bins = sweep.image.shape[1]
+    polar = np.zeros((_POLAR_ROWS, n_bins), dtype=np.uint8)
+    swept = np.zeros(_POLAR_ROWS, dtype=bool)
+
+    # Paint the whole wedge each ping covers, not a single row. A 2 degree step
+    # spans 8 rows here, and filling only one would leave unmeasured gaps that
+    # look like structure.
+    half = max(sweep.step_deg, S.BEAM_IN_PLANE_DEG) / 2.0
+    for row, ang in enumerate(sweep.angles_deg):
+        lo = int(math.floor((-ang - half) * _POLAR_ROWS / 360.0))
+        hi = int(math.ceil((-ang + half) * _POLAR_ROWS / 360.0))
+        idx = np.arange(lo, hi + 1) % _POLAR_ROWS
+        polar[idx] = sweep.image[row]
+        swept[idx] = True
+
+    flags = cv2.WARP_INVERSE_MAP + cv2.WARP_POLAR_LINEAR
+    side = 2 * radius
+    disc = cv2.warpPolar(_LUT[polar], (side, side), (radius, radius), radius, flags)
+    seen = cv2.warpPolar(np.repeat(swept.astype(np.uint8)[:, None] * 255, n_bins, 1),
+                         (side, side), (radius, radius), radius, flags)
+
+    # Only inside the circle, and only where the sonar actually looked.
+    inside = np.zeros((side, side), np.uint8)
+    cv2.circle(inside, (radius, radius), radius, 255, -1)
+    mask = (seen > 0) & (inside > 0)
+
+    y0, x0 = centre - radius, centre - radius
+    patch = canvas[y0:y0 + side, x0:x0 + side]
+    patch[mask] = disc[mask]
 
 
 def _dashed_circle(img, centre, radius, colour, dashes=36):
@@ -205,5 +256,5 @@ def _legend(panel, x, y, width):
     cv2.ellipse(panel, (x + 300, y + 2), (7, 7), 0, 180, 300, BLIND, 1)
     cv2.putText(panel, "blind zone", (x + 316, y + 6), cv2.FONT_HERSHEY_SIMPLEX,
                 0.34, DIM, 1, cv2.LINE_AA)
-    cv2.putText(panel, "each arc = one beam step", (x, y + 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.32, DIM, 1, cv2.LINE_AA)
+    cv2.putText(panel, "every sample drawn; cold = weak, hot = strong; dark = never swept",
+                (x, y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.32, DIM, 1, cv2.LINE_AA)

@@ -149,5 +149,42 @@ img = render(p, driver.memory, state=driver.state)
 cv2.imwrite("check_view.png", img)
 check_true("viewer rendered", img.size > 0, f"{img.shape[1]}x{img.shape[0]} -> check_view.png")
 
+# The radar warps polar to cartesian, and OpenCV measures its polar angle the
+# opposite way round from this package. Get that wrong and the whole picture is
+# mirrored - which is invisible on a symmetric scene and ruinous on a real one,
+# so it is worth pinning down rather than eyeballing.
+import math as _mm
+
+import numpy as _np
+
+from robotx_graey_2026.api.sonar.detect import Perception as _Per
+from robotx_graey_2026.api.sonar.sweep import Sweep as _Sw
+from robotx_graey_2026.api.sonar.viewer import _radar as _rad
+
+
+def _drawn_angle(target_deg):
+    """Put a bright band at one angle, return the angle it was drawn at."""
+    angles = [a * 2.0 for a in range(180)]
+
+    def shot(deg):
+        im = _np.zeros((len(angles), 400), _np.uint8)
+        if deg is not None:
+            for r, a in enumerate(angles):
+                if abs((a - deg + 180) % 360 - 180) < 3:
+                    im[r, 200:220] = 255
+        return _rad(_Per(sweep=_Sw(im, angles, metres_per_bin=0.01), candidates=[],
+                         best=None, floor=None, reason="OK"), 520).astype(int)
+
+    diff = _np.abs(shot(target_deg) - shot(None)).sum(axis=2)
+    y, x = _np.unravel_index(_np.argmax(diff), diff.shape)
+    return _mm.degrees(_mm.atan2(260 - y, x - 260)) % 360
+
+
+for _want in (270, 90, 0, 180):
+    _got = _drawn_angle(_want)
+    _err = abs((_got - _want + 180) % 360 - 180)
+    check_true(f"radar draws {_want} deg where it belongs", _err < 6,
+               f"drawn at {_got:.0f} deg")
+
 print(f"\n{sum(results)}/{len(results)} checks passed")
 sys.exit(0 if all(results) else 1)
