@@ -48,7 +48,7 @@ from robotx_graey_2026.api.sonar.detect import perceive
 from robotx_graey_2026.api.sonar.driver import explain
 from robotx_graey_2026.api.sonar.floor import Floor
 from robotx_graey_2026.api.sonar.sweep import Sonar
-from robotx_graey_2026.api.sonar.viewer import render
+from robotx_graey_2026.api.sonar.viewer import Radar, render
 
 
 def main():
@@ -112,19 +112,32 @@ def main():
     down_gradian = args.down_gradian
     tuning = {"threshold": args.threshold}
 
+    # The picture persists across sweeps: each angle keeps its last measurement
+    # until the head comes back round, as in Ping Viewer. Detections shown while
+    # a sweep is in progress are the LAST COMPLETE sweep's, so the rings stay
+    # attached to the picture underneath them instead of vanishing the moment a
+    # new sweep starts and has only seen a few degrees.
+    radar = Radar()
+    shown = [None]
+
     # A sweep takes many seconds, so publish partial frames while the head is
     # still moving. Without this the browser shows one frozen picture and you
     # cannot tell a working sonar from a stalled one.
     def live(partial):
-        per = perceive(partial, profile=None, tuning=tuning, floor=None,
-                       require_floor=False)
-        webview.publish(render(per, None, state=f"SCANNING  down={down_gradian}"))
+        radar.update(partial)
+        per = shown[0]
+        if per is None:
+            per = perceive(partial, profile=None, tuning=tuning, floor=None,
+                           require_floor=False)
+        webview.publish(render(per, None, state=f"SCANNING  down={down_gradian}",
+                               radar=radar))
 
     while True:
         sonar.down_gradian = down_gradian
         t0 = time.time()
         sweep = sonar.sweep(args.start, args.end, args.step, args.range,
                             on_ping=live if args.web else None)
+        radar.update(sweep)
         floor = Floor.from_known_depth(args.assume_floor) if args.assume_floor else None
 
         # No profile: measure everything, judge nothing. This is discovery mode,
@@ -139,12 +152,13 @@ def main():
         per = perceive(sweep, profile=None, tuning=tuning, floor=floor,
                        require_floor=not args.no_floor)
 
+        shown[0] = per
         elapsed = time.time() - t0
         view = None
         if not args.headless:
-            view = render(per, None, state=f"POLE TEST  down={down_gradian}")
-            cv2.putText(view, f"sweep {elapsed:.1f}s", (12, 500),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, (200, 200, 200), 1)
+            view = render(per, None, state=f"POLE TEST  down={down_gradian}", radar=radar)
+            cv2.putText(view, f"sweep {elapsed:.1f}s", (16, view.shape[0] - 18),
+                        cv2.FONT_HERSHEY_DUPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
 
         if args.save_dir and view is not None:
             path = os.path.join(args.save_dir, f"sweep_{int(time.time())}.png")

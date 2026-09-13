@@ -186,5 +186,24 @@ for _want in (270, 90, 0, 180):
     check_true(f"radar draws {_want} deg where it belongs", _err < 6,
                f"drawn at {_got:.0f} deg")
 
+# The picture must survive the start of the next sweep. A sweep is 15-25 s on
+# Graey, so wiping at the end of each one leaves an almost empty disc on screen.
+from robotx_graey_2026.api.sonar.viewer import Radar as _Radar
+
+_angs = [a * 2.0 for a in range(180)]
+_img = _np.zeros((180, 400), _np.uint8)
+_img[:, 200:220] = 200                          # a ring of returns all the way round
+_r = _Radar()
+_r.update(_Sw(_img, _angs, 0.01))
+_blank = _Per(sweep=None, candidates=[], best=None, floor=None, reason="OK")
+_before = _rad(_blank, 520, _r).astype(int)
+_r.update(_Sw(_np.zeros((20, 400), _np.uint8), _angs[:20], 0.01))   # next sweep, 40 deg in
+_after = _rad(_blank, 520, _r).astype(int)
+_changed = (_np.abs(_before - _after).sum(axis=2) > 30).mean()
+check_true("radar keeps the old sweep while the next one starts", _changed < 0.2,
+           f"{_changed:.0%} of the image changed after 40 deg of new data")
+_r.update(_Sw(_np.zeros((180, 200), _np.uint8), _angs, 0.02))
+check_true("radar resets when the range changes", _r.polar.shape[1] == 200)
+
 print(f"\n{sum(results)}/{len(results)} checks passed")
 sys.exit(0 if all(results) else 1)

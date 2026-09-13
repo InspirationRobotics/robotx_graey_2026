@@ -24,15 +24,24 @@ import cv2
 _frame = None
 _lock = threading.Lock()
 
+# Fills the window, keeping the aspect ratio. The frame is rendered large to
+# begin with, so on a laptop this is at or near native size rather than a blurry
+# stretch of a small image.
 PAGE = b"""<html><head><title>Graey sonar</title></head>
-<body style="margin:0;background:#111;text-align:center">
-<img src="/stream" style="max-width:100%"></body></html>"""
+<body style="margin:0;background:#161412;height:100vh;display:flex;
+align-items:center;justify-content:center">
+<img src="/stream" style="width:100vw;height:100vh;object-fit:contain"></body></html>"""
+
+# OpenCV's default is already 95. 98 trims the last of the ringing around thin
+# text and one-pixel rings, and on a tether the extra bytes cost nothing. Most of
+# the sharpness gain came from rendering larger with heavier fonts, not this.
+_QUALITY = [cv2.IMWRITE_JPEG_QUALITY, 98]
 
 
 def publish(frame):
     """Encode a BGR image and hand it to the server."""
     global _frame
-    ok, buf = cv2.imencode('.jpg', frame)
+    ok, buf = cv2.imencode('.jpg', frame, _QUALITY)
     if ok:
         with _lock:
             _frame = buf.tobytes()

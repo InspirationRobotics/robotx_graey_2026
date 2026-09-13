@@ -5,19 +5,30 @@ about it. This shows both, and the state it is in, so when something odd
 happens you can tell straight away whether it is a perception problem or a
 decision problem.
 
-Nothing is stretched to fill space. A thing 3 m away is drawn at the 3 m ring,
-and an arc that was never swept stays empty rather than being filled in with a
-guess.
+Nothing is stretched to fill space. A thing 3 m away is drawn at the 3 m ring.
 
-EVERY sample is painted, not just the bright ones. An earlier version drew only
-samples above a threshold, and worse, it used a DIFFERENT threshold from the one
-the detector uses - so a blob could be circled in a part of the picture that had
-been left black, which is impossible to interpret. Weak returns now show as the
-cold end of the colour map, exactly as they do in Ping Viewer.
+PERSISTENCE. A Radar object keeps the most recent measurement at every angle
+until the head comes round and measures that angle again, the way Ping Viewer
+does. A sweep takes many seconds on this hardware, so wiping the picture at the
+end of each one leaves you staring at a mostly empty disc. Water the head has
+never reached is grey; water it swept and found empty is blue. Those two must
+never look alike.
 
-The whole sweep is warped from polar to cartesian in one operation instead of
-drawing an arc per sample. That is what makes it continuous rather than speckled,
-and it is also far faster.
+WHY THE FLOOR WAS HARD TO SEE. The obvious suspect was that warpPolar squeezes
+~540 range bins into far fewer pixels with NEAREST sampling and skips bins. That
+was measured against a real Graey pool sweep and ruled out: far-field peaks came
+through at 130 of 132, no ray lost more than 25, and only one return in the
+whole sweep was a single bin thick. Real returns are several bins wide, because
+the pulse and beam smear them. Do not "fix" that again.
+
+What hid it, confirmed by rendering the same real sweep through the old and new
+viewers side by side, was two things together. The colour ramp: floor and wall
+returns sit around 120-140, which the old ramp coloured teal on a blue
+background, so they barely separated from water. And size: a 4 m sweep drawn in
+226 px of radius. The ramp below puts 130 in yellow, as Ping Viewer effectively
+does, and the radar is now 860 px. The radial squeeze is still a max-pool, as a
+safety margin for longer ranges where returns thin out, not because it was the
+cause.
 
 Angles follow the package convention: 0 right, 90 up, 180 left, 270 down.
 """
@@ -26,281 +37,302 @@ import math
 import cv2
 import numpy as np
 
-from . import detect as D
 from . import settings as S
 
-BG = (18, 17, 16)
-FACE = (78, 74, 70)         # unswept water: grey, never a ramp colour
-INK = (238, 238, 238)
-DIM = (135, 135, 135)
-GRID = (62, 60, 58)
-HIT = (70, 200, 255)
-BEST = (90, 255, 150)
-BLIND = (150, 170, 255)
-FLOORC = (120, 110, 200)
+# ------------------------------------------------------------------- look
+SIZE = 860                  # radar edge, px. Big enough to read a floor at 4 m.
+PANEL_W = 660
 
+BG = (22, 20, 18)
 SKY = (198, 126, 30)        # BGR. Ping Viewer's background blue.
-MARK = (12, 12, 12)         # near-black, for rings and detection circles
+FACE = (84, 80, 76)         # water the head has never reached
+INK = (240, 240, 240)
+DIM = (150, 150, 150)
+GRID = (70, 66, 62)
+MARK = (10, 10, 10)         # rings and detections on the radar
+HEAD = (255, 255, 255)
 
-# Ping Viewer's own ramp, near enough: mid blue for water, then cyan, green,
-# yellow, orange, dark red for the hardest returns. Built by hand rather than
-# taken from an OpenCV map because every stock map either starts near black
-# (INFERNO, TURBO) or ends somewhere that reads as "weak" on a bright field.
-_STOPS = [(0, (168, 96, 20)), (40, (176, 140, 24)), (90, (168, 190, 40)),
-          (140, (80, 200, 70)), (190, (60, 232, 226)), (225, (40, 150, 240)),
-          (255, (30, 30, 190))]
+FONT = cv2.FONT_HERSHEY_DUPLEX   # heavier strokes than SIMPLEX; survives JPEG
+
+# Ping Viewer's ramp, set against a real Graey sweep rather than guessed: in the
+# pool the median sample was 36 and the top tenth started at 120. So 36 sits in
+# plain blue, and 120 is already yellow - which is where a floor or wall lands,
+# and why it stands out in Ping Viewer.  (value, RGB)
+_STOPS = [(0, (18, 60, 140)), (36, (30, 110, 195)), (70, (40, 180, 205)),
+          (100, (60, 205, 95)), (130, (235, 228, 50)), (180, (242, 140, 30)),
+          (255, (185, 25, 25))]
 
 
 def _ramp():
     lut = np.zeros((256, 3), np.uint8)
     for (v0, c0), (v1, c1) in zip(_STOPS, _STOPS[1:]):
-        n = v1 - v0
         for ch in range(3):
-            lut[v0:v1 + 1, ch] = np.linspace(c0[ch], c1[ch], n + 1)
+            # stops are RGB, OpenCV wants BGR
+            lut[v0:v1 + 1, 2 - ch] = np.linspace(c0[ch], c1[ch], v1 - v0 + 1)
     return lut
 
 
 _LUT = _ramp()
 
-# Rows in the polar buffer before warping. 1440 is a quarter degree per row,
-# so a 2 degree beam step spans 8 rows and the warp has room to blend between
-# pings instead of stamping hard wedges.
+# Rows in the polar buffer. A quarter degree each, so a 2 degree ping covers 8.
 _POLAR_ROWS = 1440
 
 
-def render(perception, memory=None, state="", radar_size=520, panel_w=580):
-    radar = _radar(perception, radar_size)
-    panel = _panel(perception, memory, state, panel_w, radar_size)
-    return np.hstack([radar, panel])
+class Radar:
+    """The picture, kept between frames.
+
+    update() writes each ping's samples across the rows its beam covers. Nothing
+    is ever cleared except when the range setting changes, because then the old
+    samples are at a different scale and would be drawn at the wrong distance.
+    """
+
+    def __init__(self):
+        self.polar = None
+        self.swept = None
+        self.metres_per_bin = None
+        self.head_deg = None
+
+    def update(self, sweep):
+        if sweep is None or sweep.image.size == 0:
+            return
+        n_bins = sweep.image.shape[1]
+        if (self.polar is None or self.polar.shape[1] != n_bins
+                or self.metres_per_bin != sweep.metres_per_bin):
+            self.polar = np.zeros((_POLAR_ROWS, n_bins), np.uint8)
+            self.swept = np.zeros(_POLAR_ROWS, bool)
+            self.metres_per_bin = sweep.metres_per_bin
+
+        # OpenCV measures polar angle clockwise, this package anticlockwise, so
+        # rows are laid down against -angle. sonar_check.py pins this down.
+        half = max(sweep.step_deg, S.BEAM_IN_PLANE_DEG) / 2.0
+        for row, ang in enumerate(sweep.angles_deg):
+            lo = int(math.floor((-ang - half) * _POLAR_ROWS / 360.0))
+            hi = int(math.ceil((-ang + half) * _POLAR_ROWS / 360.0))
+            idx = np.arange(lo, hi) % _POLAR_ROWS
+            self.polar[idx] = sweep.image[row]
+            self.swept[idx] = True
+        self.head_deg = sweep.angles_deg[-1]
+
+    @property
+    def max_range_m(self):
+        return self.polar.shape[1] * self.metres_per_bin
+
+
+def render(perception, memory=None, state="", radar=None, size=SIZE, panel_w=PANEL_W):
+    """Radar beside the numbers.
+
+    Pass a Radar to keep the picture between calls. Without one, the radar shows
+    only this perception's sweep - which is what the checks and one-off renders
+    want.
+    """
+    return np.hstack([_radar(perception, size, radar),
+                      _panel(perception, memory, state, panel_w, size)])
+
+
+def _text(img, s, org, scale, colour, thick=1, halo=None):
+    if halo is not None:
+        cv2.putText(img, s, org, FONT, scale, halo, thick + 3, cv2.LINE_AA)
+    cv2.putText(img, s, org, FONT, scale, colour, thick, cv2.LINE_AA)
 
 
 def _to_screen(centre, angle_deg, r_px):
     a = math.radians(angle_deg)
-    return (int(centre + r_px * math.cos(a)), int(centre - r_px * math.sin(a)))
+    return (int(round(centre + r_px * math.cos(a))),
+            int(round(centre - r_px * math.sin(a))))
 
 
-def _radar(p, size):
-    canvas = np.full((size, size, 3), SKY, dtype=np.uint8)
-    c, margin = size // 2, 34
-    sweep = p.sweep
-    if sweep is None or sweep.image.size == 0:
+def _radar(p, size, radar=None):
+    canvas = np.full((size, size, 3), SKY, np.uint8)
+    if radar is None:
+        radar = Radar()
+        radar.update(p.sweep)
+    if radar.polar is None:
         return canvas
 
-    max_range = sweep.col_to_range_m(sweep.image.shape[1])
-    radius = int(size / 2 - margin)
+    c = size // 2
+    margin = int(size * 0.065)
+    radius = c - margin
+    max_range = radar.max_range_m
     ppm = radius / max_range
-    # Deliberately NOT the cold end of the ramp. Water the head has not reached
-    # yet has to look different from water it swept and found empty, or a
-    # half-finished sweep is indistinguishable from a clear picture.
-    cv2.circle(canvas, (c, c), radius, FACE, -1)
 
-    _paint_returns(canvas, sweep, c, radius)
+    cv2.circle(canvas, (c, c), radius, FACE, -1, cv2.LINE_AA)
+    _paint(canvas, radar, c, radius)
 
-    # range rings
-    ring = 1.0 if max_range <= 6 else 2.0
+    ring = 0.5 if max_range <= 2.5 else (1.0 if max_range <= 6 else 2.0)
     r = ring
     while r <= max_range + 1e-6:
-        cv2.circle(canvas, (c, c), int(r * ppm), MARK, 1)
-        # just inside the ring and left of centre, clear of the "up" marker
-        cv2.putText(canvas, f"{r:.0f}m", (c - 46, c - int(r * ppm) + 14),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.34, MARK, 1, cv2.LINE_AA)
+        cv2.circle(canvas, (c, c), int(r * ppm), MARK, 1, cv2.LINE_AA)
+        label = f"{r:g} m"
+        _text(canvas, label, (c + 6, c - int(r * ppm) + 18), 0.5, MARK, 1, halo=INK)
         r += ring
 
     for ang, txt in ((0, "right"), (90, "up"), (180, "left"), (270, "down")):
-        x, y = _to_screen(c, ang, size / 2 - margin + 16)
-        (tw, th), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 0.36, 1)
-        cv2.putText(canvas, txt, (x - tw // 2, y + th // 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.36, INK, 1, cv2.LINE_AA)
+        x, y = _to_screen(c, ang, radius + margin * 0.55)
+        (tw, th), _ = cv2.getTextSize(txt, FONT, 0.65, 1)
+        _text(canvas, txt, (x - tw // 2, y + th // 2), 0.65, INK, 1)
 
-    # Where the transducer is pointing right now. On a partial sweep this is the
-    # live edge, so it sits at the boundary between painted and unpainted water
-    # and shows the head moving.
-    hx, hy = _to_screen(c, sweep.angles_deg[-1], radius)
-    cv2.line(canvas, (c, c), (hx, hy), (255, 255, 255), 1, cv2.LINE_AA)
-
-    # the detected floor, drawn as the arc it was measured at
     if p.floor is not None:
         pts = []
-        for ang in range(180, 361, 3):
+        for ang in range(180, 361, 2):
             fr = p.floor.range_at(ang % 360)
-            if fr is None or fr > max_range:
-                continue
-            pts.append(_to_screen(c, ang % 360, fr * ppm))
+            if fr is not None and fr <= max_range:
+                pts.append(_to_screen(c, ang % 360, fr * ppm))
         for a, b in zip(pts, pts[1:]):
-            cv2.line(canvas, a, b, FLOORC, 1)
+            cv2.line(canvas, a, b, MARK, 1, cv2.LINE_AA)
 
-    # blind zone
-    _dashed_circle(canvas, (c, c), int(S.MIN_RANGE_M * ppm), BLIND)
+    _dashed_circle(canvas, (c, c), int(S.MIN_RANGE_M * ppm), MARK)
 
-    # Black on the colour ramp. Nothing in the ramp is dark, so a black ring
-    # reads as an annotation rather than as another return - which a bright ring
-    # did not, when it sat on top of a bright patch.
+    if radar.head_deg is not None:
+        cv2.line(canvas, (c, c), _to_screen(c, radar.head_deg, radius), HEAD, 2, cv2.LINE_AA)
+
+    # Thin black rings: nothing in the ramp is black, so they read as
+    # annotation, and at one pixel they do not hide what they are pointing at.
     for i, d in enumerate(p.candidates):
         x, y = _to_screen(c, d.angle_deg, d.range_m * ppm)
-        cv2.circle(canvas, (x, y), 12, MARK, 2, cv2.LINE_AA)
+        cv2.circle(canvas, (x, y), 14, MARK, 1, cv2.LINE_AA)
         if d is p.best:
-            cv2.circle(canvas, (x, y), 16, MARK, 1, cv2.LINE_AA)
-        cv2.putText(canvas, str(i), (x + 15, y - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, MARK, 2, cv2.LINE_AA)
+            cv2.circle(canvas, (x, y), 19, MARK, 1, cv2.LINE_AA)
+        _text(canvas, str(i), (x + 16, y - 12), 0.5, MARK, 1, halo=INK)
 
-    cv2.line(canvas, (c, c - 6), (c, c + 6), MARK, 1)
-    cv2.line(canvas, (c - 6, c), (c + 6, c), MARK, 1)
+    cv2.drawMarker(canvas, (c, c), MARK, cv2.MARKER_CROSS, 12, 1, cv2.LINE_AA)
     return canvas
 
 
-def _paint_returns(canvas, sweep, centre, radius):
-    """Warp the whole sweep from polar to cartesian in one operation.
+def _paint(canvas, radar, centre, radius):
+    """Warp the kept picture from polar to cartesian and lay it on the canvas."""
+    polar = radar.polar
+    n_bins = polar.shape[1]
 
-    sweep.image IS already a polar image - rows are scan angles, columns are
-    range bins - so the only work is resampling it onto a full circle at a fixed
-    angular pitch and handing it to OpenCV.
+    # Blend neighbouring pings a little. The beam is 2 degrees wide, so this
+    # removes the hard wedge edges without blurring anything it actually resolved.
+    k = 5
+    wrapped = np.concatenate([polar[-k:], polar, polar[:k]])
+    polar = cv2.blur(wrapped, (1, k))[k:-k]
 
-    The resample is a LINEAR resize rather than stamping each ping across the
-    rows it covers. Stamping gives hard-edged wedges, which is what made the
-    display look blocky; resizing blends between neighbouring pings the way Ping
-    Viewer does. It invents nothing the beam did not already smear together - the
-    beam is 2 degrees wide and the step is 2 degrees, so adjacent pings genuinely
-    do overlap.
+    # Squeeze range bins down to pixels by keeping the BRIGHTEST in each group.
+    if n_bins > radius:
+        kx = int(math.ceil(n_bins / radius))
+        polar = cv2.dilate(polar, np.ones((1, kx), np.uint8))
+        polar = cv2.resize(polar, (radius, _POLAR_ROWS), interpolation=cv2.INTER_AREA)
+    cols = polar.shape[1]
 
-    OpenCV measures its polar angle clockwise from the +x axis, because image y
-    runs downward. Our angles run anticlockwise from the same axis, so the rows
-    are laid down against -angle. Getting this backwards mirrors the picture,
-    which is easy to miss on a symmetric scene, so sonar_check.py pins it down.
-    """
-    n_bins = sweep.image.shape[1]
-    angs = np.asarray(sweep.angles_deg, dtype=float)
-    step = sweep.step_deg
-    half = step / 2.0
-
-    # How much of the circle this sweep covers, unwrapped so an arc crossing 360
-    # stays monotonic.
-    span = float((angs[-1] - angs[0]) % 360.0) if len(angs) > 1 else 0.0
-    arc = span + step
-    rows = max(2, int(round(arc / 360.0 * _POLAR_ROWS)))
-
-    strip = cv2.resize(sweep.image, (n_bins, rows), interpolation=cv2.INTER_LINEAR)
-    # Index 0 of the flipped strip is the HIGHEST angle, which is the LOWEST row
-    # once angles are negated.
-    strip = np.flipud(strip)
-    start = int(round(((-(angs[0] + span + half)) % 360.0) * _POLAR_ROWS / 360.0))
-    idx = (np.arange(rows) + start) % _POLAR_ROWS
-
-    polar = np.zeros((_POLAR_ROWS, n_bins), dtype=np.uint8)
-    swept = np.zeros(_POLAR_ROWS, dtype=bool)
-    polar[idx] = strip
-    swept[idx] = True
-
-    flags = cv2.WARP_INVERSE_MAP + cv2.WARP_POLAR_LINEAR
     side = 2 * radius
-    disc = cv2.warpPolar(_LUT[polar], (side, side), (radius, radius), radius, flags)
-    seen = cv2.warpPolar(np.repeat(swept.astype(np.uint8)[:, None] * 255, n_bins, 1),
-                         (side, side), (radius, radius), radius, flags)
+    flags = cv2.WARP_INVERSE_MAP + cv2.WARP_POLAR_LINEAR + cv2.INTER_LINEAR
+    intensity = cv2.warpPolar(polar, (side, side), (radius, radius), radius, flags)
+    swept = np.repeat(radar.swept.astype(np.uint8)[:, None] * 255, cols, 1)
+    seen = cv2.warpPolar(swept, (side, side), (radius, radius), radius,
+                         cv2.WARP_INVERSE_MAP + cv2.WARP_POLAR_LINEAR)
 
-    # Only inside the circle, and only where the sonar actually looked.
     inside = np.zeros((side, side), np.uint8)
     cv2.circle(inside, (radius, radius), radius, 255, -1)
     mask = (seen > 0) & (inside > 0)
 
-    y0, x0 = centre - radius, centre - radius
+    y0 = x0 = centre - radius
     patch = canvas[y0:y0 + side, x0:x0 + side]
-    patch[mask] = disc[mask]
+    # Ramp applied AFTER the warp, so every pixel is a true ramp colour rather
+    # than a blend of two colours the ramp never produces.
+    patch[mask] = _LUT[intensity][mask]
 
 
-def _dashed_circle(img, centre, radius, colour, dashes=36):
+def _dashed_circle(img, centre, radius, colour, dashes=40):
     if radius < 3:
         return
     for k in range(0, dashes, 2):
         a0 = (360.0 / dashes) * k
-        cv2.ellipse(img, centre, (radius, radius), 0, a0, a0 + 360.0 / dashes, colour, 1)
+        cv2.ellipse(img, centre, (radius, radius), 0, a0, a0 + 360.0 / dashes,
+                    colour, 1, cv2.LINE_AA)
 
 
 def _panel(p, memory, state, width, height):
-    panel = np.full((height, width, 3), BG, dtype=np.uint8)
-    y = 30
+    panel = np.full((height, width, 3), BG, np.uint8)
+    L = 22
+    y = 48
 
-    cv2.putText(panel, state or "-", (14, y), cv2.FONT_HERSHEY_SIMPLEX,
-                0.72, BEST if p.found else INK, 2, cv2.LINE_AA)
-    y += 26
+    _text(panel, state or "-", (L, y), 1.0, INK, 1)
+    y += 38
     from .driver import explain
-    cv2.putText(panel, explain(p), (14, y), cv2.FONT_HERSHEY_SIMPLEX,
-                0.40, DIM, 1, cv2.LINE_AA)
-    y += 30
-
+    _text(panel, explain(p), (L, y), 0.55, DIM)
+    y += 34
     floor_txt = "floor: not found" if p.floor is None else (
-        f"floor: {p.floor.depth_m:.2f} m below  (agreement {p.floor.confidence:.0%})")
-    cv2.putText(panel, floor_txt, (14, y), cv2.FONT_HERSHEY_SIMPLEX, 0.42,
-                INK if p.floor else DIM, 1, cv2.LINE_AA)
-    y += 30
+        f"floor: {p.floor.depth_m:.2f} m below   agreement {p.floor.confidence:.0%}")
+    _text(panel, floor_txt, (L, y), 0.6, INK if p.floor else DIM)
+    y += 40
 
-    cv2.line(panel, (14, y - 12), (width - 14, y - 12), GRID, 1)
-    labels = ["#", "range", "offset", "height", "span", "bright", "solid", "score"]
-    xs = [14, 44, 110, 186, 262, 326, 400, 470]
+    cv2.line(panel, (L, y - 22), (width - L, y - 22), GRID, 1)
+    labels = ["#", "range", "offset", "height", "span", "bright", "solid"]
+    xs = [L, 62, 160, 270, 380, 470, 565]
     for x, lab in zip(xs, labels):
-        cv2.putText(panel, lab, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.36, DIM, 1, cv2.LINE_AA)
-    y += 22
+        _text(panel, lab, (x, y), 0.52, DIM)
+    y += 34
 
     if not p.candidates:
-        cv2.putText(panel, "no candidates", (14, y + 6), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.42, DIM, 1, cv2.LINE_AA)
-        y += 34
+        _text(panel, "no detections", (L, y), 0.6, DIM)
+        y += 40
     else:
-        for i, d in enumerate(p.candidates[:5]):
-            colour = BEST if d is p.best else INK
+        for i, d in enumerate(p.candidates[:8]):
             cells = [str(i), f"{d.range_m:.2f}m", f"{d.offset_m:+.2f}m",
                      "-" if d.height_m is None else f"{d.height_m:.2f}m",
-                     f"{d.span_deg:.0f}d",
-                     f"{d.brightness:.0f}", f"{d.solidity:.2f}",
-                     "-" if d.score is None else f"{d.score:.2f}"]
+                     f"{d.span_deg:.0f}°".replace("°", " deg"),
+                     f"{d.brightness:.0f}", f"{d.solidity:.2f}"]
+            colour = INK if d is not p.best else (120, 240, 150)
             for x, cell in zip(xs, cells):
-                cv2.putText(panel, cell, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.38,
-                            colour, 1, cv2.LINE_AA)
-            if d.scores:
-                parts = "  ".join(f"{k.replace('_m','').replace('_deg','')} {v:.2f}"
-                                  for k, v in d.scores.items())
-                cv2.putText(panel, parts, (44, y + 12), cv2.FONT_HERSHEY_SIMPLEX,
-                            0.30, DIM, 1, cv2.LINE_AA)
-            y += 30
+                _text(panel, cell, (x, y), 0.55, colour)
+            y += 32
+        if len(p.candidates) > 8:
+            _text(panel, f"+ {len(p.candidates) - 8} more", (L, y), 0.5, DIM)
+            y += 32
 
     if p.best is not None:
-        y += 8
-        cv2.putText(panel, f"orientation: {p.best.orientation}", (14, y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.46, BEST, 1, cv2.LINE_AA)
-        y += 24
+        y += 6
+        _text(panel, f"orientation: {p.best.orientation}", (L, y), 0.6, (120, 240, 150))
+        y += 34
 
     if memory is not None:
         slope = memory.offset_slope()
         bend = memory.bend()
-        lines = [
-            f"misses: {memory.misses}   centred: {memory.centred}",
-            "drift: -" if slope is None else f"drift: {slope:+.3f} m/sweep",
-            f"bend: {bend or '-'}",
-        ]
-        for line in lines:
-            cv2.putText(panel, line, (14, y), cv2.FONT_HERSHEY_SIMPLEX, 0.40,
-                        BEST if bend and "bend" in line else DIM, 1, cv2.LINE_AA)
-            y += 20
+        for line in (f"misses {memory.misses}    centred {memory.centred}",
+                     "drift -" if slope is None else f"drift {slope:+.3f} m per sweep",
+                     f"bend {bend or '-'}"):
+            _text(panel, line, (L, y), 0.55, DIM)
+            y += 28
 
-    _legend(panel, 14, height - 74, width)
+    _legend(panel, L, height - 190, width)
     return panel
 
 
 def _legend(panel, x, y, width):
-    """Annotations are black on the radar. They are drawn light here because
-    this panel is dark - what matters is the shape, not the colour."""
-    cv2.line(panel, (14, y - 14), (width - 14, y - 14), GRID, 1)
-    cv2.circle(panel, (x + 8, y + 2), 5, DIM, 1, cv2.LINE_AA)
-    cv2.circle(panel, (x + 8, y + 2), 8, DIM, 1, cv2.LINE_AA)
-    cv2.putText(panel, "best match", (x + 24, y + 6), cv2.FONT_HERSHEY_SIMPLEX,
-                0.34, DIM, 1, cv2.LINE_AA)
-    cv2.circle(panel, (x + 132, y + 2), 7, DIM, 1, cv2.LINE_AA)
-    cv2.putText(panel, "other", (x + 148, y + 6), cv2.FONT_HERSHEY_SIMPLEX,
-                0.34, DIM, 1, cv2.LINE_AA)
-    cv2.line(panel, (x + 210, y + 2), (x + 232, y + 2), INK, 1)
-    cv2.putText(panel, "head", (x + 238, y + 6), cv2.FONT_HERSHEY_SIMPLEX,
-                0.34, DIM, 1, cv2.LINE_AA)
-    cv2.ellipse(panel, (x + 300, y + 2), (7, 7), 0, 0, 120, DIM, 1)
-    cv2.ellipse(panel, (x + 300, y + 2), (7, 7), 0, 180, 300, DIM, 1)
-    cv2.putText(panel, "blind zone", (x + 316, y + 6), cv2.FONT_HERSHEY_SIMPLEX,
-                0.34, DIM, 1, cv2.LINE_AA)
-    cv2.putText(panel, "every sample drawn; blue = weak, red = strong; grey = never swept",
-                (x, y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.32, DIM, 1, cv2.LINE_AA)
+    """Swatches are drawn on the radar's own colours, so each symbol looks here
+    exactly as it does on the radar."""
+    cv2.line(panel, (x, y - 20), (width - x, y - 20), GRID, 1)
+
+    # colour ramp
+    bar_w, bar_h = width - 2 * x - 150, 18
+    bar = np.repeat(_LUT[np.linspace(0, 255, bar_w).astype(np.uint8)][None, :, :], bar_h, 0)
+    panel[y:y + bar_h, x:x + bar_w] = bar
+    _text(panel, "weak", (x, y + bar_h + 22), 0.5, DIM)
+    (tw, _), _ = cv2.getTextSize("strong", FONT, 0.5, 1)
+    _text(panel, "strong", (x + bar_w - tw, y + bar_h + 22), 0.5, DIM)
+    cv2.rectangle(panel, (x + bar_w + 24, y), (x + bar_w + 24 + bar_h, y + bar_h), FACE, -1)
+    _text(panel, "not swept", (x + bar_w + 50, y + 15), 0.5, DIM)
+
+    # symbols, each on a patch of radar blue
+    y2 = y + 80
+    items = [("detection", "ring"), ("best match", "double"),
+             ("sonar head", "head"), ("blind zone", "dash")]
+    col = (width - 2 * x) // 2
+    for n, (label, kind) in enumerate(items):
+        cx = x + (n % 2) * col
+        cy = y2 + (n // 2) * 44
+        sw = (cx, cy - 16, cx + 36, cy + 16)
+        panel[sw[1]:sw[3], sw[0]:sw[2]] = _LUT[36]
+        mid = (cx + 18, cy)
+        if kind == "ring":
+            cv2.circle(panel, mid, 10, MARK, 1, cv2.LINE_AA)
+        elif kind == "double":
+            cv2.circle(panel, mid, 8, MARK, 1, cv2.LINE_AA)
+            cv2.circle(panel, mid, 13, MARK, 1, cv2.LINE_AA)
+        elif kind == "head":
+            cv2.line(panel, (cx + 4, cy + 10), (cx + 32, cy - 10), HEAD, 2, cv2.LINE_AA)
+        else:
+            _dashed_circle(panel, mid, 11, MARK, dashes=16)
+        _text(panel, label, (cx + 50, cy + 7), 0.55, INK)
