@@ -57,8 +57,16 @@ MAX_STEP_M = 1.0        # refuse to command a jump bigger than this, whatever
                         # a three-metre lunge.
 
 
-def refresh_pose(link, pose, timeout=POSE_TIMEOUT_S):
-    """Drain MAVLink until we have a fresh position and attitude."""
+def refresh_pose(link, pose, timeout=POSE_TIMEOUT_S, need_pos=True):
+    """Drain MAVLink until we have a fresh attitude, and a position if needed.
+
+    need_pos is False for a dry run. Position is used for exactly one thing,
+    turning a body-frame move into an absolute NED target, and a dry run never
+    sends one. Demanding it anyway made the tool unrunnable wherever the EKF has
+    no position fix - on the bench, and in water too shallow for the DVL to
+    lock - which is precisely where you want to rehearse the state machine.
+    ATTITUDE comes straight off the IMU and is always there.
+    """
     def handle(kind, m):
         if kind == 'LOCAL_POSITION_NED':
             pose['pos'] = (m.x, m.y, m.z)
@@ -67,11 +75,13 @@ def refresh_pose(link, pose, timeout=POSE_TIMEOUT_S):
 
     t0 = time.time()
     pose['pos'] = pose['yaw'] = None
-    while (pose['pos'] is None or pose['yaw'] is None) and time.time() - t0 < timeout:
+    while time.time() - t0 < timeout:
+        if pose['yaw'] is not None and (pose['pos'] is not None or not need_pos):
+            break
         link.heartbeat()                    # MAVProxy will not route to us first
         link.drain(handle)
         time.sleep(0.05)
-    return pose['pos'] is not None and pose['yaw'] is not None
+    return pose['yaw'] is not None and (pose['pos'] is not None or not need_pos)
 
 
 def action_to_target(action, n, e, down, yaw):
@@ -125,8 +135,15 @@ def main():
     link = Link(args.mavlink, 191)
     pose = {'pos': None, 'yaw': None}
 
-    if not refresh_pose(link, pose):
-        sys.exit("no position/attitude - is MAVProxy running?")
+    # A dry run needs heading only. --live needs position too, because that is
+    # what an absolute NED setpoint is built from.
+    need_pos = args.live
+    if not refresh_pose(link, pose, need_pos=need_pos):
+        if pose['yaw'] is None:
+            sys.exit("no ATTITUDE - is MAVProxy running, and is 14553 free?")
+        sys.exit("no LOCAL_POSITION_NED - the EKF has no position fix. The DVL "
+                 "feeds it, so check the DVL is reachable and dvl_node and "
+                 "nav_ekf_bridge are up. Drop --live to rehearse without it.")
 
     driver = Driver(profile=S.PIPELINE_PROFILE,
                     start_heading_deg=math.degrees(pose['yaw']))
@@ -138,16 +155,20 @@ def main():
     print(f"[INFO] {mode}")
     if args.live:
         print("[INFO] vehicle must already be in GUIDED and ARMED")
+    elif pose['pos'] is None:
+        print("[INFO] no position fix; heading only. The NED figures below are "
+              "measured from an assumed origin and mean nothing in absolute "
+              "terms - the state machine and the moves it picks are still real.")
 
     tuning = {"threshold": args.threshold}
     target = None
     last_send = 0.0
 
     for i in range(args.max_sweeps):
-        if not refresh_pose(link, pose):
-            print("[WARN] lost position - holding")
+        if not refresh_pose(link, pose, need_pos=need_pos):
+            print("[WARN] lost pose - holding")
             continue
-        n, e, down = pose['pos']
+        n, e, down = pose['pos'] or (0.0, 0.0, 0.0)
         yaw = pose['yaw']
         heading_deg = math.degrees(yaw) % 360.0
 
