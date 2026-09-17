@@ -38,10 +38,29 @@ MIN_RANGE_M = 0.75          # near-field blanking. Inside this the sonar is
                             # still hearing its own transmit pulse.
 
 # THE calibration constant. Which hardware gradian points straight down.
-# Calibrate by aiming at the floor and seeing which gradian lights up, or by
-# putting a target directly below. Every angle this package reports is
-# measured from here, so if the whole picture looks rotated, change this.
-DOWN_GRADIAN = 0
+# Every angle this package reports is measured from here, so if the whole
+# picture looks rotated, this is why.
+#
+# HOW TO MEASURE IT. Stand a vertical pole in the water a couple of metres off
+# the sub's beam, with the sub upright. A vertical pole cuts the scan plane
+# whatever depth the sonar sits at, so nothing has to be measured or matched.
+# Off the starboard side it must read bearing 0, off port 180. Then
+#
+#     DOWN_GRADIAN = (reported bearing - expected) / 0.9,  mod 400
+#
+# Do BOTH sides and average. The pole spans the water column, so the detection's
+# centre sits wherever the pole returns strongest rather than exactly on the
+# horizontal, and that bias tilts the answer one way to starboard and the other
+# way to port. One side alone is worth about ten degrees of error.
+#
+# DO NOT calibrate off the floor, which is what this comment used to advise. The
+# floor detector only finds a flat surface, and in a pool a wall is just as flat.
+# It reported a confident "floor" that was a wall, and agreed with itself at the
+# wrong rotation. A reference you placed yourself is the only honest one.
+#
+# 111 measured 16 Sep 2026 in the pool, starboard side only, so treat it as
+# provisional to about ten degrees until the port-side reading is averaged in.
+DOWN_GRADIAN = 111
 
 # --------------------------------------------------------- sweep per state
 # Each state gets its own arc, step and range, because they want different
