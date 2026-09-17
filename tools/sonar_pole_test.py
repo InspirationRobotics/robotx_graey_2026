@@ -38,6 +38,7 @@ the one on Onyx, which runs ROS 1.
 """
 import argparse
 import os
+import sys
 import time
 
 import cv2
@@ -52,6 +53,12 @@ from robotx_graey_2026.api.sonar.viewer import Radar, render
 
 
 def main():
+    # Line-buffer stdout so each sweep prints as it finishes even when piped
+    # into tee. Python block-buffers a pipe by default, and since one sweep is
+    # only a few hundred bytes the terminal stays blank for dozens of them,
+    # which looks exactly like a stalled sonar.
+    sys.stdout.reconfigure(line_buffering=True)
+
     p = argparse.ArgumentParser()
     p.add_argument("--udp", help="host:port of pingproxy, e.g. 127.0.0.1:9092")
     p.add_argument("--device", help="serial by-id path, if not using pingproxy")
