@@ -15,6 +15,14 @@ empty radar with a full table underneath means "you have not said what you are
 looking for", not "nothing is out there". What counts as a match is set entirely
 by the target you pass to perceive(); see library.resolve().
 
+THE OUTLINE IS THE WHOLE ANNOTATION. Nothing is drawn for a detection but the
+shape of its own return, coloured by how well it matched, with a thicker line
+for the winner. No numbers, no percentages, no circle around it: every figure
+the radar could print is already in the table beside it, one row per blob, and
+printing them twice buried the picture under its own annotation. A blob you
+pick by hand is drawn magenta with its row number - the only text on the disc,
+and only when you ask for it.
+
 PERSISTENCE. A Radar object keeps the most recent measurement at every angle
 until the head comes round and measures that angle again, the way Ping Viewer
 does. A sweep takes many seconds on this hardware, so wiping the picture at the
@@ -259,29 +267,27 @@ def _radar(p, size, radar=None, selected=()):
     # about and nothing is drawn. An empty radar here means "you have not said
     # what you are looking for", not "nothing is there"; the table still lists
     # every blob and its numbers.
+    #
+    # THE OUTLINE IS THE WHOLE ANNOTATION. No text, no circle round it, nothing
+    # but the shape of the return itself in a colour that says how well it
+    # matched. Each one used to carry "3  68%" as well, which is the same thing
+    # the table already says one row per blob, and eleven of those on a
+    # reverberant sweep buried the picture they were annotating - and made the
+    # frame need rendering larger just to stay readable, which costs CPU on the
+    # Jetson and bytes down the tether for a duplicate.
+    #
+    # A small blob therefore draws a small outline, with nothing added to catch
+    # the eye. That is the honest picture: a small return IS small. When you
+    # need to find a particular one, click its button and it is drawn magenta
+    # with its row number.
     for i, d in enumerate(p.candidates):
         if d.score is None:
             continue
-        shade = confidence_colour(d.score)
-        weight = 2 if d is p.best else 1
-        x, y = _to_screen(c, d.angle_deg, d.range_m * ppm)
-
         poly = _outline(p, d, c, ppm)
-        big = False
-        if poly is not None and len(poly) >= 3:
-            cv2.polylines(canvas, [poly], True, shade, weight, cv2.LINE_AA)
-            big = max(np.ptp(poly[:, 0]), np.ptp(poly[:, 1])) >= 20
-        if not big:
-            # Small things need something to catch the eye, or a two-pixel
-            # smudge on a busy radar is invisible. Big ones already have their
-            # own shape and a circle round it would only hide the ends.
-            cv2.circle(canvas, (x, y), 14, shade, weight, cv2.LINE_AA)
-        # Halo picked to contrast with the ring, not fixed. A pale ring
-        # meaning "barely a match" was being drawn in near-white on a white
-        # halo, so a radar where NOTHING matched turned into a wall of
-        # unreadable white labels - at the moment you most need to read them.
-        _text(canvas, f"{i}  {d.confidence}%", (x + 16, y - 14), 0.5, shade, 1,
-              halo=INK if sum(shade) < 384 else MARK)
+        if poly is None or len(poly) < 3:
+            continue
+        cv2.polylines(canvas, [poly], True, confidence_colour(d.score),
+                      2 if d is p.best else 1, cv2.LINE_AA)
 
     # Hand-picked candidates, drawn last so nothing covers them, and drawn
     # whether or not they were scored. A box round a long thing and a circle
@@ -299,6 +305,7 @@ def _radar(p, size, radar=None, selected=()):
             cv2.polylines(canvas, [box], True, HILITE, 2, cv2.LINE_AA)
         else:
             cv2.circle(canvas, (x, y), 17, HILITE, 2, cv2.LINE_AA)
+        # The only text on the disc, and only when you asked for it.
         _text(canvas, str(i), (x + 20, y + 24), 0.6, HILITE, 1, halo=MARK)
 
     cv2.drawMarker(canvas, (c, c), MARK, cv2.MARKER_CROSS, 12, 1, cv2.LINE_AA)
@@ -526,7 +533,8 @@ def _legend(panel, x, y, width):
     # symbols, each on a patch of radar blue
     y2 = y + 82
     items = [("outline = real shape", "shape"), ("best match: thicker", "thick"),
-             ("sonar head", "head"), ("blind zone", "dash")]
+             ("picked: numbered", "pick"), ("sonar head", "head"),
+             ("blind zone", "dash")]
     col = (width - 2 * x) // 2
     for n, (label, kind) in enumerate(items):
         cx = x + (n % 2) * col
@@ -540,6 +548,8 @@ def _legend(panel, x, y, width):
                                            np.int32)], True, CONF_SURE, 1, cv2.LINE_AA)
         elif kind == "thick":
             cv2.circle(panel, mid, 11, CONF_SURE, 2, cv2.LINE_AA)
+        elif kind == "pick":
+            cv2.circle(panel, mid, 11, HILITE, 2, cv2.LINE_AA)
         elif kind == "head":
             cv2.line(panel, (cx + 4, cy + 10), (cx + 32, cy - 10), HEAD, 2, cv2.LINE_AA)
         else:

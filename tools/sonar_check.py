@@ -360,13 +360,22 @@ check_true("without a target, best is left empty", _blind.best is None)
 # blind-zone dashes are black furniture and swamp any ring. Compare against the
 # SAME radar with the candidate list emptied, so the only pixels that can differ
 # are the ones a candidate put there.
+# Compared with a tolerance, not exactly. OpenCV's resize is threaded and not
+# bit-exact run to run: it moves one or two antialiased pixels on the black
+# range rings, which is nothing, while a real outline is hundreds.
+def _pixels_apart(a, b):
+    return int((_np.abs(a.astype(int) - b.astype(int)).sum(axis=2) > 30).sum())
+
+
 _bare = _Per(sweep=_blind.sweep, floor=_blind.floor, candidates=[], best=None,
              reason=_blind.reason)
 _bare_img = _rad(_bare, 520)
 check_true("without a target a candidate draws nothing at all",
-           _np.array_equal(_rad(_blind, 520), _bare_img))
+           _pixels_apart(_rad(_blind, 520), _bare_img) < 20,
+           f"{_pixels_apart(_rad(_blind, 520), _bare_img)} px")
 check_true("with a target it does draw something",
-           not _np.array_equal(_rad(_judged, 520), _bare_img))
+           _pixels_apart(_rad(_judged, 520), _bare_img) > 100,
+           f"{_pixels_apart(_rad(_judged, 520), _bare_img)} px")
 
 from robotx_graey_2026.api.sonar.viewer import confidence_colour as _conf
 check_true("a sure match is shaded darker than a poor one",
@@ -735,14 +744,7 @@ check_true("a long blob is marked with something bigger than a fixed circle",
            f"span {_many.candidates[_long].span_deg:.0f} deg -> {_lw}x{_lh} px, "
            f"span {_many.candidates[_small].span_deg:.0f} deg -> {_sw}x{_sh} px")
 
-# Paging past the end must land on a real page, not a blank one. Compared with a
-# tolerance rather than exactly: OpenCV's threaded resize is not bit-exact run to
-# run and moves a couple of antialiased pixels on the range rings, while a
-# genuinely different page of text differs by thousands.
-def _pixels_apart(a, b):
-    return int((_np.abs(a.astype(int) - b.astype(int)).sum(axis=2) > 30).sum())
-
-
+# Paging past the end must land on a real page, not a blank one.
 _p1 = render(_many, None, page=0)
 _far = render(_many, None, page=99)
 check_true("paging past the end lands on a real page, not a blank one",
