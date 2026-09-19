@@ -70,7 +70,7 @@ from robotx_graey_2026.api.sonar import library as lib
 from robotx_graey_2026.api.sonar import settings as S
 from robotx_graey_2026.api.sonar import webview
 from robotx_graey_2026.api.sonar.detect import OK, Perception, perceive
-from robotx_graey_2026.api.sonar.sweep import Sonar
+from robotx_graey_2026.api.sonar.sweep import Sonar, arc_around
 from robotx_graey_2026.api.sonar.viewer import Radar, render
 
 
@@ -161,6 +161,15 @@ def main():
     p.add_argument("--start", type=float, default=0.0)
     p.add_argument("--end", type=float, default=360.0)
     p.add_argument("--step", type=float, default=2.0)
+    p.add_argument("--around", type=float, default=None,
+                   help="sweep a narrow arc centred on this bearing instead of "
+                        "the whole circle: 0 straight out to starboard, 90 up, "
+                        "180 to port, 270 straight down. Use it with --width.")
+    p.add_argument("--width", type=float, default=40.0,
+                   help="how wide that arc is, in degrees. Only used with "
+                        "--around. A sweep costs very nearly one motor step per "
+                        "ping, so 40 degrees takes about a ninth of the time a "
+                        "full turn does.")
     p.add_argument("--threshold", type=int, default=S.DETECT["threshold"])
     p.add_argument("--down-gradian", type=int, default=S.DOWN_GRADIAN)
     p.add_argument("--web", action="store_true",
@@ -186,9 +195,22 @@ def main():
     if args.udp:
         host, port = args.udp.split(":")
         udp = (host, int(port))
+    # A narrow arc, if asked for. start/end are left UNWRAPPED on purpose -
+    # sweep() takes the modulo per ping, and an arc across the 0/360 seam cannot
+    # be written as start < end any other way.
+    start_deg, end_deg = args.start, args.end
+    if args.around is not None:
+        try:
+            start_deg, end_deg = arc_around(args.around, args.width)
+        except ValueError as exc:
+            sys.exit(str(exc))
+
     sonar = Sonar(device=args.device, udp=udp, down_gradian=args.down_gradian)
 
-    print(f"[INFO] recording '{args.name}' for {args.sweeps} sweeps")
+    arc = ("full circle" if end_deg - start_deg >= 359.9 else
+           f"{end_deg - start_deg:.0f} deg centred on "
+           f"{(start_deg + end_deg) / 2 % 360:.0f}")
+    print(f"[INFO] recording '{args.name}' for {args.sweeps} sweeps, {arc}")
     if args.no_floor:
         print("[INFO] no floor - height_m will be missing from these samples")
 
@@ -211,7 +233,7 @@ def main():
                                    state=f"RECORDING {args.name}  {i + 1}/{args.sweeps}",
                                    radar=radar))
 
-        sweep = sonar.sweep(args.start, args.end, args.step, args.range,
+        sweep = sonar.sweep(start_deg, end_deg, args.step, args.range,
                             on_ping=live if args.web else None)
         # No target, always. This is the tool that finds out what the numbers
         # are; scoring them against a guess first would be circular.

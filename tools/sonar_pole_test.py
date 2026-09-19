@@ -93,7 +93,7 @@ from robotx_graey_2026.api.sonar import webview
 from robotx_graey_2026.api.sonar.detect import perceive, rescore
 from robotx_graey_2026.api.sonar.driver import explain
 from robotx_graey_2026.api.sonar.floor import Floor
-from robotx_graey_2026.api.sonar.sweep import Sonar
+from robotx_graey_2026.api.sonar.sweep import Sonar, arc_around
 from robotx_graey_2026.api.sonar.viewer import (SIZE, Radar, render,
                                                 table_rows)
 
@@ -112,6 +112,15 @@ def main():
     p.add_argument("--start", type=float, default=0.0, help="sweep start, degrees")
     p.add_argument("--end", type=float, default=360.0, help="sweep end, degrees")
     p.add_argument("--step", type=float, default=2.0, help="degrees between pings")
+    p.add_argument("--around", type=float, default=None,
+                   help="sweep a narrow arc centred on this bearing instead of "
+                        "the whole circle: 0 straight out to starboard, 90 up, "
+                        "180 to port, 270 straight down. Use it with --width.")
+    p.add_argument("--width", type=float, default=40.0,
+                   help="how wide that arc is, in degrees. Only used with "
+                        "--around. A sweep costs very nearly one motor step per "
+                        "ping, so 40 degrees takes about a ninth of the time a "
+                        "full turn does.")
     p.add_argument("--down-gradian", type=int, default=S.DOWN_GRADIAN,
                    help="which hardware gradian points straight down")
     p.add_argument("--assume-floor", type=float, default=None,
@@ -165,13 +174,26 @@ def main():
         sys.exit(f"bad --target: {exc}")
     label = args.target or ""
 
+    # A narrow arc, if asked for. start/end are left UNWRAPPED on purpose -
+    # sweep() takes the modulo per ping, and an arc across the 0/360 seam cannot
+    # be written as start < end any other way.
+    start_deg, end_deg = args.start, args.end
+    if args.around is not None:
+        try:
+            start_deg, end_deg = arc_around(args.around, args.width)
+        except ValueError as exc:
+            sys.exit(str(exc))
+
     sonar = Sonar(device=args.device, udp=udp, down_gradian=args.down_gradian)
 
     # A FULL circle by default, not the downward half the mission states use.
     # In shallow water a pole standing a couple of metres away sits near the
     # horizontal, not below you, so a downward-only sweep would miss most of it.
-    pings = int((args.end - args.start) / args.step)
-    print(f"[INFO] {pings} pings per sweep at {args.range} m")
+    pings = int((end_deg - start_deg) / args.step)
+    arc = ("full circle" if end_deg - start_deg >= 359.9 else
+           f"{end_deg - start_deg:.0f} deg centred on "
+           f"{(start_deg + end_deg) / 2 % 360:.0f}")
+    print(f"[INFO] {pings} pings per sweep at {args.range} m, {arc}")
     windowed = not (args.web or args.headless)
     hint = "  (use [ and ] to adjust)" if windowed else ""
     print(f"[INFO] down gradian = {args.down_gradian}{hint}")
@@ -269,7 +291,7 @@ def main():
             retarget()                  # in case a sweep returns with no pings
         sonar.down_gradian = down_gradian
         t0 = time.time()
-        sweep = sonar.sweep(args.start, args.end, args.step, args.range,
+        sweep = sonar.sweep(start_deg, end_deg, args.step, args.range,
                             on_ping=live if args.web else None)
         radar.update(sweep)
         floor = Floor.from_known_depth(args.assume_floor) if args.assume_floor else None

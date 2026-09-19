@@ -750,5 +750,52 @@ check_true("paging past the end lands on a real page, not a blank one",
            f"{_pixels_apart(_far, _p1)} px from page 1 "
            f"({len(_many.candidates)} candidates, one page)")
 
+# --------------------------------------------------- narrow arcs
+# Watching one object does not need a full turn, and a sweep costs very nearly
+# one motor step per ping - so a 40 degree arc updates roughly nine times as
+# often. The trap is that the most useful arc of all, straight out to starboard,
+# straddles the 0/360 seam and cannot be written as start < end.
+print("\n--- narrow arcs ---")
+from robotx_graey_2026.api.sonar.sweep import arc_around as _arc
+
+
+def _pings(start, end, step=2.0):
+    """The angles sweep() would actually visit, in order."""
+    out, a = [], float(start)
+    while a <= end + 1e-9:
+        out.append(round(a % 360.0, 3))
+        a += step
+    return out
+
+
+check_true("a plain start>end arc sweeps NOTHING - the reason --around exists",
+           _pings(340, 20) == [])
+
+_seam = _pings(*_arc(0, 40))
+check_true("an arc across the seam sweeps the whole width",
+           len(_seam) == 21 and _seam[0] == 340.0 and _seam[-1] == 20.0,
+           f"{len(_seam)} pings, {_seam[0]} to {_seam[-1]}")
+check_true("and every angle in it is a real bearing",
+           all(0.0 <= a < 360.0 for a in _seam))
+check_true("the arc is centred where you asked",
+           _pings(*_arc(270, 60))[0] == 240.0 and _pings(*_arc(270, 60))[-1] == 300.0)
+
+check_true("a narrow arc really is proportionally fewer pings",
+           len(_pings(*_arc(0, 40))) * 8 < len(_pings(*_arc(0, 360))),
+           f"{len(_pings(*_arc(0, 40)))} pings vs "
+           f"{len(_pings(*_arc(0, 360)))} for a full turn")
+
+# The first two angles set step_deg, which the radar uses for how wide to paint
+# each ping. An arc that STARTED on the seam would make that 358 instead of 2.
+check_true("the seam never lands between the first two pings",
+           abs(_seam[1] - _seam[0]) == 2.0, f"step reads {abs(_seam[1] - _seam[0])}")
+
+for _bad in (0, -5, 361):
+    try:
+        _arc(0, _bad)
+        check_true(f"a width of {_bad} is rejected", False)
+    except ValueError:
+        check_true(f"a width of {_bad} is rejected", True)
+
 print(f"\n{sum(results)}/{len(results)} checks passed")
 sys.exit(0 if all(results) else 1)

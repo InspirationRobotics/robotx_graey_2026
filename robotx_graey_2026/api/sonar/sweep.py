@@ -55,6 +55,28 @@ class Sweep:
         return range_m * math.cos(a), range_m * math.sin(a)
 
 
+def arc_around(centre_deg, width_deg):
+    """(start, end) for a sweep of `width` degrees centred on `centre`.
+
+    Returned UNWRAPPED - start may be negative, end may exceed 360 - because
+    sweep() walks from start to end and takes the modulo per ping. An arc across
+    the 0/360 seam is straight out to starboard, which is exactly where you are
+    most likely to want one, and it cannot be written as a plain start < end
+    pair any other way: --start 340 --end 20 sweeps nothing at all, because 340
+    is already past 20.
+
+    WHY BOTHER. Time per ping is dominated by the motor step, not by the sound,
+    so the cost of a sweep is very nearly proportional to how many pings it
+    takes. A 40 degree arc is a ninth of a full turn and takes about a ninth of
+    the time. Watching one object, that is the difference between a picture that
+    updates every twenty seconds and one that updates every two.
+    """
+    if not 0 < width_deg <= 360:
+        raise ValueError(f"width must be between 0 and 360 degrees, got {width_deg}")
+    half = width_deg / 2.0
+    return centre_deg - half, centre_deg + half
+
+
 def gradian_to_angle_deg(gradian, down_gradian=None):
     """Hardware gradian -> scan-plane angle in our convention."""
     if down_gradian is None:
