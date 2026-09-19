@@ -568,5 +568,31 @@ check_true("--bearing to port picks the port one",
            _pick(_blobs, near=2.07, bearing=180.0) is _ring)
 check_true("nothing to pick from gives nothing", _pick([], near=2.1) is None)
 
+# --------------------------------------------- how many candidates are visible
+# A hidden candidate is one you cannot check. This was a hardcoded 8 that left a
+# large empty gap under the table, and with no target the list is sorted by
+# range - so in a reverberant pool the blob you care about sat below the cut.
+print("\n--- how many candidates the table shows ---")
+from robotx_graey_2026.api.sonar.viewer import LEGEND_H as _LH, table_rows as _tr
+
+_y = 224                                    # where the table starts, in practice
+check_true("the table fills the space instead of stopping at eight",
+           _tr(860, _y) >= 10, f"{_tr(860, _y)} rows with no breakdown")
+_explained = _det(141, 1.5, 0.09)
+_explained.scores = {"height_m": 0.9, "brightness": 0.8, "thickness_m": 0.7}
+check_true("a score breakdown takes its space off the table, not off the legend",
+           3 <= _tr(860, _y, _explained) < _tr(860, _y),
+           f"{_tr(860, _y, _explained)} rows with a breakdown, {_tr(860, _y)} without")
+_with_note = _det(141, 1.5, 0.09)
+_with_note.scores = dict(_explained.scores)
+_with_note.unscored = ("solidity",)
+check_true("the 'not scored' note takes its space too",
+           _tr(860, _y, _with_note) <= _tr(860, _y, _explained),
+           f"{_tr(860, _y, _with_note)} vs {_tr(860, _y, _explained)} rows")
+check_true("rows never run into the legend",
+           _y + 34 + _tr(860, _y) * 32 <= 860 - _LH)
+check_true("a short panel still shows a few rows rather than none",
+           _tr(520, _y) >= 3, f"{_tr(520, _y)} rows at 520 px")
+
 print(f"\n{sum(results)}/{len(results)} checks passed")
 sys.exit(0 if all(results) else 1)

@@ -69,6 +69,11 @@ CONF_WEAK = (220, 220, 220)
 
 FONT = cv2.FONT_HERSHEY_DUPLEX   # heavier strokes than SIMPLEX; survives JPEG
 
+# Height the legend block needs at the bottom of the panel. The candidate
+# table is sized to fill whatever is left, so this is the one number that
+# decides how many detections you can actually see.
+LEGEND_H = 250
+
 # Ping Viewer's ramp, set against a real Graey sweep rather than guessed: in the
 # pool the median sample was 36 and the top tenth started at 120. So 36 sits in
 # plain blue, and 120 is already yellow - which is where a floor or wall lands,
@@ -154,6 +159,28 @@ def confidence_colour(score):
     s = max(0.0, min(1.0, float(score)))
     return tuple(int(round(w + (c - w) * s))
                  for w, c in zip(CONF_WEAK, CONF_SURE))
+
+
+ROW_H = 32          # one candidate row
+
+
+def table_rows(height, y, explained=None):
+    """How many candidate rows fit between the table header and the legend.
+
+    Computed, not picked by hand. It used to be a hardcoded 8, which left a
+    large empty gap under the table and hid everything past the eighth blob -
+    and with no target set the list is sorted by RANGE, so the thing you care
+    about is as likely to be near the bottom as the top. In a reverberant pool
+    that meant a dozen hidden candidates and no way to know it.
+
+    `explained` is the candidate whose score breakdown is printed underneath, if
+    any; the space its lines need comes off the top.
+    """
+    reserve = 0
+    if explained is not None and explained.scores:
+        reserve = (36 + 26 * len(explained.scores) + 32
+                   + (46 if explained.unscored else 0))
+    return max(3, (height - LEGEND_H - y - reserve - 64) // ROW_H)
 
 
 def _text(img, s, org, scale, colour, thick=1, halo=None):
@@ -336,12 +363,13 @@ def _panel(p, memory, state, width, height, target=""):
 
     # The one worth explaining: the best match, or whatever came closest if
     # nothing cleared the bar. The table shrinks to make room for the reasons,
-    # because a list of eight candidates you cannot interpret is worth less than
-    # five you can.
+    # because a list of candidates you cannot interpret is worth less than a
+    # shorter one you can.
     explained = p.best
     if explained is None and p.candidates and p.candidates[0].score is not None:
         explained = p.candidates[0]
-    rows = 5 if explained is not None and explained.scores else 8
+
+    rows = table_rows(height, y, explained)
 
     cv2.line(panel, (L, y - 22), (width - L, y - 22), GRID, 1)
     labels = ["#", "range", "offset", "height", "span", "bright", "solid", "conf"]
@@ -363,7 +391,7 @@ def _panel(p, memory, state, width, height, target=""):
             colour = INK if d is not p.best else (120, 240, 150)
             for x, cell in zip(xs, cells):
                 _text(panel, cell, (x, y), 0.55, colour)
-            y += 32
+            y += ROW_H
         if len(p.candidates) > rows:
             _text(panel, f"+ {len(p.candidates) - rows} more", (L, y), 0.5, DIM)
             y += 30
@@ -384,7 +412,7 @@ def _panel(p, memory, state, width, height, target=""):
             _text(panel, line, (L, y), 0.55, DIM)
             y += 28
 
-    _legend(panel, L, height - 250, width)
+    _legend(panel, L, height - LEGEND_H, width)
     return panel
 
 
