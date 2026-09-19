@@ -18,7 +18,8 @@ import cv2
 from robotx_graey_2026.api.sonar import library as _lib
 from robotx_graey_2026.api.sonar import settings as S
 from robotx_graey_2026.api.sonar.detect import ACROSS, ALONG, NO_FLOOR, perceive
-from robotx_graey_2026.api.sonar.driver import APPROACH, Driver, FOLLOW, ORIENT, SEARCH
+from robotx_graey_2026.api.sonar.driver import (APPROACH, Driver, FOLLOW, ORIENT,
+                                                SEARCH, YAW_BY)
 from robotx_graey_2026.api.sonar.floor import Floor
 from robotx_graey_2026.api.sonar.simulate import FakeSonar, Scene, simulate_sweep
 from robotx_graey_2026.api.sonar.viewer import render
@@ -126,6 +127,25 @@ check_true("progressed past search",
 check_true("reached follow", FOLLOW in seen_states,
            f"states: {sorted(set(seen_states))}")
 
+# --stop-at parks the sub at a state instead of running the whole mission.
+# It has to stop BEFORE the action that leaves that state, or "stop when
+# you are overhead" yaws 90 degrees and then stops.
+_d2 = Driver(TARGET)
+_sonar2 = FakeSonar(Scene.zigzag(start=(1.3, 0.0), z=PIPE_Z, floor_z=FLOOR_Z,
+                                 first_heading_deg=90.0),
+                    sub_pos=(0.0, 0.0, 0.0), heading_deg=0.0, seed=3)
+_sent = []
+for _ in range(90):
+    _sweep2 = _sonar2.sweep_for_state(_d2.sweep_state(), _sonar2.heading_deg)
+    _act = _d2.tick(perceive(_sweep2, target=TARGET), _sonar2.heading_deg)
+    if _d2.state == ORIENT:
+        break
+    _sent.append(_act.kind)
+    _sonar2.apply(_act)
+check_true("--stop-at ORIENT stops before the turn that leaves APPROACH",
+           _d2.state == ORIENT and YAW_BY not in _sent,
+           f"state {_d2.state}, sent {sorted(set(_sent))}")
+
 # ------------------------------------------------- Action -> NED conversion
 # The geometry that turns a Driver decision into a setpoint. Wrong signs here
 # send the sub the opposite way from the one the detector asked for, and that
@@ -134,7 +154,7 @@ print("\n--- action to NED target ---")
 try:
     import math as _m
     from tools.sonar_follow import MAX_STEP_M, action_to_target
-    from robotx_graey_2026.api.sonar.driver import Action, FORWARD, HOLD, STRAFE, YAW_BY
+    from robotx_graey_2026.api.sonar.driver import Action, FORWARD, HOLD, STRAFE
 
     def near(got, want):
         return all(abs(a - b) <= 1e-6 for a, b in zip(got, want))
@@ -154,6 +174,7 @@ try:
                     (MAX_STEP_M, 0, 2, 0)))
     check_true("depth is never altered",
                action_to_target(Action(HOLD), 0, 0, 7.5, 0.0)[2] == 7.5)
+
 except ImportError as exc:
     print(f"SKIP  action->NED checks ({exc}) - pymavlink not installed")
 

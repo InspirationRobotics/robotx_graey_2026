@@ -139,6 +139,13 @@ def main():
     p.add_argument("--port", type=int, default=8081)
     p.add_argument("--max-sweeps", type=int, default=40,
                    help="stop after this many sweeps, whatever the state")
+    p.add_argument("--stop-at", default=None,
+                   help="stop the moment the driver enters this state. "
+                        "--stop-at ORIENT means 'search, approach, and park "
+                        "when you are overhead' - which is the whole of what a "
+                        "vertical pole can test, since ORIENT and FOLLOW judge "
+                        "alignment by the span collapsing and a pole looks the "
+                        "same from every heading.")
     args = p.parse_args()
 
     udp = None
@@ -216,6 +223,14 @@ def main():
 
         if action.kind == FINISHED:
             print("[INFO] driver reports finished")
+            break
+
+        # Stop BEFORE carrying out the action that would leave the state you
+        # asked to stop at. --stop-at ORIENT should park the sub overhead, not
+        # yaw 90 degrees first.
+        if args.stop_at and driver.state == args.stop_at.upper():
+            print(f"[INFO] reached {driver.state} - stopping as asked, "
+                  f"without sending '{action.kind}'")
             break
 
         tgt = action_to_target(action, n, e, down, yaw)
