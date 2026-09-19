@@ -8,6 +8,7 @@ Needs the package importable, either way round:
     source /root/robotx_ws/install/setup.bash   # on Graey
     PYTHONPATH=. python3 tools/sonar_check.py   # from a plain checkout
 """
+import os
 import sys
 
 import cv2
@@ -204,6 +205,61 @@ check_true("radar keeps the old sweep while the next one starts", _changed < 0.2
            f"{_changed:.0%} of the image changed after 40 deg of new data")
 _r.update(_Sw(_np.zeros((180, 200), _np.uint8), _angs, 0.02))
 check_true("radar resets when the range changes", _r.polar.shape[1] == 200)
+
+# ------------------------------------------------------------- object library
+print("\n--- object library ---")
+import tempfile as _tf
+
+from robotx_graey_2026.api.sonar import library as _lib
+from robotx_graey_2026.api.sonar.detect import Detection as _Det
+
+
+def _det(bright, height, thick, solid=0.8, rng=1.3, span=16.0):
+    return _Det(range_m=rng, angle_deg=0.0, offset_m=rng, height_m=height,
+                span_deg=span, brightness=bright, solidity=solid,
+                contour=None, thickness_m=thick)
+
+
+# real PVC numbers from the pool, 16 Sep 2026, plus a plausible wall
+_pipe = [_lib.sample_from(_det(b, 1.5, 0.09))
+         for b in (146, 140, 134, 132, 143, 141)]
+_wall = [_lib.sample_from(_det(b, 0.05, 0.45))
+         for b in (149, 144, 152, 138, 141)]
+
+_L = {}
+_lib.add_samples(_L, "pvc_pipe", _pipe, "pool, 1.3 m off starboard")
+_lib.add_samples(_L, "pool_wall", _wall, "pool wall")
+
+_prof = _lib.profile_for(_L, "pvc_pipe")
+check_true("profile centres on the median, not a stray sweep",
+           139 <= _prof["brightness"]["ideal"] <= 142,
+           f"ideal {_prof['brightness']['ideal']}")
+check_true("profile edges sit outside the samples seen",
+           _prof["brightness"]["min"] < 132 and _prof["brightness"]["max"] > 146)
+check_true("span is recorded but kept out of identity",
+           "span_deg" in _pipe[0] and "span_deg" not in _prof)
+
+_name, _sc, _ = _lib.identify(_det(141, 1.5, 0.09), _L)
+check_true("identifies pipe as pipe", _name == "pvc_pipe", f"{_name} {_sc:.2f}")
+_name, _sc, _ = _lib.identify(_det(145, 0.05, 0.45), _L)
+check_true("identifies wall as wall", _name == "pool_wall", f"{_name} {_sc:.2f}")
+
+# brightness alone cannot separate them - that is the whole point of the pool
+# result. thickness and height are what do the work.
+_bright_only = {k: {"pvc_pipe": {"profile": {"brightness": _prof["brightness"]}},
+                    "pool_wall": {"profile": {"brightness":
+                                  _lib.profile_for(_L, "pool_wall")["brightness"]}}}[k]
+                for k in ("pvc_pipe", "pool_wall")}
+_n1, _s1, _ = _lib.identify(_det(141, 1.5, 0.09), _bright_only)
+_n2, _s2, _ = _lib.identify(_det(141, 0.05, 0.45), _bright_only)
+check_true("on brightness alone the two are NOT separable", _n1 == _n2,
+           f"both score as {_n1}")
+
+with _tf.NamedTemporaryFile(suffix=".json", delete=False) as _fh:
+    _path = _fh.name
+_lib.save(_L, _path)
+check_true("library survives a save and load", _lib.load(_path) == _L)
+os.unlink(_path)
 
 print(f"\n{sum(results)}/{len(results)} checks passed")
 sys.exit(0 if all(results) else 1)

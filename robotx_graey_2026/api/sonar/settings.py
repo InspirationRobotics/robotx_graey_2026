@@ -151,5 +151,9 @@ STALE_SWEEPS = 4                # no detection for this many sweeps means lost
 # brightness, which is a material property.
 PIPELINE_PROFILE = {
     "height_m":     {"min": 0.4, "ideal": 1.5, "max": 2.8},   # above the floor
-    "brightness":   {"min": 70,  "ideal": 170, "max": 255},
+    # 140 is measured, not guessed: PVC came back 132-146 in the pool on
+    # 16 Sep 2026. The old ideal of 170 was invented, and scored real pipe at
+    # 0.70 instead of 1.0. Brightness is the feature that travels worst between
+    # locations, so re-measure it in Singapore rather than trusting this.
+    "brightness":   {"min": 70,  "ideal": 140, "max": 255},
 }

@@ -34,12 +34,13 @@ ALONG = "along"        # pipe runs fore-aft: the sub is pointed along it
 SLANTED = "slanted"
 ACROSS = "across"      # pipe lies across the view: the sub is perpendicular
 
-FEATURES = ("height_m", "span_deg", "brightness", "solidity")
+FEATURES = ("height_m", "span_deg", "brightness", "solidity", "thickness_m",
+            "width_m")
 
 
 class Detection:
     def __init__(self, range_m, angle_deg, offset_m, height_m, span_deg,
-                 brightness, solidity, contour):
+                 brightness, solidity, contour, thickness_m=None):
         self.range_m = range_m
         self.angle_deg = angle_deg
         self.offset_m = offset_m        # positive to starboard
@@ -47,16 +48,29 @@ class Detection:
         self.span_deg = span_deg        # angular extent in the scan plane
         self.brightness = brightness
         self.solidity = solidity
+        self.thickness_m = thickness_m  # radial depth of the return, metres
         self.contour = contour
         self.score = None
         self.scores = {}
 
     @property
+    def width_m(self):
+        """Angular extent converted to metres at the measured range.
+
+        span_deg on its own says nothing about size - 20 degrees is a pipe up
+        close and a wall far away. This is the same measurement in units you can
+        compare against a tape.
+        """
+        return self.range_m * math.radians(self.span_deg)
+
+    @property
     def features(self):
         f = {"span_deg": self.span_deg, "brightness": self.brightness,
-             "solidity": self.solidity}
+             "solidity": self.solidity, "width_m": self.width_m}
         if self.height_m is not None:
             f["height_m"] = self.height_m
+        if self.thickness_m is not None:
+            f["thickness_m"] = self.thickness_m
         return f
 
     @property
@@ -161,8 +175,14 @@ def measure(contour, sweep, floor=None):
     cv2.drawContours(mask, [contour], -1, 255, thickness=cv2.FILLED)
     brightness = float(cv2.mean(sweep.image, mask=mask)[0])
 
+    # Radial depth of the return. Nearly pose-invariant: a pipe is its own
+    # diameter thick however you look at it, while a grazing seabed return
+    # smears over many bins. That makes it worth more for identity than span,
+    # which changes completely with viewing angle.
+    thickness_m = w * sweep.metres_per_bin
+
     return Detection(range_m, angle_deg, offset_m, height_m, span_deg,
-                     brightness, solidity, contour)
+                     brightness, solidity, contour, thickness_m)
 
 
 def _score_one(value, spec):
