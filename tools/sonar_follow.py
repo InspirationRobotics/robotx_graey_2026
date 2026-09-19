@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Sonar search-and-approach: let the state machine drive the sub.
 
-    python3 tools/sonar_follow.py --udp 127.0.0.1:9092 --target pvc_pipe
-    python3 tools/sonar_follow.py --udp 127.0.0.1:9092 --target pvc_pipe --live
+    python3 tools/sonar_follow.py --target pvc_pipe --device SONAR
+    python3 tools/sonar_follow.py --target pvc_pipe --device SONAR --live
+
+where SONAR is the by-id path, never a ttyUSB number - on Graey that is
+    /dev/serial/by-id/usb-FTDI_FT230X_Basic_UART_D2010VWF-if00-port0
+and ttyUSB0 is the LED controller. Or --udp 127.0.0.1:9092 with pingproxy up.
 
 --target is required and has no default. This tool moves the sub towards
 whatever matches it, so "what am I hunting" is not something to leave implied:

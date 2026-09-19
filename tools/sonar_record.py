@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Measure one object over several sweeps and store what it looks like.
 
-    python3 tools/sonar_record.py --udp 127.0.0.1:9092 --name pvc_pipe \
-        --near 1.3 --sweeps 8 --no-floor --notes "1.3 m off starboard, pool"
+    python3 tools/sonar_record.py --name pvc_pipe --near 1.3 --sweeps 8 \
+        --no-floor --notes "1.3 m off starboard, pool" \
+        --device /dev/serial/by-id/usb-FTDI_FT230X_Basic_UART_D2010VWF-if00-port0
+
+--device takes the by-id path, never a ttyUSB number: the numbers are handed out
+in whatever order things enumerate at boot, and on Graey ttyUSB0 is the LED
+controller. --udp 127.0.0.1:9092 instead, if pingproxy is running.
 
 Everything lands in one file, ~/sonar_data/objects.json by default, with each
 object under its own name. Run it again with the same --name and the new sweeps

@@ -1,8 +1,28 @@
 #!/usr/bin/env python3
 """Ping360 radar view -> http://<jetson-ip>:8081   (Ctrl-C to stop)
 
-    on Graey, once:   pingproxy.py --device /dev/ttyUSB0 --port 9092
-    then:             python3 tools/sonar_pole_test.py --udp 127.0.0.1:9092 --no-floor --web
+Straight at the sonar, no proxy - simplest, but Ping Viewer cannot also be open:
+
+    python3 tools/sonar_pole_test.py --no-floor --web \
+        --device /dev/serial/by-id/usb-FTDI_FT230X_Basic_UART_D2010VWF-if00-port0
+
+Or through pingproxy, which lets Ping Viewer share the device:
+
+    python3 ~/.local/bin/pingproxy.py --port 9092 \
+        --device /dev/serial/by-id/usb-FTDI_FT230X_Basic_UART_D2010VWF-if00-port0
+    python3 tools/sonar_pole_test.py --udp 127.0.0.1:9092 --no-floor --web
+
+ALWAYS THE by-id PATH, NEVER A ttyUSB NUMBER. This file used to say ttyUSB0,
+which on Graey is the LED controller's Arduino - pointing the sonar at it would
+have opened the wrong device and sent it Ping protocol bytes. USB enumeration
+order is not stable across reboots, so a number means nothing; the by-id name is
+tied to the actual hardware. Graey's four serial devices, for reference:
+
+    usb-FTDI_FT230X_Basic_UART_D2010VWF-if00-port0    THE SONAR
+    usb-1a86_USB_Serial-if00-port0                    LED controller
+    usb-FTDI_USB-RS232_Cable_AV0K9DQE-if00-port0      VN100 IMU
+    usb-Silicon_Labs_CP2102_..._0001-if00-port0       acoustic modem
+    usb-Hex_ProfiCNC_CubeOrange_...                   Cube - MAVProxy owns it
 
 THE TARGET IS A SETTING, AND IT STARTS BLANK
 
