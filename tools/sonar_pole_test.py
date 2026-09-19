@@ -6,19 +6,26 @@
 
 THE TARGET IS A SETTING, AND IT STARTS BLANK
 
-Without --target nothing is judged. Every blob is measured and listed, and the
-radar draws no rings, because nothing has been said about what counts. That is
-the mode for looking, and for finding out what a real object's numbers are.
+Without a target nothing is judged. Every blob is measured and listed, and the
+radar draws no outlines, because nothing has been said about what counts. That
+is the mode for looking, and for finding out what a real object's numbers are.
 
-Give it a target and each blob gets a score, drawn as a ring shaded by that
-score - dark for a sure match, pale for a poor one. Three ways to say it:
+Give it a target and each blob gets a confidence from 0 to 100%, drawn round its
+real shape and shaded by that number - dark for a sure match, pale for a poor
+one. The panel then breaks the number down feature by feature, so you can see
+WHICH one is costing you the score rather than only that something is.
+
+With --web you change the target in the browser: type in the box at the top,
+press enter, and the sweep already on screen is re-judged at once. No restart,
+and no waiting out the twenty seconds of the next sweep. --target only seeds
+that box:
 
     --target pvc_pipe                       an object you measured with
                                             tools/sonar_record.py
     --target height_m=1.5,brightness=140    ideal values typed straight in
     --target height_m=1.5 --tolerance 0.3   the same, but fussier
 
-Nothing here has a default target. Rings you did not ask for are a lie about
+Nothing here has a default target. Outlines you did not ask for are a lie about
 what the code knows.
 
 You can equally run the whole thing from a laptop and leave only pingproxy on
@@ -63,7 +70,7 @@ import cv2
 from robotx_graey_2026.api.sonar import library as lib
 from robotx_graey_2026.api.sonar import settings as S
 from robotx_graey_2026.api.sonar import webview
-from robotx_graey_2026.api.sonar.detect import perceive
+from robotx_graey_2026.api.sonar.detect import perceive, rescore
 from robotx_graey_2026.api.sonar.driver import explain
 from robotx_graey_2026.api.sonar.floor import Floor
 from robotx_graey_2026.api.sonar.sweep import Sonar
@@ -170,7 +177,15 @@ def main():
     down_gradian = args.down_gradian
     tuning = {"threshold": args.threshold}
 
-    # The target can be retyped in the browser between sweeps. `applied` is the
+    # The picture persists across sweeps: each angle keeps its last measurement
+    # until the head comes back round, as in Ping Viewer. Detections shown while
+    # a sweep is in progress are the LAST COMPLETE sweep's, so the rings stay
+    # attached to the picture underneath them instead of vanishing the moment a
+    # new sweep starts and has only seen a few degrees.
+    radar = Radar()
+    shown = [None]
+
+    # The target can be retyped in the browser at any time. `applied` is the
     # string currently in force; a new one is resolved once, here, and a bad one
     # leaves the working profile alone rather than blanking the radar.
     applied = [label]
@@ -194,18 +209,23 @@ def main():
                                         for k, v in sorted(profile.items())))
         print(f"[INFO] target is now '{wanted or '(none)'}'")
 
-    # The picture persists across sweeps: each angle keeps its last measurement
-    # until the head comes back round, as in Ping Viewer. Detections shown while
-    # a sweep is in progress are the LAST COMPLETE sweep's, so the rings stay
-    # attached to the picture underneath them instead of vanishing the moment a
-    # new sweep starts and has only seen a few degrees.
-    radar = Radar()
-    shown = [None]
+        # Answer at once. Measuring is the slow half and it does not depend on
+        # the target, so the sweep already on screen can be re-judged and
+        # republished now rather than in another fifteen to twenty-five seconds.
+        if shown[0] is not None:
+            rescore(shown[0], profile)
+            webview.publish(render(shown[0], None, radar=radar, target=label,
+                                   state=f"RESCORED  down={down_gradian}"))
 
     # A sweep takes many seconds, so publish partial frames while the head is
     # still moving. Without this the browser shows one frozen picture and you
     # cannot tell a working sonar from a stalled one.
+    #
+    # This is also where the target box gets read. Checking it once per ping
+    # rather than once per sweep is what makes pressing enter feel immediate
+    # instead of costing you the rest of a twenty-second sweep.
     def live(partial):
+        retarget()
         radar.update(partial)
         per = shown[0]
         if per is None:
@@ -216,7 +236,7 @@ def main():
 
     while True:
         if args.web:
-            retarget()                  # between sweeps, never mid-sweep
+            retarget()                  # in case a sweep returns with no pings
         sonar.down_gradian = down_gradian
         t0 = time.time()
         sweep = sonar.sweep(args.start, args.end, args.step, args.range,
@@ -292,14 +312,14 @@ def _print_sweep(per, elapsed, down_gradian):
         print(f"    nothing found: {explain(per)}")
         return
     print(f"    {'#':<3}{'range':>8}{'bearing':>9}{'height':>9}"
-          f"{'span':>7}{'bright':>8}{'solid':>7}{'thick':>8}{'score':>7}")
+          f"{'span':>7}{'bright':>8}{'solid':>7}{'thick':>8}{'conf':>7}")
     for i, d in enumerate(per.candidates[:6]):
         height = " -" if d.height_m is None else f"{d.height_m:.2f}"
         thick = " -" if d.thickness_m is None else f"{d.thickness_m:.3f}"
-        score = " -" if d.score is None else f"{d.score:.2f}"
+        conf = " -" if d.confidence is None else f"{d.confidence}%"
         print(f"    {i:<3}{d.range_m:>7.2f}m{d.angle_deg:>8.0f}d{height:>9}"
               f"{d.span_deg:>6.0f}d{d.brightness:>8.0f}{d.solidity:>7.2f}"
-              f"{thick:>8}{score:>7}")
+              f"{thick:>8}{conf:>7}")
 
 
 if __name__ == "__main__":

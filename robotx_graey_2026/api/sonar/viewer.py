@@ -215,26 +215,53 @@ def _radar(p, size, radar=None):
     if radar.head_deg is not None:
         cv2.line(canvas, (c, c), _to_screen(c, radar.head_deg, radius), HEAD, 2, cv2.LINE_AA)
 
-    # Rings, shaded by confidence. A candidate with score None was never judged,
-    # because no target was given - so there is nothing to be confident about
-    # and nothing is drawn. An empty radar here means "you have not said what
-    # you are looking for", not "nothing is there"; the table still lists every
-    # blob and its numbers.
-    #
-    # One pixel wide so a ring does not hide what it is pointing at.
+    # Outlines, shaded by confidence. A candidate with score None was never
+    # judged, because no target was given - so there is nothing to be confident
+    # about and nothing is drawn. An empty radar here means "you have not said
+    # what you are looking for", not "nothing is there"; the table still lists
+    # every blob and its numbers.
     for i, d in enumerate(p.candidates):
         if d.score is None:
             continue
         shade = confidence_colour(d.score)
+        weight = 2 if d is p.best else 1
         x, y = _to_screen(c, d.angle_deg, d.range_m * ppm)
-        cv2.circle(canvas, (x, y), 14, shade, 1, cv2.LINE_AA)
-        if d is p.best:
-            cv2.circle(canvas, (x, y), 19, shade, 1, cv2.LINE_AA)
-        _text(canvas, f"{i}  {d.score:.2f}", (x + 16, y - 12), 0.5, shade, 1,
+
+        poly = _outline(p, d, c, ppm)
+        big = False
+        if poly is not None and len(poly) >= 3:
+            cv2.polylines(canvas, [poly], True, shade, weight, cv2.LINE_AA)
+            big = max(np.ptp(poly[:, 0]), np.ptp(poly[:, 1])) >= 20
+        if not big:
+            # Small things need something to catch the eye, or a two-pixel
+            # smudge on a busy radar is invisible. Big ones already have their
+            # own shape and a circle round it would only hide the ends.
+            cv2.circle(canvas, (x, y), 14, shade, weight, cv2.LINE_AA)
+        _text(canvas, f"{i}  {d.confidence}%", (x + 16, y - 14), 0.5, shade, 1,
               halo=INK)
 
     cv2.drawMarker(canvas, (c, c), MARK, cv2.MARKER_CROSS, 12, 1, cv2.LINE_AA)
     return canvas
+
+
+def _outline(p, d, centre, ppm):
+    """A candidate's real shape, in screen pixels.
+
+    A detection is not a point. A pipeline seen broadside is a long thin arc,
+    the same pipeline end-on is a small lump, and a pool wall is a band running
+    most of the way across the picture - drawing all three as the same little
+    circle throws away the one thing that separates them at a glance.
+
+    The contour comes out of the detector in (range bin, angle row) coordinates,
+    so each point goes through the same conversion the radar itself uses and the
+    outline lands exactly on the returns that produced it.
+    """
+    if d.contour is None or p.sweep is None:
+        return None
+    pts = [_to_screen(centre, p.sweep.row_to_angle_deg(float(row)),
+                      p.sweep.col_to_range_m(float(col)) * ppm)
+           for col, row in np.asarray(d.contour).reshape(-1, 2)]
+    return np.array(pts, np.int32)
 
 
 def _paint(canvas, radar, centre, radius):
@@ -307,8 +334,17 @@ def _panel(p, memory, state, width, height, target=""):
     _text(panel, floor_txt, (L, y), 0.6, INK if p.floor else DIM)
     y += 40
 
+    # The one worth explaining: the best match, or whatever came closest if
+    # nothing cleared the bar. The table shrinks to make room for the reasons,
+    # because a list of eight candidates you cannot interpret is worth less than
+    # five you can.
+    explained = p.best
+    if explained is None and p.candidates and p.candidates[0].score is not None:
+        explained = p.candidates[0]
+    rows = 5 if explained is not None and explained.scores else 8
+
     cv2.line(panel, (L, y - 22), (width - L, y - 22), GRID, 1)
-    labels = ["#", "range", "offset", "height", "span", "bright", "solid", "score"]
+    labels = ["#", "range", "offset", "height", "span", "bright", "solid", "conf"]
     xs = [L, 58, 150, 255, 360, 445, 535, 625]
     for x, lab in zip(xs, labels):
         _text(panel, lab, (x, y), 0.52, DIM)
@@ -318,21 +354,23 @@ def _panel(p, memory, state, width, height, target=""):
         _text(panel, "no detections", (L, y), 0.6, DIM)
         y += 40
     else:
-        for i, d in enumerate(p.candidates[:8]):
+        for i, d in enumerate(p.candidates[:rows]):
             cells = [str(i), f"{d.range_m:.2f}m", f"{d.offset_m:+.2f}m",
                      "-" if d.height_m is None else f"{d.height_m:.2f}m",
                      f"{d.span_deg:.0f}°".replace("°", " deg"),
                      f"{d.brightness:.0f}", f"{d.solidity:.2f}",
-                     "-" if d.score is None else f"{d.score:.2f}"]
+                     "-" if d.confidence is None else f"{d.confidence}%"]
             colour = INK if d is not p.best else (120, 240, 150)
             for x, cell in zip(xs, cells):
                 _text(panel, cell, (x, y), 0.55, colour)
             y += 32
-        if len(p.candidates) > 8:
-            _text(panel, f"+ {len(p.candidates) - 8} more", (L, y), 0.5, DIM)
-            y += 32
+        if len(p.candidates) > rows:
+            _text(panel, f"+ {len(p.candidates) - rows} more", (L, y), 0.5, DIM)
+            y += 30
 
-    if p.best is not None:
+    if explained is not None and explained.scores:
+        y = _breakdown(panel, explained, p, L, y, width)
+    elif p.best is not None:
         y += 6
         _text(panel, f"orientation: {p.best.orientation}", (L, y), 0.6, (120, 240, 150))
         y += 34
@@ -348,6 +386,41 @@ def _panel(p, memory, state, width, height, target=""):
 
     _legend(panel, L, height - 250, width)
     return panel
+
+
+def _breakdown(panel, d, p, x, y, width):
+    """Why that candidate scored what it scored, one line per feature.
+
+    A single percentage tells you the answer and not the reason, and the reason
+    is the part you can act on: 88% overall hides "brightness 99, height 12",
+    which says the thing is the right stuff at the wrong depth. Each line is the
+    measured value and what the profile made of it.
+    """
+    index = p.candidates.index(d)
+    head = (f"why #{index} scores {d.confidence}%" if d is p.best else
+            f"closest was #{index} at {d.confidence}%, below the bar")
+    _text(panel, head, (x, y + 6), 0.6, (120, 240, 150) if d is p.best else DIM)
+    y += 36
+
+    for name, s in sorted(d.scores.items(), key=lambda kv: kv[1]):
+        value = d.features.get(name)
+        pct = int(round(s * 100))
+        # worst first, and coloured, so the feature that is costing you the
+        # score is the one you read first
+        colour = (110, 110, 240) if pct < 40 else (INK if pct < 85 else (120, 240, 150))
+        _text(panel, f"{name:<13}{value:>9.2f}{pct:>7d}%", (x + 8, y), 0.55, colour)
+        y += 26
+
+    if d.unscored:
+        _text(panel, "not scored: " + ", ".join(sorted(d.unscored)),
+              (x + 8, y), 0.5, (110, 190, 245))
+        y += 22
+        _text(panel, "the profile asks for it, this sweep cannot measure it",
+              (x + 8, y), 0.45, DIM)
+        y += 24
+
+    _text(panel, f"orientation: {d.orientation}", (x, y + 4), 0.55, DIM)
+    return y + 32
 
 
 def _legend(panel, x, y, width):
@@ -379,17 +452,21 @@ def _legend(panel, x, y, width):
 
     # symbols, each on a patch of radar blue
     y2 = y + 82
-    items = [("best match", "double"), ("sonar head", "head"),
-             ("blind zone", "dash")]
+    items = [("outline = real shape", "shape"), ("best match: thicker", "thick"),
+             ("sonar head", "head"), ("blind zone", "dash")]
     col = (width - 2 * x) // 2
     for n, (label, kind) in enumerate(items):
         cx = x + (n % 2) * col
         cy = y2 + (n // 2) * 44
         panel[cy - 16:cy + 16, cx:cx + 36] = _LUT[36]
         mid = (cx + 18, cy)
-        if kind == "double":
-            cv2.circle(panel, mid, 8, CONF_SURE, 1, cv2.LINE_AA)
-            cv2.circle(panel, mid, 13, CONF_SURE, 1, cv2.LINE_AA)
+        if kind == "shape":
+            # a long thin blob, as a broadside pipe actually comes out
+            cv2.polylines(panel, [np.array([(cx + 3, cy + 4), (cx + 14, cy - 4),
+                                            (cx + 33, cy - 2), (cx + 20, cy + 6)],
+                                           np.int32)], True, CONF_SURE, 1, cv2.LINE_AA)
+        elif kind == "thick":
+            cv2.circle(panel, mid, 11, CONF_SURE, 2, cv2.LINE_AA)
         elif kind == "head":
             cv2.line(panel, (cx + 4, cy + 10), (cx + 32, cy - 10), HEAD, 2, cv2.LINE_AA)
         else:

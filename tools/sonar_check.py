@@ -365,6 +365,100 @@ def _canvas(score):
     return _rad(_p2, 520).astype(int)
 
 
+# ------------------------------------------------- scoring and confidence
+print("\n--- scoring and confidence ---")
+from robotx_graey_2026.api.sonar.detect import rescore as _rescore, score as _score
+
+# A percentage has to mean the same thing however many questions you asked.
+# The old plain product did not: four features at 0.9 came out as 0.66.
+_two = {"brightness": {"min": 0, "ideal": 100, "max": 200},
+        "solidity":   {"min": 0.0, "ideal": 0.8, "max": 1.0}}
+_four = dict(_two, height_m={"min": 0.0, "ideal": 2.0, "max": 4.0},
+             thickness_m={"min": 0.0, "ideal": 0.2, "max": 0.4})
+_ideal = _det(100, 2.0, 0.2, 0.8)
+check_true("a perfect match is 100% however many features are asked",
+           _score(_ideal, _two)[1] == 1.0 and _score(_ideal, _four)[1] == 1.0)
+
+# halfway along every taper: should read the same with two features or four
+_half = _det(50, 1.0, 0.1, 0.4)
+_s2, _s4 = _score(_half, _two)[1], _score(_half, _four)[1]
+check_true("asking more questions does not lower the score on its own",
+           abs(_s2 - _s4) < 0.02 and 0.45 < _s2 < 0.55, f"{_s2:.2f} vs {_s4:.2f}")
+
+# but one outright failure still has to veto, whatever the rest say
+_veto = _det(100, 2.0, 0.2, 1.5)          # solidity outside its range
+check_true("one failed feature still kills the whole score",
+           _score(_veto, _four)[1] == 0.0)
+
+_d1 = _det(141, 1.5, 0.09)
+_d1.scores, _d1.score = _score(_d1, _lib.profile_for(_L, "pvc_pipe"))
+check_true("confidence is the score as a whole percent",
+           _d1.confidence == int(round(_d1.score * 100)), f"{_d1.confidence}%")
+check_true("unscored means unscored, not zero", _det(141, 1.5, 0.09).confidence is None)
+
+# a profile asking for height in water with no floor: the feature is dropped
+# rather than failed, and the drop is recorded so the viewer can say so
+_noheight = _det(141, None, 0.09)
+_per_f, _tot = _score(_noheight, _lib.profile_for(_L, "pvc_pipe"))
+check_true("a feature this sweep cannot measure is skipped, not failed",
+           "height_m" not in _per_f and _tot > 0.0, f"scored on {sorted(_per_f)}")
+
+_p3 = perceive(sweep_of(along), target=TARGET)
+check_true("what was dropped is recorded for the viewer to show",
+           _p3.best is not None and _p3.best.unscored == (),
+           f"unscored: {_p3.best.unscored if _p3.best else '-'}")
+
+# rescore: a new target without a new sweep. This is what makes the target box
+# answer at once, since a sweep is 15-25 s and scoring is microseconds.
+_live = perceive(sweep_of(along), target=TARGET)
+check_true("rescore to an impossible target drops the match",
+           _rescore(_live, "brightness=250").best is None)
+check_true("rescore back to a good target brings it back",
+           _rescore(_live, TARGET).best is not None)
+check_true("rescore to no target clears every score",
+           _rescore(_live, None).best is None
+           and all(d.score is None for d in _live.candidates))
+
+# ------------------------------------------- outlines follow the real size
+# A detection is not a point, and drawing a pipeline seen broadside as the same
+# little circle as a pole throws away the thing that separates them.
+print("\n--- outlines follow the real size ---")
+from robotx_graey_2026.api.sonar.viewer import _outline as _out
+
+
+def _extent(per):
+    """Biggest on-screen dimension of the best candidate's drawn outline."""
+    size = 520
+    centre = size // 2
+    radius = centre - int(size * 0.065)
+    ppm = radius / (per.sweep.image.shape[1] * per.sweep.metres_per_bin)
+    poly = _out(per, per.best, centre, ppm)
+    return max(_np.ptp(poly[:, 0]), _np.ptp(poly[:, 1]))
+
+
+def _predicted(per):
+    """How long that blob ought to be drawn, from its own measurements.
+
+    An arc of `span` degrees at `range` metres has a chord of 2*r*sin(span/2),
+    and a blob is at least as wide as it is radially thick. Getting the pixels
+    per metre wrong, or dropping the range, shows up here and nowhere else.
+    """
+    size, d = 520, per.best
+    ppm = (size // 2 - int(size * 0.065)) / (per.sweep.image.shape[1]
+                                             * per.sweep.metres_per_bin)
+    return max(2 * d.range_m * _mm.sin(_mm.radians(d.span_deg) / 2),
+               d.thickness_m) * ppm
+
+
+check_true("a pipe across the view is drawn much longer than one end-on",
+           _extent(q) > _extent(p) * 2,
+           f"{_extent(p)} px along vs {_extent(q)} px across")
+for _per, _nm in ((p, "end-on"), (q, "broadside")):
+    _ratio = _extent(_per) / _predicted(_per)
+    check_true(f"the {_nm} outline is the size the geometry says it should be",
+               0.7 < _ratio < 1.4,
+               f"drawn {_extent(_per)} px, predicted {_predicted(_per):.0f} px")
+
 _sure_img, _weak_img = _canvas(1.0), _canvas(0.05)
 _ring = _np.abs(_sure_img - _weak_img).sum(axis=2) > 30
 check_true("the shading reaches the canvas, not just the colour function",

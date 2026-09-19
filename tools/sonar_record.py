@@ -130,8 +130,9 @@ def main():
 
     others = [n for n in library if n != args.name and library[n].get("profile")]
     if others:
-        print("\nhow this object scores against the others you have measured.")
-        print("two names scoring close together means they are NOT separable:")
+        print("\nhow this object scores against the others you have measured,")
+        print("fed its OWN ideal values. Two names scoring close together means")
+        print("your features do not separate them:")
         worst = None
         from robotx_graey_2026.api.sonar.detect import Detection
         d = Detection(range_m=1.0, angle_deg=0.0, offset_m=0.0,
@@ -143,11 +144,11 @@ def main():
                       thickness_m=entry["profile"].get("thickness_m", {}).get("ideal"))
         for other, sc in reversed(lib.rank(d, library)):
             flag = "  <- this one" if other == args.name else ""
-            print(f"    {other:<20} {sc:.2f}{flag}")
+            print(f"    {other:<20} {sc * 100:3.0f}%{flag}")
             if other != args.name and worst is None:
                 worst = sc
         if worst is not None and worst > 0.5:
-            print("    WARNING: something else scores above 0.5 on this "
+            print("    WARNING: something else scores above 50% on this "
                   "object's own ideal values. Your features do not separate "
                   "them, and the code will confuse them in the water.")
 

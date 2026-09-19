@@ -121,7 +121,16 @@ ALIGNED_SPAN_FRACTION = 0.6     # or: span has fallen to this share of its
                                 # absolute meaning and a zigzag has no single
                                 # direction to align to.
 SPAN_ACROSS_DEG = 30.0          # span above this: pipe lies across the view
-MIN_SCORE = 0.25                # below this, treat a candidate as not found
+# Below this, a candidate is not the thing you are looking for. Scores are the
+# geometric mean of the per-feature scores, so this reads as "every feature has
+# to be at least about half right, on average". 0.50 replaces an old 0.25 that
+# was against a plain PRODUCT of the feature scores: for the two-feature
+# profiles used so far, a product of 0.25 IS a geometric mean of 0.50, so this
+# keeps the bar where it was rather than moving it quietly.
+#
+# It is a knob, not a measurement. Watch what real objects and real clutter
+# score in the viewer and move it to sit between them.
+MIN_SCORE = 0.50
 STALE_SWEEPS = 4                # no detection for this many sweeps means lost
 
 # --------------------------------------------------- what NOT to put here

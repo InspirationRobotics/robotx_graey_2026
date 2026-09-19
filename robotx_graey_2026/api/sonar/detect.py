@@ -52,8 +52,19 @@ class Detection:
         self.solidity = solidity
         self.thickness_m = thickness_m  # radial depth of the return, metres
         self.contour = contour
-        self.score = None
-        self.scores = {}
+        self.score = None       # 0-1, geometric mean of the per-feature scores
+        self.scores = {}        # per feature, 0-1
+        self.unscored = ()      # features the profile wanted and we could not
+                                # supply - height_m when there is no floor
+
+    @property
+    def confidence(self):
+        """The score as a percentage, for reading rather than arithmetic.
+
+        None when nothing was scored, which is not the same as 0. 0 means "this
+        matched nothing"; None means "you never said what to match against".
+        """
+        return None if self.score is None else int(round(self.score * 100))
 
     @property
     def width_m(self):
@@ -210,17 +221,38 @@ def _score_one(value, spec):
 def score(detection, profile):
     """Measured features against a target description -> per-feature and total.
 
-    Total is the PRODUCT, not the average. A candidate has to be plausible on
-    every feature the profile mentions; one near-zero kills it. Averaging would
-    let a great brightness score paper over a completely wrong shape.
+    Total is the GEOMETRIC MEAN of the per-feature scores: multiply them, then
+    take the n-th root. Detection.confidence is the same number as 0-100.
+
+    NOT THE AVERAGE, because averaging lets a good brightness paper over a
+    completely wrong shape. A candidate has to be plausible on every feature the
+    profile mentions, and one zero has to kill it whatever the others say. A
+    geometric mean does that - anything times zero is zero - while an average
+    would still hand back 0.75 for three good features and one total failure.
+
+    NOT THE PLAIN PRODUCT, which is what this used to be, because a product
+    punishes you for asking more questions. Four features at 0.9 each multiply
+    out to 0.66, so adding a feature you are perfectly happy about drags the
+    number down, and the same object scores differently depending on how many
+    features the profile happens to name. The n-th root cancels that: 0.9 on
+    every feature comes out as 0.9 whether there are two features or ten, which
+    is the only way a percentage means anything.
+
+    Features the profile names but the detection cannot supply are SKIPPED, not
+    scored zero. The usual case is height_m in water too shallow to find the
+    bottom, and failing a candidate for that would be blaming it for the pool.
+    But skipping quietly makes the score easier, so the caller records what was
+    dropped in Detection.unscored and the viewer says so on screen.
     """
     feats = detection.features
     per = {name: _score_one(feats[name], spec)
            for name, spec in profile.items() if name in feats}
+    if not per:
+        return per, 0.0
     total = 1.0
     for v in per.values():
         total *= v
-    return per, (total if per else 0.0)
+    return per, total ** (1.0 / len(per))
 
 
 def perceive(sweep, target=None, tuning=None, floor=None, min_score=None,
@@ -273,14 +305,42 @@ def perceive(sweep, target=None, tuning=None, floor=None, min_score=None,
     if not candidates:
         return Perception(sweep, floor, [], None, NOTHING_ABOVE_FLOOR)
 
-    if profile:
-        for d in candidates:
-            d.scores, d.score = score(d, profile)
-        candidates.sort(key=lambda d: d.score, reverse=True)
-        best = candidates[0] if candidates[0].score >= min_score else None
-        reason = OK if best else NOTHING_SCORED
-    else:
-        candidates.sort(key=lambda d: d.range_m)
-        best, reason = None, OK
+    return rescore(Perception(sweep, floor, candidates, None, OK), profile,
+                   min_score=min_score)
 
-    return Perception(sweep, floor, candidates, best, reason)
+
+def rescore(perception, target=None, min_score=None, library_path=None):
+    """Judge an already-measured Perception against a different target.
+
+    Measuring is the expensive half and it does not depend on the target at all:
+    a sweep is fifteen to twenty-five seconds on this hardware, and scoring what
+    came back is microseconds. So changing what you are looking for does not
+    need a new sweep - it needs this. That is what lets the target box on the
+    radar page answer the moment you press enter rather than at the end of the
+    next sweep.
+
+    Modifies the Perception in place and returns it.
+    """
+    profile = L.resolve(target, **({"path": library_path} if library_path else {}))
+    if min_score is None:
+        min_score = S.MIN_SCORE
+
+    candidates = perception.candidates
+    if not profile:
+        for d in candidates:
+            d.scores, d.score, d.unscored = {}, None, ()
+        candidates.sort(key=lambda d: d.range_m)
+        perception.best = None
+        if perception.reason == NOTHING_SCORED:
+            perception.reason = OK
+        return perception
+
+    for d in candidates:
+        d.scores, d.score = score(d, profile)
+        d.unscored = tuple(n for n in profile if n not in d.scores)
+    candidates.sort(key=lambda d: d.score, reverse=True)
+    perception.best = (candidates[0] if candidates
+                       and candidates[0].score >= min_score else None)
+    if perception.reason in (OK, NOTHING_SCORED):
+        perception.reason = OK if perception.best else NOTHING_SCORED
+    return perception
