@@ -140,6 +140,12 @@ def main():
     p.add_argument("--device", help="serial by-id path instead of pingproxy")
     p.add_argument("--name", required=True, help="what to call this object")
     p.add_argument("--library", default=lib.DEFAULT_PATH)
+    p.add_argument("--reset", action="store_true",
+                   help="throw away everything already recorded under --name "
+                        "and start this object over. Profiles are built from "
+                        "EVERY sample an object has ever had, so one run that "
+                        "measured the wrong blob stays in the numbers for good "
+                        "unless you do this.")
     p.add_argument("--notes", default="", help="where it was, how far, anything")
     p.add_argument("--sweeps", type=int, default=8)
     p.add_argument("--near", type=float,
@@ -238,6 +244,32 @@ def main():
                  "threshold?")
 
     library = lib.load(args.library)
+
+    if args.reset:
+        gone = lib.clear(library, args.name)
+        if gone:
+            print(f"[INFO] --reset: discarded {gone} earlier sample(s) of "
+                  f"'{args.name}'")
+
+    # Appending is right when you are measuring the same thing again and wrong
+    # when you have drifted onto something else, and the two look identical from
+    # the command line. Say which this is before writing.
+    old = library.get(args.name)
+    if old and old.get("samples"):
+        print(f"\n[INFO] adding to {len(old['samples'])} sample(s) already "
+              f"recorded under '{args.name}'.")
+        odd = lib.disagreement(old, samples)
+        if odd:
+            print("[WARN] these sweeps do not look like the earlier ones:")
+            for name, mid, lo, hi in odd:
+                print(f"       {name:<13} now {mid:>8.3f}, "
+                      f"before {lo:.3f} to {hi:.3f}")
+            print("       The median of this run sits outside everything the")
+            print("       old samples ever saw. That is evidence of TWO objects,")
+            print("       not more evidence about one - and the profile is built")
+            print("       from both. Re-run with --reset if the earlier run")
+            print("       measured the wrong blob.")
+
     entry = lib.add_samples(library, args.name, samples, args.notes)
     lib.save(library, args.library)
 

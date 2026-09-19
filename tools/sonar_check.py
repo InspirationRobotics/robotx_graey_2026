@@ -594,5 +594,54 @@ check_true("rows never run into the legend",
 check_true("a short panel still shows a few rows rather than none",
            _tr(520, _y) >= 3, f"{_tr(520, _y)} rows at 520 px")
 
+# ------------------------------------------- profiles stay physically possible
+# A profile is padded outwards from the samples, and padding can walk an edge
+# somewhere no measurement could ever be. A bound that cannot be crossed is not
+# a tolerant constraint, it is an absent one.
+print("\n--- profiles stay physically possible ---")
+
+_thin = [_lib.sample_from(_det(90, 1.5, t)) for t in (0.05, 0.06, 0.40)]
+_p2 = _lib.build_profile(_thin)
+check_true("a padded thickness cannot go negative", _p2["thickness_m"]["min"] >= 0.0,
+           f"min {_p2['thickness_m']['min']}")
+_solid = [_lib.sample_from(_det(90, 1.5, 0.09, solid=x)) for x in (0.95, 0.99, 1.0)]
+check_true("a padded solidity cannot exceed 1",
+           _lib.build_profile(_solid)["solidity"]["max"] <= 1.0)
+_bright = [_lib.sample_from(_det(b, 1.5, 0.09)) for b in (240, 250, 255)]
+check_true("a padded brightness cannot exceed 255",
+           _lib.build_profile(_bright)["brightness"]["max"] <= 255.0)
+
+# ------------------------------------------------ starting an object over
+# add_samples only appends, and the profile is rebuilt from EVERY sample the
+# object has ever had - so one run that measured the wrong blob is permanent
+# unless there is a way out, and it is silent because the numbers still parse.
+print("\n--- starting an object over ---")
+
+_L2 = {}
+_wrong = [_lib.sample_from(_det(70, 1.5, 0.45)) for _ in range(4)]   # a wall
+_right = [_lib.sample_from(_det(90, 1.5, 0.07)) for _ in range(4)]   # the pipe
+_lib.add_samples(_L2, "pvc_pipe", _wrong)
+_polluted = _lib.add_samples(_L2, "pvc_pipe", _right)["profile"]
+check_true("appending a different object visibly poisons the profile",
+           _polluted["thickness_m"]["max"] > 0.3,
+           f"thickness max {_polluted['thickness_m']['max']} after 4 good sweeps")
+
+check_true("the disagreement is detected and named",
+           "thickness_m" in [f[0] for f in
+                             _lib.disagreement({"samples": _wrong}, _right)])
+check_true("measuring the same thing twice raises no disagreement",
+           _lib.disagreement({"samples": _right}, _right) == [])
+
+check_true("clear() reports how many samples it dropped",
+           _lib.clear(_L2, "pvc_pipe") == 8)
+check_true("and the object is gone, not emptied in place",
+           "pvc_pipe" not in _L2)
+check_true("clearing something that was never there is not an error",
+           _lib.clear(_L2, "nothing_here") == 0)
+
+_lib.add_samples(_L2, "pvc_pipe", _right)
+check_true("after a reset the profile is the object alone",
+           _lib.profile_for(_L2, "pvc_pipe")["thickness_m"]["max"] < 0.1)
+
 print(f"\n{sum(results)}/{len(results)} checks passed")
 sys.exit(0 if all(results) else 1)

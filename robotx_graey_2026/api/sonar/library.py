@@ -126,10 +126,27 @@ def build_profile(samples, features=IDENTITY, margin=0.25):
         mid = values[len(values) // 2]
         lo, hi = values[0], values[-1]
         pad = max((hi - lo) * margin, abs(mid) * 0.1, 1e-6)
-        profile[name] = {"min": round(lo - pad, 4),
+        lo, hi = _clamp(name, lo - pad, hi + pad)
+        profile[name] = {"min": round(lo, 4),
                          "ideal": round(mid, 4),
-                         "max": round(hi + pad, 4)}
+                         "max": round(hi, 4)}
     return profile
+
+
+def _clamp(name, lo, hi):
+    """Hold an edge inside what the feature can physically be.
+
+    Every profile goes through this, however it was built. Padding a measured
+    spread can otherwise produce a minimum thickness of -0.02 m, which is not a
+    tolerant profile, it is a meaningless one - and a bound that can never be
+    crossed silently stops being a constraint at all.
+    """
+    low_limit, high_limit = LIMITS.get(name, (None, None))
+    if low_limit is not None:
+        lo = max(lo, low_limit)
+    if high_limit is not None:
+        hi = min(hi, high_limit)
+    return lo, hi
 
 
 def profile_from_ideals(ideals, tolerance=TOLERANCE):
@@ -154,12 +171,7 @@ def profile_from_ideals(ideals, tolerance=TOLERANCE):
     for name, ideal in ideals.items():
         ideal = float(ideal)
         pad = abs(ideal) * tolerance or float(tolerance)
-        lo, hi = ideal - pad, ideal + pad
-        low_limit, high_limit = LIMITS.get(name, (None, None))
-        if low_limit is not None:
-            lo = max(lo, low_limit)
-        if high_limit is not None:
-            hi = min(hi, high_limit)
+        lo, hi = _clamp(name, ideal - pad, ideal + pad)
         profile[name] = {"min": round(lo, 4), "ideal": round(ideal, 4),
                          "max": round(hi, 4)}
     return profile
@@ -238,6 +250,39 @@ def add_samples(library, name, samples, notes=""):
     entry["samples"].extend(samples)
     entry["profile"] = build_profile(entry["samples"])
     return entry
+
+
+def clear(library, name):
+    """Forget everything measured under `name`. Returns how many samples went.
+
+    add_samples only ever appends, and a profile is rebuilt from EVERY sample
+    an object has ever had. So one run that measured the wrong blob poisons the
+    profile for good unless there is a way to start again - and the poisoning is
+    quiet, because the numbers still look like numbers.
+    """
+    entry = library.pop(name, None)
+    return len(entry.get("samples", [])) if entry else 0
+
+
+def disagreement(entry, samples, features=IDENTITY):
+    """Which features of `samples` fall outside what `entry` has seen before.
+
+    Appending to an object is right when you are measuring the same thing again
+    and wrong when you have drifted onto something else, and the two look
+    identical from the command line. If the new median sits outside the whole
+    range of the old samples, that is not more evidence about one object - it is
+    evidence about two.
+    """
+    out = []
+    for name in features:
+        old = sorted(s[name] for s in entry.get("samples", []) if name in s)
+        new = sorted(s[name] for s in samples if name in s)
+        if not old or not new:
+            continue
+        mid = new[len(new) // 2]
+        if mid < old[0] or mid > old[-1]:
+            out.append((name, mid, old[0], old[-1]))
+    return out
 
 
 def profile_for(library, name):
