@@ -25,6 +25,16 @@ resolve one, and never scores anything - it hands the text to whichever tool is
 publishing frames, and that tool decides what to do with it and writes a line
 back with set_note(). Trying different ideals against a real object is then
 typing in a browser rather than killing an SSH session and restarting.
+
+THE DETECTION BUTTONS. The picture is a JPEG, so nothing drawn in it can be
+clicked. Underneath it the page builds one real HTML button per detection from
+set_rows(), pages through them when there are more than fit, and posts back
+which ones you picked. The tool passes those to render(), which boxes a long
+one and circles a compact one - so "which blob is my pipe" is a click instead
+of a screenshot with a circle drawn on it in red.
+
+Selecting is never locked, even on a tool that moves the sub: looking at a
+detection changes nothing about what the vehicle does.
 """
 import json
 import threading
@@ -37,7 +47,34 @@ _frame = None
 _target = ""
 _note = ""
 _editable = True
+_rows = []                          # one summary per detection, for the buttons
+_per_page = 10
+_view = {"page": 0, "selected": []}
 _lock = threading.Lock()
+
+
+def set_rows(rows, per_page=10):
+    """Publish a summary of this sweep's detections, for the buttons.
+
+    The picture is a JPEG, so nothing in it can be clicked. The page draws one
+    real HTML button per detection from this list, and the tool reads back which
+    ones you picked. Keep it small - it goes over the tether once a second.
+    """
+    global _rows, _per_page
+    with _lock:
+        _rows = list(rows)
+        _per_page = max(1, int(per_page))
+        # A sweep with fewer blobs than the last one must not leave you stranded
+        # on a page that no longer exists.
+        last = max(0, (len(_rows) - 1) // _per_page)
+        if _view["page"] > last:
+            _view["page"] = last
+
+
+def view():
+    """(page, selected indices) the browser is currently asking for."""
+    with _lock:
+        return _view["page"], set(_view["selected"])
 
 
 def target():
@@ -93,19 +130,58 @@ padding:5px 12px;font:13px ui-monospace,Menlo,monospace;cursor:pointer">apply</b
 <span id="note" style="color:#8ea;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 max-width:45vw"></span></div>
 <img src="/stream" style="flex:1;min-height:0;width:100%;object-fit:contain">
+<div id="bar" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;
+padding:7px 12px;background:#221f1c;font:13px ui-monospace,Menlo,monospace;color:#ddd">
+<button id="prev" style="background:#3a3632;color:#eee;border:1px solid #555;border-radius:3px;
+padding:4px 10px;font:13px ui-monospace,Menlo,monospace;cursor:pointer">&#9664;</button>
+<span id="pg" style="min-width:86px;text-align:center;color:#999"></span>
+<button id="next" style="background:#3a3632;color:#eee;border:1px solid #555;border-radius:3px;
+padding:4px 10px;font:13px ui-monospace,Menlo,monospace;cursor:pointer">&#9654;</button>
+<span style="color:#666">|</span><span id="blobs" style="display:flex;gap:5px;flex-wrap:wrap"></span>
+<button id="none" style="background:#2a2724;color:#999;border:1px solid #444;border-radius:3px;
+padding:4px 10px;font:13px ui-monospace,Menlo,monospace;cursor:pointer">clear</button></div>
 <script>
 var t=document.getElementById('t'),n=document.getElementById('note'),
 g=document.getElementById('go');
 function send(){if(!t.disabled)fetch('/target',{method:'POST',body:t.value});}
 g.onclick=send;
 t.addEventListener('keydown',function(e){if(e.key==='Enter')send();});
+var pg=document.getElementById('pg'),blobs=document.getElementById('blobs'),
+page=0,sel=[],rows=[],per=10,drawn='';
+function push(){fetch('/view',{method:'POST',
+body:JSON.stringify({page:page,selected:sel})});}
+function turn(d){var last=Math.max(0,Math.ceil(rows.length/per)-1);
+page=Math.max(0,Math.min(page+d,last));push();paint();}
+document.getElementById('prev').onclick=function(){turn(-1);};
+document.getElementById('next').onclick=function(){turn(1);};
+document.getElementById('none').onclick=function(){sel=[];push();paint();};
+function toggle(i){var k=sel.indexOf(i);if(k<0)sel.push(i);else sel.splice(k,1);
+push();paint();}
+function paint(){
+var pages=Math.max(1,Math.ceil(rows.length/per));
+if(page>pages-1)page=pages-1;
+pg.textContent=rows.length?('page '+(page+1)+'/'+pages):'no blobs';
+var slice=rows.slice(page*per,(page+1)*per);
+var key=page+'|'+rows.length+'|'+sel.join(',')+'|'+slice.map(function(r){
+return r.i+':'+r.label;}).join(',');
+if(key===drawn)return; drawn=key;
+blobs.innerHTML='';
+slice.forEach(function(r){var b=document.createElement('button');
+var on=sel.indexOf(r.i)>=0;
+b.textContent=r.i+' - '+r.label;
+b.style.cssText='border-radius:3px;padding:4px 9px;cursor:pointer;'+
+'font:13px ui-monospace,Menlo,monospace;border:1px solid '+
+(on?'#eb3cf0':'#555')+';background:'+(on?'#eb3cf0':'#3a3632')+';color:'+
+(on?'#120b13':'#eee');
+b.onclick=function(){toggle(r.i);};blobs.appendChild(b);});}
 (function poll(){fetch('/state').then(function(r){return r.json();}).then(function(s){
 n.textContent=s.note;if(document.activeElement!==t)t.value=s.target;
 var lock=(s.editable===false);
 if(t.disabled!==lock){t.disabled=g.disabled=lock;
 t.style.opacity=g.style.opacity=lock?'0.45':'1';
 t.placeholder=lock?'fixed for this run':
-'blank = no rings. or a name, or height_m=1.5,brightness=140';}})
+'blank = no rings. or a name, or height_m=1.5,brightness=140';}
+rows=s.rows||[];per=s.perPage||10;paint();})
 .catch(function(){}).then(function(){setTimeout(poll,1000);});})();
 </script></body></html>"""
 
@@ -132,13 +208,34 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_POST(self):
-        """The target box. The string is stored and nothing else happens here.
+    def _body(self, cap=1024):
+        length = min(int(self.headers.get('Content-Length') or 0), cap)
+        return self.rfile.read(length)
 
-        Capped at a kilobyte: this listens on 0.0.0.0 so anything on the tether
-        network can reach it, and a setting is a short line of text.
+    def do_POST(self):
+        """Two settings come back from the page: the target, and the view.
+
+        Bodies are capped: this listens on 0.0.0.0 so anything on the tether
+        network can reach it, and both of these are short.
         """
         global _target
+        if self.path == '/view':
+            # Which page to show and which detections to highlight. Never
+            # locked, because looking at something changes nothing - you can
+            # pick a blob apart mid-mission without touching what the sub does.
+            try:
+                want = json.loads(self._body(4096).decode('utf-8', 'replace'))
+            except ValueError:
+                self.send_error(400)
+                return
+            with _lock:
+                last = max(0, (len(_rows) - 1) // _per_page)
+                _view["page"] = max(0, min(int(want.get("page", 0)), last))
+                _view["selected"] = sorted(
+                    {int(i) for i in want.get("selected", [])
+                     if 0 <= int(i) < len(_rows)})[:32]
+            self._send(b'ok', 'text/plain')
+            return
         if self.path != '/target':
             self.send_error(404)
             return
@@ -150,8 +247,7 @@ class _Handler(BaseHTTPRequestHandler):
         if locked:
             self._send(b'target is fixed for this run', 'text/plain')
             return
-        length = min(int(self.headers.get('Content-Length') or 0), 1024)
-        text = self.rfile.read(length).decode('utf-8', 'replace').strip()
+        text = self._body().decode('utf-8', 'replace').strip()
         with _lock:
             _target = text
         self._send(b'ok', 'text/plain')
@@ -162,7 +258,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if self.path == '/state':
             with _lock:
-                state = {'target': _target, 'note': _note, 'editable': _editable}
+                state = {'target': _target, 'note': _note, 'editable': _editable,
+                         'rows': _rows, 'perPage': _per_page,
+                         'page': _view["page"], 'selected': _view["selected"]}
             self._send(json.dumps(state).encode(), 'application/json')
             return
         if self.path != '/stream':

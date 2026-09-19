@@ -534,6 +534,37 @@ try:
     _wv.set_target_editable(True)
     _url.urlopen(_url.Request(_base + "/target", data=b"brightness=1", method="POST"))
     check_true("unlocking lets it through again", _wv.target() == "brightness=1")
+
+    # Paging and picking detections. Never locked, even on a tool that moves
+    # the sub, because looking at a blob changes nothing about what it does.
+    _wv.set_rows([{"i": i, "label": f"{i}m"} for i in range(25)], per_page=10)
+    _url.urlopen(_url.Request(_base + "/view", method="POST",
+                              data=b'{"page":2,"selected":[3,7,3]}'))
+    check_true("the page and the picked blobs come back", _wv.view() == (2, {3, 7}))
+    _url.urlopen(_url.Request(_base + "/view", method="POST",
+                              data=b'{"page":99,"selected":[]}'))
+    check_true("a page past the end is clamped, not accepted",
+               _wv.view()[0] == 2, f"page {_wv.view()[0]} of 0-2")
+    _url.urlopen(_url.Request(_base + "/view", method="POST",
+                              data=b'{"page":0,"selected":[1,999,-4]}'))
+    check_true("a pick that is not a real detection is dropped",
+               _wv.view()[1] == {1})
+
+    # A sweep with fewer blobs than the last must not strand you on a page that
+    # no longer exists - the picture would simply stop changing.
+    _url.urlopen(_url.Request(_base + "/view", method="POST",
+                              data=b'{"page":2,"selected":[]}'))
+    _wv.set_rows([{"i": i, "label": f"{i}m"} for i in range(4)], per_page=10)
+    check_true("a shrinking sweep pulls you back to a page that exists",
+               _wv.view()[0] == 0, f"page {_wv.view()[0]}")
+    try:
+        _url.urlopen(_url.Request(_base + "/view", method="POST", data=b'not json'))
+        _refused = False
+    except _url.HTTPError as _e:
+        _refused = _e.code == 400
+    check_true("a malformed view POST is refused, and the server survives it",
+               _refused and _wv.view()[0] == 0
+               and _json.loads(_url.urlopen(_base + "/state").read())["page"] == 0)
 except OSError as _exc:
     print(f"SKIP  target box checks ({_exc}) - port 8099 busy?")
 
@@ -642,6 +673,82 @@ check_true("clearing something that was never there is not an error",
 _lib.add_samples(_L2, "pvc_pipe", _right)
 check_true("after a reset the profile is the object alone",
            _lib.profile_for(_L2, "pvc_pipe")["thickness_m"]["max"] < 0.1)
+
+# ------------------------------------------------ picking a blob by hand
+# The picture is a JPEG so nothing in it is clickable; the page posts back which
+# detections to pick out. In discovery mode nothing is scored and nothing is
+# outlined, so this is the ONLY way to tell the code which blob you mean.
+print("\n--- picking a blob by hand ---")
+
+_many = perceive(sweep_of(Scene(
+    [((x, -0.25, z), (x, 0.25, z)) for x, z in
+     [(2.6, -2.2), (-2.4, -2.6), (1.2, -1.9), (-1.0, -3.0), (3.4, -2.8)]]
+    + [((-3.4, 0.0, -2.9), (-1.0, 0.0, -2.9))], floor_z=FLOOR_Z)))
+check_true("the scene gives several blobs to pick between",
+           len(_many.candidates) >= 4, f"{len(_many.candidates)} candidates")
+
+# Count the HIGHLIGHT's own colour rather than comparing whole images. Magenta
+# is a colour the ramp never produces - it runs blue-cyan-green-yellow-orange-red
+# - so this counts exactly the pixels the pick added and nothing else. Whole-image
+# equality was too strong a claim: OpenCV's threaded resize is not bit-exact run
+# to run, and it moved two antialiased pixels on the black range rings.
+def _hilite_px(selected):
+    im = _rad(_many, 520, None, selected)
+    b = im[:, :, 0].astype(int)
+    g = im[:, :, 1].astype(int)
+    r = im[:, :, 2].astype(int)
+    return int(((b > 150) & (r > 150) & (g < 120)).sum())
+
+
+check_true("nothing is highlighted until you pick something",
+           _hilite_px(set()) == 0)
+check_true("picking a blob marks it, even with nothing scored",
+           _hilite_px({0}) > 0 and all(d.score is None for d in _many.candidates),
+           f"{_hilite_px({0})} px")
+check_true("unpicking it takes the mark away", _hilite_px(set()) == 0)
+check_true("a pick that is not a real detection marks nothing, and does not crash",
+           _hilite_px({99}) == 0)
+check_true("two picks mark more than one", _hilite_px({0, 1}) > _hilite_px({0}))
+
+_plain = _rad(_many, 520).astype(int)
+
+# a compact blob gets a circle, a long one a box: which you get is itself the
+# answer to "what does this thing look like"
+_by_span = sorted(range(len(_many.candidates)),
+                  key=lambda i: _many.candidates[i].span_deg)
+_small, _long = _by_span[0], _by_span[-1]
+
+
+def _marked(i):
+    """How big the mark is on screen, from the highlight colour alone."""
+    im = _rad(_many, 520, None, {i})
+    hit = ((im[:, :, 0].astype(int) > 150) & (im[:, :, 2].astype(int) > 150)
+           & (im[:, :, 1].astype(int) < 120))
+    ys, xs = _np.nonzero(hit)
+    return (xs.max() - xs.min(), ys.max() - ys.min()) if len(xs) else (0, 0)
+
+
+_sw, _sh = _marked(_small)
+_lw, _lh = _marked(_long)
+check_true("a long blob is marked with something bigger than a fixed circle",
+           max(_lw, _lh) > max(_sw, _sh) * 1.5,
+           f"span {_many.candidates[_long].span_deg:.0f} deg -> {_lw}x{_lh} px, "
+           f"span {_many.candidates[_small].span_deg:.0f} deg -> {_sw}x{_sh} px")
+
+# Paging past the end must land on a real page, not a blank one. Compared with a
+# tolerance rather than exactly: OpenCV's threaded resize is not bit-exact run to
+# run and moves a couple of antialiased pixels on the range rings, while a
+# genuinely different page of text differs by thousands.
+def _pixels_apart(a, b):
+    return int((_np.abs(a.astype(int) - b.astype(int)).sum(axis=2) > 30).sum())
+
+
+_p1 = render(_many, None, page=0)
+_far = render(_many, None, page=99)
+check_true("paging past the end lands on a real page, not a blank one",
+           _pixels_apart(_far, _p1) < 200,
+           f"{_pixels_apart(_far, _p1)} px from page 1 "
+           f"({len(_many.candidates)} candidates, one page)")
 
 print(f"\n{sum(results)}/{len(results)} checks passed")
 sys.exit(0 if all(results) else 1)

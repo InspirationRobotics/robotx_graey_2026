@@ -94,7 +94,8 @@ from robotx_graey_2026.api.sonar.detect import perceive, rescore
 from robotx_graey_2026.api.sonar.driver import explain
 from robotx_graey_2026.api.sonar.floor import Floor
 from robotx_graey_2026.api.sonar.sweep import Sonar
-from robotx_graey_2026.api.sonar.viewer import Radar, render
+from robotx_graey_2026.api.sonar.viewer import (SIZE, Radar, render,
+                                                table_rows)
 
 
 def main():
@@ -234,8 +235,7 @@ def main():
         # republished now rather than in another fifteen to twenty-five seconds.
         if shown[0] is not None:
             rescore(shown[0], profile)
-            webview.publish(render(shown[0], None, radar=radar, target=label,
-                                   state=f"RESCORED  down={down_gradian}"))
+            publish(shown[0], f"RESCORED  down={down_gradian}")
 
     # A sweep takes many seconds, so publish partial frames while the head is
     # still moving. Without this the browser shows one frozen picture and you
@@ -244,6 +244,17 @@ def main():
     # This is also where the target box gets read. Checking it once per ping
     # rather than once per sweep is what makes pressing enter feel immediate
     # instead of costing you the rest of a twenty-second sweep.
+    def publish(per, state):
+        """One frame, with whatever page and selection the browser asked for."""
+        page, selected = webview.view()
+        webview.set_rows(
+            [{"i": i, "label": f"{d.range_m:.2f}m"
+              + ("" if d.confidence is None else f" {d.confidence}%")}
+             for i, d in enumerate(per.candidates)],
+            per_page=table_rows(SIZE, 224))
+        webview.publish(render(per, None, state=state, radar=radar,
+                               target=label, page=page, selected=selected))
+
     def live(partial):
         retarget()
         radar.update(partial)
@@ -251,8 +262,7 @@ def main():
         if per is None:
             per = perceive(partial, target=profile, tuning=tuning, floor=None,
                            require_floor=False)
-        webview.publish(render(per, None, state=f"SCANNING  down={down_gradian}",
-                               radar=radar, target=label))
+        publish(per, f"SCANNING  down={down_gradian}")
 
     while True:
         if args.web:
@@ -281,8 +291,10 @@ def main():
         elapsed = time.time() - t0
         view = None
         if not args.headless:
+            page, selected = webview.view() if args.web else (0, ())
             view = render(per, None, state=f"POLE TEST  down={down_gradian}",
-                          radar=radar, target=label)
+                          radar=radar, target=label, page=page,
+                          selected=selected)
             cv2.putText(view, f"sweep {elapsed:.1f}s", (16, view.shape[0] - 18),
                         cv2.FONT_HERSHEY_DUPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
 
@@ -313,7 +325,9 @@ def main():
         # web and headless both print, because over SSH the numbers are the
         # thing you can actually read back to someone.
         _print_sweep(per, elapsed, down_gradian)
-        if view is not None:
+        if args.web:
+            publish(per, f"POLE TEST  down={down_gradian}")
+        elif view is not None:
             webview.publish(view)
         if args.once:
             break

@@ -67,6 +67,11 @@ HEAD = (255, 255, 255)
 CONF_SURE = (10, 10, 10)
 CONF_WEAK = (220, 220, 220)
 
+# Picked out by hand from the page. Magenta because the colour ramp runs
+# blue-cyan-green-yellow-orange-red and never goes near it, so a highlight can
+# never be mistaken for something the sonar heard.
+HILITE = (235, 60, 240)
+
 FONT = cv2.FONT_HERSHEY_DUPLEX   # heavier strokes than SIMPLEX; survives JPEG
 
 # Height the legend block needs at the bottom of the panel. The candidate
@@ -139,7 +144,7 @@ class Radar:
 
 
 def render(perception, memory=None, state="", radar=None, size=SIZE,
-           panel_w=PANEL_W, target=""):
+           panel_w=PANEL_W, target="", page=0, selected=()):
     """Radar beside the numbers.
 
     Pass a Radar to keep the picture between calls. Without one, the radar shows
@@ -149,9 +154,16 @@ def render(perception, memory=None, state="", radar=None, size=SIZE,
     target is only ever printed. What the rings do is decided entirely by the
     scores already sitting on the candidates, so this cannot show one target
     while the detector used another.
+
+    page picks which slice of the candidate table to print. selected is the set
+    of candidate indices to pick out on the radar, whether or not they scored -
+    which is the point, since in discovery mode nothing is scored and the table
+    is the only way to tell one blob from another.
     """
-    return np.hstack([_radar(perception, size, radar),
-                      _panel(perception, memory, state, panel_w, size, target)])
+    selected = set(selected or ())
+    return np.hstack([_radar(perception, size, radar, selected),
+                      _panel(perception, memory, state, panel_w, size, target,
+                             page, selected)])
 
 
 def confidence_colour(score):
@@ -195,7 +207,7 @@ def _to_screen(centre, angle_deg, r_px):
             int(round(centre - r_px * math.sin(a))))
 
 
-def _radar(p, size, radar=None):
+def _radar(p, size, radar=None, selected=()):
     canvas = np.full((size, size, 3), SKY, np.uint8)
     if radar is None:
         radar = Radar()
@@ -267,6 +279,24 @@ def _radar(p, size, radar=None):
         _text(canvas, f"{i}  {d.confidence}%", (x + 16, y - 14), 0.5, shade, 1,
               halo=INK)
 
+    # Hand-picked candidates, drawn last so nothing covers them, and drawn
+    # whether or not they were scored. A box round a long thing and a circle
+    # round a compact one, because which of those you get is itself the answer
+    # to "what does this look like".
+    for i in selected:
+        if not (0 <= i < len(p.candidates)):
+            continue
+        d = p.candidates[i]
+        x, y = _to_screen(c, d.angle_deg, d.range_m * ppm)
+        poly = _outline(p, d, c, ppm)
+        if poly is not None and len(poly) >= 3 and max(
+                np.ptp(poly[:, 0]), np.ptp(poly[:, 1])) >= 20:
+            box = cv2.boxPoints(cv2.minAreaRect(poly)).astype(np.int32)
+            cv2.polylines(canvas, [box], True, HILITE, 2, cv2.LINE_AA)
+        else:
+            cv2.circle(canvas, (x, y), 17, HILITE, 2, cv2.LINE_AA)
+        _text(canvas, str(i), (x + 20, y + 24), 0.6, HILITE, 1, halo=MARK)
+
     cv2.drawMarker(canvas, (c, c), MARK, cv2.MARKER_CROSS, 12, 1, cv2.LINE_AA)
     return canvas
 
@@ -336,7 +366,8 @@ def _dashed_circle(img, centre, radius, colour, dashes=40):
                     colour, 1, cv2.LINE_AA)
 
 
-def _panel(p, memory, state, width, height, target=""):
+def _panel(p, memory, state, width, height, target="", page=0,
+           selected=()):
     panel = np.full((height, width, 3), BG, np.uint8)
     L = 22
     y = 48
@@ -382,18 +413,28 @@ def _panel(p, memory, state, width, height, target=""):
         _text(panel, "no detections", (L, y), 0.6, DIM)
         y += 40
     else:
-        for i, d in enumerate(p.candidates[:rows]):
+        pages = max(1, (len(p.candidates) + rows - 1) // rows)
+        page = max(0, min(int(page), pages - 1))
+        first = page * rows
+        # Indices stay GLOBAL across pages. Candidate 11 is candidate 11 on
+        # page 2, not candidate 1 - otherwise the number on the radar and the
+        # number in the table stop agreeing, which is the one thing this table
+        # exists to do.
+        for i, d in enumerate(p.candidates[first:first + rows], start=first):
             cells = [str(i), f"{d.range_m:.2f}m", f"{d.offset_m:+.2f}m",
                      "-" if d.height_m is None else f"{d.height_m:.2f}m",
                      f"{d.span_deg:.0f}°".replace("°", " deg"),
                      f"{d.brightness:.0f}", f"{d.solidity:.2f}",
                      "-" if d.confidence is None else f"{d.confidence}%"]
             colour = INK if d is not p.best else (120, 240, 150)
+            if i in selected:
+                colour = HILITE
             for x, cell in zip(xs, cells):
                 _text(panel, cell, (x, y), 0.55, colour)
             y += ROW_H
-        if len(p.candidates) > rows:
-            _text(panel, f"+ {len(p.candidates) - rows} more", (L, y), 0.5, DIM)
+        if pages > 1:
+            _text(panel, f"page {page + 1} of {pages}   "
+                         f"({len(p.candidates)} detections)", (L, y), 0.5, DIM)
             y += 30
 
     if explained is not None and explained.scores:
