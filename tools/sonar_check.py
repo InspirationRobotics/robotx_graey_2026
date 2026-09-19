@@ -520,6 +520,20 @@ try:
     _url.urlopen(_url.Request(_base + "/target", data=b"x" * 5000, method="POST"))
     check_true("an oversized body is capped, not swallowed whole",
                len(_wv.target()) == 1024)
+
+    # A tool that moves the sub locks the box. The lock has to live on the
+    # SERVER: a disabled input is only a suggestion to a browser, and this port
+    # is reachable from anything on the tether network.
+    _wv.set_target("pvc_pipe")
+    _wv.set_target_editable(False)
+    _url.urlopen(_url.Request(_base + "/target", data=b"brightness=1", method="POST"))
+    check_true("a locked target refuses a POST, not just greys out the box",
+               _wv.target() == "pvc_pipe")
+    check_true("the page is told the target is locked",
+               _json.loads(_url.urlopen(_base + "/state").read())["editable"] is False)
+    _wv.set_target_editable(True)
+    _url.urlopen(_url.Request(_base + "/target", data=b"brightness=1", method="POST"))
+    check_true("unlocking lets it through again", _wv.target() == "brightness=1")
 except OSError as _exc:
     print(f"SKIP  target box checks ({_exc}) - port 8099 busy?")
 

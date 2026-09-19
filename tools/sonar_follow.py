@@ -56,11 +56,11 @@ from robotx_graey_2026.api.pixhawk.mavlink import Link
 from robotx_graey_2026.api.sonar import library as lib
 from robotx_graey_2026.api.sonar import settings as S
 from robotx_graey_2026.api.sonar import webview
-from robotx_graey_2026.api.sonar.detect import perceive
+from robotx_graey_2026.api.sonar.detect import OK, Perception, perceive
 from robotx_graey_2026.api.sonar.driver import (
     Driver, FINISHED, FORWARD, HOLD, STRAFE, YAW_BY, YAW_TO)
 from robotx_graey_2026.api.sonar.sweep import Sonar
-from robotx_graey_2026.api.sonar.viewer import render
+from robotx_graey_2026.api.sonar.viewer import Radar, render
 
 RESEND_S = 3.0          # matches mission_base: unchanged targets go no faster
 POSE_TIMEOUT_S = 5.0
@@ -183,7 +183,18 @@ def main():
     for name, spec in sorted(driver.profile.items()):
         print(f"       {name:<13} min {spec['min']:>8.3f}   "
               f"ideal {spec['ideal']:>8.3f}   max {spec['max']:>8.3f}")
+    # The radar the mission draws on. Persistent, so the picture survives
+    # between sweeps instead of blinking empty every time the head restarts.
+    radar = Radar()
     if args.web:
+        # The target is FIXED for a run. The box is disabled rather than hidden
+        # so the page still shows what is being hunted - but changing it from a
+        # browser while the sub is moving would leave the state machine on its
+        # old heading with its old memory while the detector scored something
+        # else, which is a good way to lose a vehicle.
+        webview.set_target(args.target)
+        webview.set_target_editable(False)
+        webview.set_note("fixed for this run")
         webview.serve(args.port)
         print(f"[INFO] view on http://0.0.0.0:{args.port}")
 
@@ -200,6 +211,15 @@ def main():
     target = None
     last_send = 0.0
 
+    # The last complete perception, so a partial frame can show the detections
+    # the driver actually acted on rather than half-measured ones from a sweep
+    # that is still in progress.
+    shown = [None]
+
+    def _blank(partial):
+        """A Perception with no candidates, for the very first partial frame."""
+        return Perception(partial, None, [], None, OK)
+
     for i in range(args.max_sweeps):
         if not refresh_pose(link, pose, need_pos=need_pos):
             print("[WARN] lost pose - holding")
@@ -209,7 +229,21 @@ def main():
         heading_deg = math.degrees(yaw) % 360.0
 
         state = driver.state
-        sweep = sonar.sweep_for_state(driver.sweep_state(), heading_deg)
+
+        # Publish while the head is still moving. A sweep is 9-25 s, so without
+        # this the picture freezes for the whole of one and you cannot tell a
+        # working sonar from a stalled one - which is exactly the question you
+        # want answered while the sub is under way. The detections drawn are the
+        # LAST complete sweep's, the ones the driver actually acted on.
+        def live(partial):
+            radar.update(partial)
+            webview.publish(render(shown[0] or _blank(partial), driver.memory,
+                                   state=f"{driver.state}  scanning",
+                                   radar=radar, target=args.target))
+
+        sweep = sonar.sweep_for_state(driver.sweep_state(), heading_deg,
+                                      on_ping=live if args.web else None)
+        radar.update(sweep)
         # driver.profile, not args.target: one resolved profile, so the state
         # machine cannot be steering towards something the detector never scored.
         per = perceive(sweep, target=driver.profile, tuning=tuning,
@@ -221,9 +255,10 @@ def main():
         print(f"    {action.kind} "
               f"{'' if action.value is None else f'{action.value:+.2f}'}: {action.why}")
 
+        shown[0] = per
         if args.web:
             webview.publish(render(per, driver.memory, state=driver.state,
-                                   target=args.target))
+                                   radar=radar, target=args.target))
 
         if action.kind == FINISHED:
             print("[INFO] driver reports finished")

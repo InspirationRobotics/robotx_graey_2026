@@ -36,6 +36,7 @@ import cv2
 _frame = None
 _target = ""
 _note = ""
+_editable = True
 _lock = threading.Lock()
 
 
@@ -43,6 +44,23 @@ def target():
     """Whatever was last typed into the target box."""
     with _lock:
         return _target
+
+
+def set_target_editable(flag):
+    """Whether the browser may change the target.
+
+    A tool that never reads target() must call this with False, or the page
+    shows a box you can type into that silently does nothing - which is worse
+    than having no box at all.
+
+    It is also the safe default for anything that MOVES THE SUB. Changing what
+    the vehicle is hunting, from a browser, midway through an autonomous run, is
+    not a knob worth having: the state machine would keep its old heading and
+    its old memory while the detector started scoring something else.
+    """
+    global _editable
+    with _lock:
+        _editable = bool(flag)
 
 
 def set_target(text):
@@ -76,12 +94,18 @@ padding:5px 12px;font:13px ui-monospace,Menlo,monospace;cursor:pointer">apply</b
 max-width:45vw"></span></div>
 <img src="/stream" style="flex:1;min-height:0;width:100%;object-fit:contain">
 <script>
-var t=document.getElementById('t'),n=document.getElementById('note');
-function send(){fetch('/target',{method:'POST',body:t.value});}
-document.getElementById('go').onclick=send;
+var t=document.getElementById('t'),n=document.getElementById('note'),
+g=document.getElementById('go');
+function send(){if(!t.disabled)fetch('/target',{method:'POST',body:t.value});}
+g.onclick=send;
 t.addEventListener('keydown',function(e){if(e.key==='Enter')send();});
 (function poll(){fetch('/state').then(function(r){return r.json();}).then(function(s){
-n.textContent=s.note;if(document.activeElement!==t)t.value=s.target;})
+n.textContent=s.note;if(document.activeElement!==t)t.value=s.target;
+var lock=(s.editable===false);
+if(t.disabled!==lock){t.disabled=g.disabled=lock;
+t.style.opacity=g.style.opacity=lock?'0.45':'1';
+t.placeholder=lock?'fixed for this run':
+'blank = no rings. or a name, or height_m=1.5,brightness=140';}})
 .catch(function(){}).then(function(){setTimeout(poll,1000);});})();
 </script></body></html>"""
 
@@ -118,6 +142,14 @@ class _Handler(BaseHTTPRequestHandler):
         if self.path != '/target':
             self.send_error(404)
             return
+        # Refused here, not just greyed out in the page. The lock is on the
+        # server because anything on the tether network can reach this port, and
+        # a disabled input is only a suggestion.
+        with _lock:
+            locked = not _editable
+        if locked:
+            self._send(b'target is fixed for this run', 'text/plain')
+            return
         length = min(int(self.headers.get('Content-Length') or 0), 1024)
         text = self.rfile.read(length).decode('utf-8', 'replace').strip()
         with _lock:
@@ -130,7 +162,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if self.path == '/state':
             with _lock:
-                state = {'target': _target, 'note': _note}
+                state = {'target': _target, 'note': _note, 'editable': _editable}
             self._send(json.dumps(state).encode(), 'application/json')
             return
         if self.path != '/stream':

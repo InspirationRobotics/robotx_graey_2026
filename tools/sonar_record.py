@@ -25,28 +25,68 @@ A sweep usually finds several. Two ways to say which one you mean:
 --near is the honest one, because you know where you put the thing. --pick is
 for when the table is stable and you can see which row it is.
 
-WHAT COMES OUT
+WHAT IT ACTUALLY COLLECTS, AND WHAT IT THROWS AWAY
 
-Raw samples, one per sweep, plus a profile built from them: the median becomes
-the ideal and the observed spread becomes the edges. The profile is what
-identify() scores against. Both are kept, so a profile can be rebuilt later
-under different rules without getting wet again.
+Not everything. Per sweep it keeps SEVEN NUMBERS ABOUT ONE BLOB - the one you
+pointed at with --near or --pick:
 
-Only pose-invariant features go into the profile - height above floor,
-brightness, radial thickness, solidity. Span and width are recorded but left
-out, because they change with which way you are looking at the pipe rather than
-with what it is.
+    height_m  brightness  span_deg  solidity  width_m  thickness_m  range_m
+
+Every other blob in that sweep, and the sonar picture itself, is discarded. So
+if you later change your mind about the threshold, or want a feature nobody has
+written yet - an acoustic shadow, a straightness score - the only way back is
+another trip to the water.
+
+--save-raw fixes that. It dumps each sweep exactly as it came off the sonar,
+about 200 kB apiece, alongside the angles, the metres-per-bin and the
+calibration in force. Any measurement can then be recomputed at a desk. Use it:
+pool time is the scarce thing, not disk.
+
+Of the seven, only four go into the profile - height above floor, brightness,
+radial thickness, solidity. Span and width are recorded but left out, because
+they change with which way you are looking at the pipe rather than with what it
+is. The profile takes the median of each as the ideal and the observed spread as
+the edges, and both it and the raw samples are kept, so it can be rebuilt under
+different rules later.
 
 Needs the workspace sourced, or PYTHONPATH=. from the repo root.
 """
 import argparse
+import json
+import os
 import sys
 import time
 
+import numpy as np
+
 from robotx_graey_2026.api.sonar import library as lib
 from robotx_graey_2026.api.sonar import settings as S
-from robotx_graey_2026.api.sonar.detect import perceive
+from robotx_graey_2026.api.sonar import webview
+from robotx_graey_2026.api.sonar.detect import OK, Perception, perceive
 from robotx_graey_2026.api.sonar.sweep import Sonar
+from robotx_graey_2026.api.sonar.viewer import Radar, render
+
+
+def _save_raw(directory, name, index, sweep):
+    """Dump one sweep exactly as it came off the sonar.
+
+    The measurements this tool stores are seven numbers about one blob. That is
+    what the scorer needs, and it is also everything else thrown away: change
+    your mind about the threshold, or want a feature nobody has written yet, and
+    the only way back is another trip to the water.
+
+    A raw sweep is the whole picture. Keep them and any measurement can be
+    recomputed at a desk, for about 200 kB a sweep.
+    """
+    os.makedirs(directory, exist_ok=True)
+    stem = os.path.join(directory, f"{name}_{int(time.time())}_{index:03d}")
+    np.save(stem + ".npy", sweep.image)
+    with open(stem + ".json", "w") as fh:
+        json.dump({"angles_deg": list(sweep.angles_deg),
+                   "metres_per_bin": sweep.metres_per_bin,
+                   "heading_deg": sweep.heading_deg,
+                   "down_gradian": S.DOWN_GRADIAN,
+                   "speed_of_sound": S.SPEED_OF_SOUND}, fh)
 
 
 def pick(candidates, near=None, index=None):
@@ -78,6 +118,16 @@ def main():
     p.add_argument("--step", type=float, default=2.0)
     p.add_argument("--threshold", type=int, default=S.DETECT["threshold"])
     p.add_argument("--down-gradian", type=int, default=S.DOWN_GRADIAN)
+    p.add_argument("--web", action="store_true",
+                   help="watch it on http://<this-machine>:8081 while it "
+                        "records. One process, so it does not fight the "
+                        "viewer for the motor.")
+    p.add_argument("--port", type=int, default=8081)
+    p.add_argument("--save-raw", default=None,
+                   help="also dump every sweep as it came off the sonar, into "
+                        "this directory. About 200 kB a sweep, and the only way "
+                        "to re-measure something later without getting wet "
+                        "again. Use it - pool time is the scarce thing, not disk.")
     p.add_argument("--no-floor", action="store_true",
                    help="skip the floor. Height is then not recorded at all, "
                         "which costs you the strongest identity feature - "
@@ -97,13 +147,37 @@ def main():
     if args.no_floor:
         print("[INFO] no floor - height_m will be missing from these samples")
 
+    radar = Radar()
+    if args.web:
+        # No target while recording - this tool exists to find out what the
+        # numbers ARE, so there is nothing to score against yet and the box
+        # would be a lie.
+        webview.set_target("")
+        webview.set_target_editable(False)
+        webview.set_note("recording - nothing is being scored")
+        webview.serve(args.port)
+        print(f"[INFO] watch it on http://0.0.0.0:{args.port}")
+
     samples, missed = [], 0
     for i in range(args.sweeps):
-        sweep = sonar.sweep(args.start, args.end, args.step, args.range)
+        def live(partial):
+            radar.update(partial)
+            webview.publish(render(Perception(partial, None, [], None, OK), None,
+                                   state=f"RECORDING {args.name}  {i + 1}/{args.sweeps}",
+                                   radar=radar))
+
+        sweep = sonar.sweep(args.start, args.end, args.step, args.range,
+                            on_ping=live if args.web else None)
         # No target, always. This is the tool that finds out what the numbers
         # are; scoring them against a guess first would be circular.
         per = perceive(sweep, tuning={"threshold": args.threshold},
                        require_floor=not args.no_floor)
+        if args.save_raw:
+            _save_raw(args.save_raw, args.name, i, sweep)
+        if args.web:
+            radar.update(sweep)
+            webview.publish(render(per, None, radar=radar,
+                                   state=f"RECORDING {args.name}  {i + 1}/{args.sweeps}"))
         d = pick(per.candidates, args.near, args.pick)
         if d is None:
             missed += 1

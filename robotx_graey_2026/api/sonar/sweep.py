@@ -161,8 +161,15 @@ class Sonar:
         image = np.vstack(rows) if rows else np.zeros((0, 1), dtype=np.uint8)
         return Sweep(image, angles, self.metres_per_bin, heading_deg)
 
-    def sweep_for_state(self, state, heading_deg=None):
-        """Sweep using the settings for whichever state the driver is in."""
+    def sweep_for_state(self, state, heading_deg=None, on_ping=None):
+        """Sweep using the settings for whichever state the driver is in.
+
+        on_ping is passed straight through, so a mission can show a live
+        picture. Without it the display only updates once a whole sweep has
+        finished - up to twenty-five seconds of a frozen screen, which looks
+        exactly like a crashed sonar at the moment you most want to know the
+        difference.
+        """
         cfg = S.SWEEP[state]
         return self.sweep(cfg["start_deg"], cfg["end_deg"], cfg["step_deg"],
-                          cfg["max_range_m"], heading_deg)
+                          cfg["max_range_m"], heading_deg, on_ping=on_ping)
