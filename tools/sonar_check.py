@@ -537,5 +537,36 @@ try:
 except OSError as _exc:
     print(f"SKIP  target box checks ({_exc}) - port 8099 busy?")
 
+# ------------------------------------------------- pointing at one blob
+# Which candidate the recorder measures. Get this wrong and the profile is
+# built from the wrong object, which is the sort of mistake that only shows up
+# a month later when nothing matches anything.
+print("\n--- pointing the recorder at a blob ---")
+from tools.sonar_record import pick as _pick
+
+_target_blob = _det(98, 1.5, 0.09, rng=2.10)          # the pipe, to starboard
+_target_blob.angle_deg = 0.0
+_ring = _det(95, 1.5, 0.40, rng=2.05)                 # reverberation, to port
+_ring.angle_deg = 180.0
+_near_ring = _det(77, 1.5, 0.30, rng=1.76)            # something else, to port
+_near_ring.angle_deg = 170.0
+_blobs = [_ring, _near_ring, _target_blob]
+
+check_true("--pick takes a row number", _pick(_blobs, index=1) is _near_ring)
+check_true("--pick out of range gives nothing, rather than the wrong blob",
+           _pick(_blobs, index=9) is None)
+
+# The trap, pinned down so it stays fixed. Asked for 2.07 m, the ring at 2.05 is
+# 0.02 m away and the pipe at 2.10 is 0.03 m away, so range alone hands back the
+# ring - an object half a circle from where you put yours.
+check_true("range alone can pick the ring instead of the object",
+           _pick(_blobs, near=2.07) is _ring,
+           "0.02 m nearer in range, and half a circle away in reality")
+check_true("--bearing makes it pick the object on the side you put it",
+           _pick(_blobs, near=2.07, bearing=0.0) is _target_blob)
+check_true("--bearing to port picks the port one",
+           _pick(_blobs, near=2.07, bearing=180.0) is _ring)
+check_true("nothing to pick from gives nothing", _pick([], near=2.1) is None)
+
 print(f"\n{sum(results)}/{len(results)} checks passed")
 sys.exit(0 if all(results) else 1)

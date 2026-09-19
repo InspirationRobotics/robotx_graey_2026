@@ -19,11 +19,17 @@ WHICH BLOB IS THE OBJECT
 
 A sweep usually finds several. Two ways to say which one you mean:
 
-    --near 1.3      the one closest to 1.3 m. Use the distance you measured.
-    --pick 0        by row number, as printed.
+    --near 1.3              the one closest to 1.3 m
+    --near 1.3 --bearing 0  the one closest to 1.3 m OFF THE STARBOARD SIDE
+    --pick 0                by row number, as printed
 
---near is the honest one, because you know where you put the thing. --pick is
-for when the table is stable and you can see which row it is.
+--near on its own compares distances and nothing else, so a blob at the right
+range on the wrong side wins just as easily as your object. Give --bearing too
+whenever anything else sits at a similar distance. Bearings are 0 starboard,
+90 up, 180 port, 270 straight down.
+
+--pick is for when the table is stable and you can see which row it is, but row
+order can change between sweeps, so prefer the measurements you took yourself.
 
 WHAT IT ACTUALLY COLLECTS, AND WHAT IT THROWS AWAY
 
@@ -53,6 +59,7 @@ Needs the workspace sourced, or PYTHONPATH=. from the repo root.
 """
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -89,15 +96,41 @@ def _save_raw(directory, name, index, sweep):
                    "speed_of_sound": S.SPEED_OF_SOUND}, fh)
 
 
-def pick(candidates, near=None, index=None):
-    """Which detection is the object we mean?"""
+def _xy(range_m, angle_deg):
+    a = math.radians(angle_deg)
+    return range_m * math.cos(a), range_m * math.sin(a)
+
+
+def pick(candidates, near=None, index=None, bearing=None):
+    """Which detection is the object we mean?
+
+    --pick takes a row number straight off the table. Otherwise we take the
+    candidate nearest the place you said the object was.
+
+    RANGE ALONE IS NOT ALWAYS ENOUGH, and this is the trap. --near compares
+    distances and nothing else, so a blob at the right distance on the WRONG
+    SIDE scores exactly as well as the object. In a small pool that is not
+    hypothetical: reverberation puts a ring of return at one range in every
+    direction at once, and it only has to drift a few centimetres to become the
+    closest thing to your number.
+
+    --bearing breaks the tie with the other thing you know - which side you put
+    it on. Given both, the pick is by real distance in the scan plane rather
+    than by range, so the ring on the far side is half a circle away and cannot
+    win.
+    """
     if not candidates:
         return None
     if index is not None:
         return candidates[index] if index < len(candidates) else None
-    if near is not None:
+    if near is None:
+        return candidates[0]
+    if bearing is None:
         return min(candidates, key=lambda d: abs(d.range_m - near))
-    return candidates[0]
+    wx, wy = _xy(near, bearing)
+    return min(candidates,
+               key=lambda d: math.hypot(_xy(d.range_m, d.angle_deg)[0] - wx,
+                                        _xy(d.range_m, d.angle_deg)[1] - wy))
 
 
 def main():
@@ -112,6 +145,12 @@ def main():
     p.add_argument("--near", type=float,
                    help="pick the blob nearest this range, in metres")
     p.add_argument("--pick", type=int, help="pick this row number instead")
+    p.add_argument("--bearing", type=float, default=None,
+                   help="which way the object lies, in degrees: 0 straight out "
+                        "to starboard, 90 up, 180 to port, 270 straight down. "
+                        "Use it with --near whenever there is clutter at a "
+                        "similar distance - it is what stops the pick grabbing "
+                        "the reverberation ring on the far side.")
     p.add_argument("--range", type=float, default=4.0)
     p.add_argument("--start", type=float, default=0.0)
     p.add_argument("--end", type=float, default=360.0)
@@ -178,7 +217,7 @@ def main():
             radar.update(sweep)
             webview.publish(render(per, None, radar=radar,
                                    state=f"RECORDING {args.name}  {i + 1}/{args.sweeps}"))
-        d = pick(per.candidates, args.near, args.pick)
+        d = pick(per.candidates, args.near, args.pick, args.bearing)
         if d is None:
             missed += 1
             print(f"  [{i}] nothing to record")
@@ -190,6 +229,9 @@ def main():
               f"span {s.get('span_deg', 0):.0f} deg  "
               f"thick {s.get('thickness_m', 0):.3f} m"
               + (f"  height {s['height_m']:.2f} m" if "height_m" in s else ""))
+        if s.get("span_deg", 0) > 90:
+            print("        ^^ that span is enormous. Almost certainly the "
+                  "reverberation ring, not your object - add --bearing")
 
     if not samples:
         sys.exit("nothing recorded - was the object in the arc, and above the "
