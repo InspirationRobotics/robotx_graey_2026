@@ -817,5 +817,37 @@ check_true("it does not tell you to add --bearing when you already did",
 check_true("but it does when you have not",
            "narrow it down" in " ".join(_note(310, False)))
 
+# ----------------------------------------- a profile is only valid at its settings
+# brightness is the mean over the pixels that PASSED the threshold. Raise the
+# threshold and the blob shrinks to its bright core, so the mean goes UP - a
+# profile measured at 60 scores ZERO against the same object seen at 100. That
+# happened in the pool and looked exactly like a broken detector.
+print("\n--- a profile is only valid at the settings it was measured with ---")
+
+_L3 = {}
+_at60 = [_lib.sample_from(_det(b, 1.5, 0.118)) for b in (94, 92, 91, 91)]
+_lib.add_samples(_L3, "pvc_pipe", _at60, "",
+                 settings={"threshold": 60, "range_m": 4.0})
+check_true("the settings are stored beside the samples",
+           _L3["pvc_pipe"]["settings"]["threshold"] == 60)
+check_true("matching settings raise nothing",
+           _lib.settings_clash(_L3, "pvc_pipe", {"threshold": 60, "range_m": 4.0}) == [])
+_clash = _lib.settings_clash(_L3, "pvc_pipe", {"threshold": 100, "range_m": 4.0})
+check_true("a different threshold is named, with both values",
+           _clash == [("threshold", 60, 100)], f"{_clash}")
+check_true("an object recorded before this existed is not nagged about",
+           _lib.settings_clash({"old": {"samples": []}}, "old", {"threshold": 60}) == [])
+check_true("nor is one that is not in the library at all",
+           _lib.settings_clash(_L3, "absent", {"threshold": 60}) == [])
+
+# and the failure it protects against, end to end
+_prof3 = _lib.profile_for(_L3, "pvc_pipe")
+_, _score_at_60 = _score(_det(92, 1.5, 0.118), _prof3)
+_, _score_at_100 = _score(_det(119, 1.5, 0.07), _prof3)
+check_true("the same pipe read at a higher threshold scores ZERO",
+           _score_at_60 > 0.8 and _score_at_100 == 0.0,
+           f"{_score_at_60*100:.0f}% at the recorded threshold, "
+           f"{_score_at_100*100:.0f}% at a higher one")
+
 print(f"\n{sum(results)}/{len(results)} checks passed")
 sys.exit(0 if all(results) else 1)

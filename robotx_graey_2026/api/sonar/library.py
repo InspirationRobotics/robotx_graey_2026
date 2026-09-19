@@ -242,14 +242,37 @@ def resolve(target, path=DEFAULT_PATH, tolerance=TOLERANCE):
     return profile_for(load(path), target)
 
 
-def add_samples(library, name, samples, notes=""):
-    """Append samples under `name` and rebuild that object's profile."""
+def add_samples(library, name, samples, notes="", settings=None):
+    """Append samples under `name` and rebuild that object's profile.
+
+    `settings` records the DETECTOR SETTINGS the samples were taken with. This
+    is not bookkeeping - it is a correctness requirement. brightness is the mean
+    over the pixels that passed the threshold, so raising the threshold shrinks
+    the blob to its bright core and the mean goes UP. A profile measured at
+    threshold 60 scores zero against the same object seen at threshold 100. The
+    numbers are only meaningful next to the settings that produced them.
+    """
     entry = library.setdefault(name, {"notes": notes, "samples": []})
     if notes:
         entry["notes"] = notes
+    if settings:
+        entry["settings"] = dict(settings)
     entry["samples"].extend(samples)
     entry["profile"] = build_profile(entry["samples"])
     return entry
+
+
+def settings_clash(library, name, current):
+    """Which recorded settings differ from the ones in force now.
+
+    Returns [(key, recorded, now), ...], empty when they agree or when the
+    object predates this being stored. Callers WARN rather than refuse: an
+    old library is still worth something, and you may have a reason.
+    """
+    entry = library.get(name) or {}
+    was = entry.get("settings") or {}
+    return [(k, was[k], current[k]) for k in sorted(was)
+            if k in current and was[k] != current[k]]
 
 
 def clear(library, name):

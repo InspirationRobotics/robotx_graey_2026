@@ -276,8 +276,12 @@ def _radar(p, size, radar=None, selected=()):
             # smudge on a busy radar is invisible. Big ones already have their
             # own shape and a circle round it would only hide the ends.
             cv2.circle(canvas, (x, y), 14, shade, weight, cv2.LINE_AA)
+        # Halo picked to contrast with the ring, not fixed. A pale ring
+        # meaning "barely a match" was being drawn in near-white on a white
+        # halo, so a radar where NOTHING matched turned into a wall of
+        # unreadable white labels - at the moment you most need to read them.
         _text(canvas, f"{i}  {d.confidence}%", (x + 16, y - 14), 0.5, shade, 1,
-              halo=INK)
+              halo=INK if sum(shade) < 384 else MARK)
 
     # Hand-picked candidates, drawn last so nothing covers them, and drawn
     # whether or not they were scored. A box round a long thing and a circle

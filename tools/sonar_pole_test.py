@@ -98,6 +98,30 @@ from robotx_graey_2026.api.sonar.viewer import (SIZE, Radar, render,
                                                 table_rows)
 
 
+def warn_settings(target, library_path, current):
+    """Shout if the target was measured under different detector settings.
+
+    Returns the lines to print, empty when there is nothing to say. Only a
+    plain library name can be checked - typed ideals were never measured, so
+    there is nothing to compare against.
+    """
+    if not target or "=" in target:
+        return []
+    try:
+        clash = lib.settings_clash(lib.load(library_path), target, current)
+    except Exception:
+        return []
+    if not clash:
+        return []
+    out = [f"'{target}' was measured with different settings:"]
+    for key, was, now in clash:
+        out.append(f"    {key}: recorded at {was}, running {now}")
+    out.append("brightness is the mean over the pixels that PASSED the threshold,")
+    out.append("so a higher threshold measures only the bright core and reads")
+    out.append("HIGHER. Scores will be wrong. Match the threshold, or re-record.")
+    return out
+
+
 def main():
     # Line-buffer stdout so each sweep prints as it finishes even when piped
     # into tee. Python block-buffers a pipe by default, and since one sweep is
@@ -149,6 +173,11 @@ def main():
                         "of opening a window. Use this on the Jetson.")
     p.add_argument("--port", type=int, default=8081,
                    help="port for --web. 8080 is the OAK-D view.")
+    p.add_argument("--size", type=int, default=SIZE,
+                   help="radar edge in pixels. Raise it on a big screen - the "
+                        "browser scales the frame to fit the window, and "
+                        "scaling UP is what makes it look soft. Costs CPU on "
+                        "the Jetson and bytes on the tether.")
     p.add_argument("--headless", action="store_true",
                    help="numbers only, no view at all")
     p.add_argument("--save-dir", default=None,
@@ -173,6 +202,10 @@ def main():
     except (KeyError, ValueError) as exc:
         sys.exit(f"bad --target: {exc}")
     label = args.target or ""
+    for _line in warn_settings(args.target, args.library,
+                               {"threshold": args.threshold, "range_m": args.range,
+                                "down_gradian": args.down_gradian}):
+        print(f"[WARN] {_line}")
 
     # A narrow arc, if asked for. start/end are left UNWRAPPED on purpose -
     # sweep() takes the modulo per ping, and an arc across the 0/360 seam cannot
@@ -273,9 +306,10 @@ def main():
             [{"i": i, "label": f"{d.range_m:.2f}m"
               + ("" if d.confidence is None else f" {d.confidence}%")}
              for i, d in enumerate(per.candidates)],
-            per_page=table_rows(SIZE, 224))
+            per_page=table_rows(args.size, 224))
         webview.publish(render(per, None, state=state, radar=radar,
-                               target=label, page=page, selected=selected))
+                               target=label, page=page, selected=selected,
+                               size=args.size))
 
     def live(partial):
         retarget()
@@ -316,7 +350,7 @@ def main():
             page, selected = webview.view() if args.web else (0, ())
             view = render(per, None, state=f"POLE TEST  down={down_gradian}",
                           radar=radar, target=label, page=page,
-                          selected=selected)
+                          selected=selected, size=args.size)
             cv2.putText(view, f"sweep {elapsed:.1f}s", (16, view.shape[0] - 18),
                         cv2.FONT_HERSHEY_DUPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
 

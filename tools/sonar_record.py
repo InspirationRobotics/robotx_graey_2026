@@ -318,12 +318,17 @@ def main():
             print("       from both. Re-run with --reset if the earlier run")
             print("       measured the wrong blob.")
 
-    entry = lib.add_samples(library, args.name, samples, args.notes)
+    entry = lib.add_samples(library, args.name, samples, args.notes,
+                            settings={"threshold": args.threshold,
+                                      "range_m": args.range,
+                                      "down_gradian": args.down_gradian})
     lib.save(library, args.library)
 
     print(f"\n[INFO] {len(samples)} sampled, {missed} missed. "
           f"'{args.name}' now has {len(entry['samples'])} samples in total.")
     print(f"[INFO] saved to {args.library}")
+    print(f"[INFO] recorded at threshold {args.threshold}, range {args.range} m. "
+          f"Score it at the same threshold or the numbers will not match.")
     print("\nprofile built from every sample of this object so far:")
     for name, spec in sorted(entry["profile"].items()):
         print(f"    {name:<13} min {spec['min']:>8.3f}   "

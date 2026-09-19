@@ -69,6 +69,29 @@ MAX_STEP_M = 1.0        # refuse to command a jump bigger than this, whatever
                         # a three-metre lunge.
 
 
+def warn_settings(target, library_path, current):
+    """Same check sonar_pole_test does, and it matters more here.
+
+    A profile scored under the wrong threshold does not fail loudly - it scores
+    zero, the state machine sees nothing, and the sub searches an empty pool
+    for as long as you let it.
+    """
+    if not target or "=" in target:
+        return []
+    try:
+        clash = lib.settings_clash(lib.load(library_path), target, current)
+    except Exception:
+        return []
+    if not clash:
+        return []
+    out = [f"'{target}' was measured with different settings:"]
+    for key, was, now in clash:
+        out.append(f"    {key}: recorded at {was}, running {now}")
+    out.append("brightness is measured over the pixels that passed the")
+    out.append("threshold, so scores will be wrong. Match it, or re-record.")
+    return out
+
+
 def refresh_pose(link, pose, timeout=POSE_TIMEOUT_S, need_pos=True):
     """Drain MAVLink until we have a fresh attitude, and a position if needed.
 
@@ -163,6 +186,11 @@ def main():
                               tolerance=args.tolerance)
     except (KeyError, ValueError) as exc:
         sys.exit(f"bad --target: {exc}")
+
+    for _line in warn_settings(args.target, args.library,
+                               {"threshold": args.threshold,
+                                "down_gradian": args.down_gradian}):
+        print(f"[WARN] {_line}")
 
     sonar = Sonar(device=args.device, udp=udp, down_gradian=args.down_gradian)
     link = Link(args.mavlink, 191)
