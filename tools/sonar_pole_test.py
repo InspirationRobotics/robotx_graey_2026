@@ -4,6 +4,23 @@
     on Graey, once:   pingproxy.py --device /dev/ttyUSB0 --port 9092
     then:             python3 tools/sonar_pole_test.py --udp 127.0.0.1:9092 --no-floor --web
 
+THE TARGET IS A SETTING, AND IT STARTS BLANK
+
+Without --target nothing is judged. Every blob is measured and listed, and the
+radar draws no rings, because nothing has been said about what counts. That is
+the mode for looking, and for finding out what a real object's numbers are.
+
+Give it a target and each blob gets a score, drawn as a ring shaded by that
+score - dark for a sure match, pale for a poor one. Three ways to say it:
+
+    --target pvc_pipe                       an object you measured with
+                                            tools/sonar_record.py
+    --target height_m=1.5,brightness=140    ideal values typed straight in
+    --target height_m=1.5 --tolerance 0.3   the same, but fussier
+
+Nothing here has a default target. Rings you did not ask for are a lie about
+what the code knows.
+
 You can equally run the whole thing from a laptop and leave only pingproxy on
 the sub - pingproxy binds 0.0.0.0, so --udp <jetson-ip>:9092 works from
 anywhere on the network, and then you get a real window with live calibration
@@ -43,6 +60,7 @@ import time
 
 import cv2
 
+from robotx_graey_2026.api.sonar import library as lib
 from robotx_graey_2026.api.sonar import settings as S
 from robotx_graey_2026.api.sonar import webview
 from robotx_graey_2026.api.sonar.detect import perceive
@@ -78,6 +96,17 @@ def main():
                         "height. This is the mode for a first look, and the "
                         "right one at short range - see the note in main().")
     p.add_argument("--threshold", type=int, default=S.DETECT["threshold"])
+    p.add_argument("--target", default=None,
+                   help="what to score blobs against: a name from the object "
+                        "library, or ideals like 'height_m=1.5,brightness=140'. "
+                        "Leave it off and nothing is judged and no rings are "
+                        "drawn - just the picture and the numbers.")
+    p.add_argument("--library", default=lib.DEFAULT_PATH,
+                   help="where the recorded objects live")
+    p.add_argument("--tolerance", type=float, default=lib.TOLERANCE,
+                   help="half-width of an ideals-only target, as a fraction of "
+                        "the ideal. Smaller is fussier. Ignored for a library "
+                        "name, whose edges come from real samples.")
     p.add_argument("--web", action="store_true",
                    help="serve the view at http://<this-machine>:8081 instead "
                         "of opening a window. Use this on the Jetson.")
@@ -98,6 +127,16 @@ def main():
         host, port = args.udp.split(":")
         udp = (host, int(port))
 
+    # Resolve the target ONCE, here, and hand the resulting profile down. A name
+    # resolved per sweep would re-read the library file every few seconds and,
+    # worse, would silently change what the radar means halfway through a run.
+    try:
+        profile = lib.resolve(args.target, path=args.library,
+                              tolerance=args.tolerance)
+    except (KeyError, ValueError) as exc:
+        sys.exit(f"bad --target: {exc}")
+    label = args.target or ""
+
     sonar = Sonar(device=args.device, udp=udp, down_gradian=args.down_gradian)
 
     # A FULL circle by default, not the downward half the mission states use.
@@ -112,12 +151,48 @@ def main():
         print(f"[INFO] assuming a floor {args.assume_floor} m below - not measuring it")
     if args.no_floor:
         print("[INFO] ignoring the floor - reporting range and bearing only")
+    if profile is None:
+        print("[INFO] no --target: measuring everything, judging nothing, "
+              "drawing no rings")
+    else:
+        print(f"[INFO] target '{label}':")
+        for name, spec in sorted(profile.items()):
+            print(f"       {name:<13} min {spec['min']:>8.3f}   "
+                  f"ideal {spec['ideal']:>8.3f}   max {spec['max']:>8.3f}")
     if args.web:
+        webview.set_target(label)
+        webview.set_note("blank = no rings" if profile is None
+                         else f"{len(profile)} features")
         webview.serve(args.port)
         print(f"[INFO] serving on http://0.0.0.0:{args.port}")
+        print("[INFO] the target box on that page changes what is scored, live")
 
     down_gradian = args.down_gradian
     tuning = {"threshold": args.threshold}
+
+    # The target can be retyped in the browser between sweeps. `applied` is the
+    # string currently in force; a new one is resolved once, here, and a bad one
+    # leaves the working profile alone rather than blanking the radar.
+    applied = [label]
+
+    def retarget():
+        nonlocal profile, label
+        wanted = webview.target()
+        if wanted == applied[0]:
+            return
+        applied[0] = wanted
+        try:
+            profile = lib.resolve(wanted or None, path=args.library,
+                                  tolerance=args.tolerance)
+        except (KeyError, ValueError) as exc:
+            webview.set_note(f"ignored '{wanted}': {exc}  (still on '{label}')")
+            print(f"[WARN] ignored target '{wanted}': {exc}")
+            return
+        label = wanted
+        webview.set_note("blank = no rings" if profile is None
+                         else "  ".join(f"{k} {v['ideal']:g}"
+                                        for k, v in sorted(profile.items())))
+        print(f"[INFO] target is now '{wanted or '(none)'}'")
 
     # The picture persists across sweeps: each angle keeps its last measurement
     # until the head comes back round, as in Ping Viewer. Detections shown while
@@ -134,12 +209,14 @@ def main():
         radar.update(partial)
         per = shown[0]
         if per is None:
-            per = perceive(partial, profile=None, tuning=tuning, floor=None,
+            per = perceive(partial, target=profile, tuning=tuning, floor=None,
                            require_floor=False)
         webview.publish(render(per, None, state=f"SCANNING  down={down_gradian}",
-                               radar=radar))
+                               radar=radar, target=label))
 
     while True:
+        if args.web:
+            retarget()                  # between sweeps, never mid-sweep
         sonar.down_gradian = down_gradian
         t0 = time.time()
         sweep = sonar.sweep(args.start, args.end, args.step, args.range,
@@ -147,23 +224,25 @@ def main():
         radar.update(sweep)
         floor = Floor.from_known_depth(args.assume_floor) if args.assume_floor else None
 
-        # No profile: measure everything, judge nothing. This is discovery mode,
-        # and it is the whole point - you are here to find out what the real
-        # numbers are, not to test a guess about them.
+        # profile is None unless --target was given: measure everything, judge
+        # nothing. That is discovery mode and it is the default on purpose -
+        # the first thing you want from new hardware is what the real numbers
+        # ARE, not whether they match a guess.
         #
         # A trap worth knowing at short range: the floor detector takes the
         # FARTHEST return in each direction, so if the bottom is beyond --range
         # it latches onto whatever large thing IS in view - the pole - calls
         # that the floor, and then reports nothing above it. Use --no-floor
         # until the range genuinely reaches the bottom.
-        per = perceive(sweep, profile=None, tuning=tuning, floor=floor,
+        per = perceive(sweep, target=profile, tuning=tuning, floor=floor,
                        require_floor=not args.no_floor)
 
         shown[0] = per
         elapsed = time.time() - t0
         view = None
         if not args.headless:
-            view = render(per, None, state=f"POLE TEST  down={down_gradian}", radar=radar)
+            view = render(per, None, state=f"POLE TEST  down={down_gradian}",
+                          radar=radar, target=label)
             cv2.putText(view, f"sweep {elapsed:.1f}s", (16, view.shape[0] - 18),
                         cv2.FONT_HERSHEY_DUPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
 
@@ -213,11 +292,14 @@ def _print_sweep(per, elapsed, down_gradian):
         print(f"    nothing found: {explain(per)}")
         return
     print(f"    {'#':<3}{'range':>8}{'bearing':>9}{'height':>9}"
-          f"{'span':>7}{'bright':>8}{'solid':>7}")
+          f"{'span':>7}{'bright':>8}{'solid':>7}{'thick':>8}{'score':>7}")
     for i, d in enumerate(per.candidates[:6]):
         height = " -" if d.height_m is None else f"{d.height_m:.2f}"
+        thick = " -" if d.thickness_m is None else f"{d.thickness_m:.3f}"
+        score = " -" if d.score is None else f"{d.score:.2f}"
         print(f"    {i:<3}{d.range_m:>7.2f}m{d.angle_deg:>8.0f}d{height:>9}"
-              f"{d.span_deg:>6.0f}d{d.brightness:>8.0f}{d.solidity:>7.2f}")
+              f"{d.span_deg:>6.0f}d{d.brightness:>8.0f}{d.solidity:>7.2f}"
+              f"{thick:>8}{score:>7}")
 
 
 if __name__ == "__main__":

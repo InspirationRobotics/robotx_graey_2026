@@ -22,6 +22,7 @@ invisible. So you have to close the distance sideways FIRST, while it is still
 broadside and clearly visible, and only then turn.
 """
 from . import detect as D
+from . import library as L
 from . import settings as S
 from .memory import Memory
 
@@ -53,8 +54,35 @@ class Action:
 
 
 class Driver:
-    def __init__(self, profile, memory=None, start_heading_deg=0.0):
-        self.profile = profile
+    """Drives the sub towards whatever object you name.
+
+    target is the name of an object in the library - "pvc_pipe", "pipeline" -
+    or any of the other forms library.resolve() takes. Nothing about a pipeline
+    is written into this file; swapping the hunt to a different object is
+    swapping the string.
+
+    The Driver does not score anything itself. It carries the resolved profile
+    so there is ONE source of truth: run perceive(sweep, driver.profile) and the
+    state machine cannot be steering towards a target the detector was never
+    looking for. That mismatch is silent and would look exactly like a broken
+    detector.
+    """
+
+    def __init__(self, target, memory=None, start_heading_deg=0.0,
+                 library_path=None):
+        self.target = target
+        self.profile = L.resolve(
+            target, **({"path": library_path} if library_path else {}))
+        if self.profile is None:
+            # Without a profile perceive() never fills in p.best, so every state
+            # would miss on every sweep and the sub would search for ever while
+            # printing that it found nothing. Better to say so at the door.
+            raise ValueError(
+                "the Driver needs a target - it decides where the sub goes, and "
+                "with nothing to score against it will search for ever. Name an "
+                "object from the library, or pass ideals like "
+                "'height_m=1.5,brightness=140'.")
+
         self.memory = memory or Memory()
         self.state = SEARCH
 

@@ -1,4 +1,6 @@
+from . import library
 from . import settings
+from .library import identify, rank, resolve
 from .sweep import Sonar, Sweep, gradian_to_angle_deg, angle_deg_to_gradian
 from .floor import Floor, find_floor
 from .detect import (Detection, Perception, perceive, find_blobs, measure, score,

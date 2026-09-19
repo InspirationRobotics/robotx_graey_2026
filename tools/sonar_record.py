@@ -95,7 +95,9 @@ def main():
     samples, missed = [], 0
     for i in range(args.sweeps):
         sweep = sonar.sweep(args.start, args.end, args.step, args.range)
-        per = perceive(sweep, profile=None, tuning={"threshold": args.threshold},
+        # No target, always. This is the tool that finds out what the numbers
+        # are; scoring them against a guess first would be circular.
+        per = perceive(sweep, tuning={"threshold": args.threshold},
                        require_floor=not args.no_floor)
         d = pick(per.candidates, args.near, args.pick)
         if d is None:

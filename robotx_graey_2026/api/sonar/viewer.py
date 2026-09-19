@@ -7,6 +7,14 @@ decision problem.
 
 Nothing is stretched to fill space. A thing 3 m away is drawn at the 3 m ring.
 
+RINGS. This file knows nothing about pipelines, or about any other object. It
+reads the score already sitting on each candidate and shades that candidate's
+ring by it: dark means a sure match, pale means it barely qualifies. A candidate
+that was never scored - because no target was given - gets no ring at all, so an
+empty radar with a full table underneath means "you have not said what you are
+looking for", not "nothing is out there". What counts as a match is set entirely
+by the target you pass to perceive(); see library.resolve().
+
 PERSISTENCE. A Radar object keeps the most recent measurement at every angle
 until the head comes round and measures that angle again, the way Ping Viewer
 does. A sweep takes many seconds on this hardware, so wiping the picture at the
@@ -41,7 +49,7 @@ from . import settings as S
 
 # ------------------------------------------------------------------- look
 SIZE = 860                  # radar edge, px. Big enough to read a floor at 4 m.
-PANEL_W = 660
+PANEL_W = 720
 
 BG = (22, 20, 18)
 SKY = (198, 126, 30)        # BGR. Ping Viewer's background blue.
@@ -49,8 +57,15 @@ FACE = (84, 80, 76)         # water the head has never reached
 INK = (240, 240, 240)
 DIM = (150, 150, 150)
 GRID = (70, 66, 62)
-MARK = (10, 10, 10)         # rings and detections on the radar
+MARK = (10, 10, 10)         # fixed furniture: rings, floor line, blind zone
 HEAD = (255, 255, 255)
+
+# Detection rings are shaded by how well the candidate matched the target:
+# dark means sure, pale means it only just counts. Both ends are greys the
+# colour ramp never produces, so a ring always reads as annotation rather than
+# as something the sonar heard.
+CONF_SURE = (10, 10, 10)
+CONF_WEAK = (220, 220, 220)
 
 FONT = cv2.FONT_HERSHEY_DUPLEX   # heavier strokes than SIMPLEX; survives JPEG
 
@@ -118,15 +133,27 @@ class Radar:
         return self.polar.shape[1] * self.metres_per_bin
 
 
-def render(perception, memory=None, state="", radar=None, size=SIZE, panel_w=PANEL_W):
+def render(perception, memory=None, state="", radar=None, size=SIZE,
+           panel_w=PANEL_W, target=""):
     """Radar beside the numbers.
 
     Pass a Radar to keep the picture between calls. Without one, the radar shows
     only this perception's sweep - which is what the checks and one-off renders
     want.
+
+    target is only ever printed. What the rings do is decided entirely by the
+    scores already sitting on the candidates, so this cannot show one target
+    while the detector used another.
     """
     return np.hstack([_radar(perception, size, radar),
-                      _panel(perception, memory, state, panel_w, size)])
+                      _panel(perception, memory, state, panel_w, size, target)])
+
+
+def confidence_colour(score):
+    """Score -> ring colour. 1.0 is nearly black, 0.0 is nearly white."""
+    s = max(0.0, min(1.0, float(score)))
+    return tuple(int(round(w + (c - w) * s))
+                 for w, c in zip(CONF_WEAK, CONF_SURE))
 
 
 def _text(img, s, org, scale, colour, thick=1, halo=None):
@@ -169,7 +196,10 @@ def _radar(p, size, radar=None):
     for ang, txt in ((0, "right"), (90, "up"), (180, "left"), (270, "down")):
         x, y = _to_screen(c, ang, radius + margin * 0.55)
         (tw, th), _ = cv2.getTextSize(txt, FONT, 0.65, 1)
-        _text(canvas, txt, (x - tw // 2, y + th // 2), 0.65, INK, 1)
+        # "right" and "left" sit close enough to the edge that centring them on
+        # the anchor runs the word off the canvas, so keep them on it.
+        _text(canvas, txt, (max(4, min(x - tw // 2, size - tw - 4)), y + th // 2),
+              0.65, INK, 1)
 
     if p.floor is not None:
         pts = []
@@ -185,14 +215,23 @@ def _radar(p, size, radar=None):
     if radar.head_deg is not None:
         cv2.line(canvas, (c, c), _to_screen(c, radar.head_deg, radius), HEAD, 2, cv2.LINE_AA)
 
-    # Thin black rings: nothing in the ramp is black, so they read as
-    # annotation, and at one pixel they do not hide what they are pointing at.
+    # Rings, shaded by confidence. A candidate with score None was never judged,
+    # because no target was given - so there is nothing to be confident about
+    # and nothing is drawn. An empty radar here means "you have not said what
+    # you are looking for", not "nothing is there"; the table still lists every
+    # blob and its numbers.
+    #
+    # One pixel wide so a ring does not hide what it is pointing at.
     for i, d in enumerate(p.candidates):
+        if d.score is None:
+            continue
+        shade = confidence_colour(d.score)
         x, y = _to_screen(c, d.angle_deg, d.range_m * ppm)
-        cv2.circle(canvas, (x, y), 14, MARK, 1, cv2.LINE_AA)
+        cv2.circle(canvas, (x, y), 14, shade, 1, cv2.LINE_AA)
         if d is p.best:
-            cv2.circle(canvas, (x, y), 19, MARK, 1, cv2.LINE_AA)
-        _text(canvas, str(i), (x + 16, y - 12), 0.5, MARK, 1, halo=INK)
+            cv2.circle(canvas, (x, y), 19, shade, 1, cv2.LINE_AA)
+        _text(canvas, f"{i}  {d.score:.2f}", (x + 16, y - 12), 0.5, shade, 1,
+              halo=INK)
 
     cv2.drawMarker(canvas, (c, c), MARK, cv2.MARKER_CROSS, 12, 1, cv2.LINE_AA)
     return canvas
@@ -243,24 +282,34 @@ def _dashed_circle(img, centre, radius, colour, dashes=40):
                     colour, 1, cv2.LINE_AA)
 
 
-def _panel(p, memory, state, width, height):
+def _panel(p, memory, state, width, height, target=""):
     panel = np.full((height, width, 3), BG, np.uint8)
     L = 22
     y = 48
 
     _text(panel, state or "-", (L, y), 1.0, INK, 1)
     y += 38
+
+    # What is being hunted, always on screen. Rings missing with a target set is
+    # a detector problem; rings missing with no target is just this line.
+    if target:
+        _text(panel, f"target: {target}", (L, y), 0.6, (120, 240, 150))
+    else:
+        _text(panel, "target: none - measuring everything, judging nothing",
+              (L, y), 0.6, DIM)
+    y += 32
+
     from .driver import explain
     _text(panel, explain(p), (L, y), 0.55, DIM)
-    y += 34
+    y += 32
     floor_txt = "floor: not found" if p.floor is None else (
         f"floor: {p.floor.depth_m:.2f} m below   agreement {p.floor.confidence:.0%}")
     _text(panel, floor_txt, (L, y), 0.6, INK if p.floor else DIM)
     y += 40
 
     cv2.line(panel, (L, y - 22), (width - L, y - 22), GRID, 1)
-    labels = ["#", "range", "offset", "height", "span", "bright", "solid"]
-    xs = [L, 62, 160, 270, 380, 470, 565]
+    labels = ["#", "range", "offset", "height", "span", "bright", "solid", "score"]
+    xs = [L, 58, 150, 255, 360, 445, 535, 625]
     for x, lab in zip(xs, labels):
         _text(panel, lab, (x, y), 0.52, DIM)
     y += 34
@@ -273,7 +322,8 @@ def _panel(p, memory, state, width, height):
             cells = [str(i), f"{d.range_m:.2f}m", f"{d.offset_m:+.2f}m",
                      "-" if d.height_m is None else f"{d.height_m:.2f}m",
                      f"{d.span_deg:.0f}°".replace("°", " deg"),
-                     f"{d.brightness:.0f}", f"{d.solidity:.2f}"]
+                     f"{d.brightness:.0f}", f"{d.solidity:.2f}",
+                     "-" if d.score is None else f"{d.score:.2f}"]
             colour = INK if d is not p.best else (120, 240, 150)
             for x, cell in zip(xs, cells):
                 _text(panel, cell, (x, y), 0.55, colour)
@@ -296,7 +346,7 @@ def _panel(p, memory, state, width, height):
             _text(panel, line, (L, y), 0.55, DIM)
             y += 28
 
-    _legend(panel, L, height - 190, width)
+    _legend(panel, L, height - 250, width)
     return panel
 
 
@@ -305,32 +355,41 @@ def _legend(panel, x, y, width):
     exactly as it does on the radar."""
     cv2.line(panel, (x, y - 20), (width - x, y - 20), GRID, 1)
 
-    # colour ramp
+    # echo strength ramp
     bar_w, bar_h = width - 2 * x - 150, 18
     bar = np.repeat(_LUT[np.linspace(0, 255, bar_w).astype(np.uint8)][None, :, :], bar_h, 0)
     panel[y:y + bar_h, x:x + bar_w] = bar
-    _text(panel, "weak", (x, y + bar_h + 22), 0.5, DIM)
+    _text(panel, "weak echo", (x, y + bar_h + 22), 0.5, DIM)
     (tw, _), _ = cv2.getTextSize("strong", FONT, 0.5, 1)
     _text(panel, "strong", (x + bar_w - tw, y + bar_h + 22), 0.5, DIM)
     cv2.rectangle(panel, (x + bar_w + 24, y), (x + bar_w + 24 + bar_h, y + bar_h), FACE, -1)
     _text(panel, "not swept", (x + bar_w + 50, y + 15), 0.5, DIM)
 
+    # ring shade ramp: how well a candidate matched the target, which is a
+    # different question from how loud its echo was, so it gets its own bar
+    y += 62
+    ring_bar = np.zeros((bar_h, bar_w, 3), np.uint8)
+    for col_x in range(bar_w):
+        ring_bar[:, col_x] = confidence_colour(col_x / max(bar_w - 1, 1))
+    panel[y:y + bar_h, x:x + bar_w] = ring_bar
+    _text(panel, "ring: weak match", (x, y + bar_h + 22), 0.5, DIM)
+    (tw, _), _ = cv2.getTextSize("sure", FONT, 0.5, 1)
+    _text(panel, "sure", (x + bar_w - tw, y + bar_h + 22), 0.5, DIM)
+    _text(panel, "none = no target", (x + bar_w + 24, y + 15), 0.5, DIM)
+
     # symbols, each on a patch of radar blue
-    y2 = y + 80
-    items = [("detection", "ring"), ("best match", "double"),
-             ("sonar head", "head"), ("blind zone", "dash")]
+    y2 = y + 82
+    items = [("best match", "double"), ("sonar head", "head"),
+             ("blind zone", "dash")]
     col = (width - 2 * x) // 2
     for n, (label, kind) in enumerate(items):
         cx = x + (n % 2) * col
         cy = y2 + (n // 2) * 44
-        sw = (cx, cy - 16, cx + 36, cy + 16)
-        panel[sw[1]:sw[3], sw[0]:sw[2]] = _LUT[36]
+        panel[cy - 16:cy + 16, cx:cx + 36] = _LUT[36]
         mid = (cx + 18, cy)
-        if kind == "ring":
-            cv2.circle(panel, mid, 10, MARK, 1, cv2.LINE_AA)
-        elif kind == "double":
-            cv2.circle(panel, mid, 8, MARK, 1, cv2.LINE_AA)
-            cv2.circle(panel, mid, 13, MARK, 1, cv2.LINE_AA)
+        if kind == "double":
+            cv2.circle(panel, mid, 8, CONF_SURE, 1, cv2.LINE_AA)
+            cv2.circle(panel, mid, 13, CONF_SURE, 1, cv2.LINE_AA)
         elif kind == "head":
             cv2.line(panel, (cx + 4, cy + 10), (cx + 32, cy - 10), HEAD, 2, cv2.LINE_AA)
         else:

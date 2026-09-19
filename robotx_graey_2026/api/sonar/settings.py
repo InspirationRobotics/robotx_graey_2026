@@ -7,9 +7,10 @@ Two kinds of setting live here and they are kept apart deliberately:
                      between a pool and Marina Bay.
 
   TARGET           - what the thing you are hunting looks like. This is NOT
-                     here. It is passed in by the mission, because which
-                     object you want is a mission decision, not a sonar one.
-                     See PIPELINE_PROFILE at the bottom for the shape it takes.
+                     here, and must not end up here. It is passed in by the
+                     mission, because which object you want is a mission
+                     decision, not a sonar one. See sonar/library.py, and the
+                     note at the bottom of this file.
 
 Angle convention throughout: degrees in the vertical scan plane.
     0 = right, 90 = up, 180 = left, 270 = down.
@@ -123,37 +124,19 @@ SPAN_ACROSS_DEG = 30.0          # span above this: pipe lies across the view
 MIN_SCORE = 0.25                # below this, treat a candidate as not found
 STALE_SWEEPS = 4                # no detection for this many sweeps means lost
 
-# ------------------------------------------------- example target profile
-# NOT settings - this is what the mission passes in, and it belongs in mission
-# code. Reproduced here only as a worked example of the shape.
+# --------------------------------------------------- what NOT to put here
+# There used to be a PIPELINE_PROFILE at the bottom of this file: the numbers
+# describing the thing to hunt for. It is gone, and deliberately.
 #
-# Every number is a guess until you measure the real structure with the debug
-# viewer. Do not trust these.
-# Only two features, and the omissions are the point.
+# A profile describes an OBJECT. This file describes the SONAR AND THE WATER.
+# Keeping the object here meant every tool imported "a pipeline" whether it
+# wanted one or not, the debug viewer drew rings for a target nobody had asked
+# for, and measuring a new object was a code edit instead of a data entry.
 #
-# span_deg and solidity are both measured, both shown in the viewer, and both
-# deliberately absent from the scoring. Each varies with the pipe's ORIENTATION
-# rather than with what the pipe IS:
-#
-#   span      a couple of degrees end-on, over a hundred broadside
-#   solidity  high for a compact end-on blob, low broadside, because a pipe
-#             seen side-on traces an arc and an arc's convex hull is mostly
-#             empty space
-#
-# Scoring against either one rejected the pipeline hardest exactly when it was
-# most visible. The rule this leaves behind is worth keeping: a feature that
-# changes with pose is an OUTPUT, not an identity constraint. Only put things
-# in a profile that describe what the object is regardless of how you are
-# looking at it.
-#
-# That leaves height above the floor, which is the strongest discriminator you
-# have - it is what separates a suspended pipeline from the bottom - and
-# brightness, which is a material property.
-PIPELINE_PROFILE = {
-    "height_m":     {"min": 0.4, "ideal": 1.5, "max": 2.8},   # above the floor
-    # 140 is measured, not guessed: PVC came back 132-146 in the pool on
-    # 16 Sep 2026. The old ideal of 170 was invented, and scored real pipe at
-    # 0.70 instead of 1.0. Brightness is the feature that travels worst between
-    # locations, so re-measure it in Singapore rather than trusting this.
-    "brightness":   {"min": 70,  "ideal": 140, "max": 255},
-}
+# Objects now live in sonar/library.py, in a JSON file you fill by measuring
+# real things with tools/sonar_record.py. Every entry point takes a target
+# argument and passes it to library.resolve(), which accepts a name, a
+# "height_m=1.5,brightness=140" string, a profile dict, or None for "judge
+# nothing". The reasoning about WHICH features belong in a profile - the
+# pose-invariance rule that keeps span and width out of one - moved to
+# library.IDENTITY, where it applies to every object rather than to one.

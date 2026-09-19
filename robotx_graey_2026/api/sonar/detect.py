@@ -5,9 +5,10 @@ Three jobs kept as separate functions:
   find_blobs()  turns a sweep into candidate shapes. Knows nothing about
                 pipelines.
   measure()     turns a shape into numbers. Also knows nothing about pipelines.
-  score()       compares those numbers to a description of the target. This is
-                the only part that knows what a pipeline is, and the
-                description arrives as an argument rather than being written in.
+  score()       compares those numbers to a description of the target. Even
+                this one does not know what a pipeline is: the description
+                arrives as an argument, and there is no default. Nothing in
+                this package names an object it expects to find.
 
 perceive() runs the whole chain and reports WHICH way it failed, because
 "cannot see the bottom" and "can see the bottom but nothing above it" are
@@ -20,6 +21,7 @@ import math
 import cv2
 import numpy as np
 
+from . import library as L
 from . import settings as S
 from .floor import find_floor
 
@@ -221,13 +223,19 @@ def score(detection, profile):
     return per, (total if per else 0.0)
 
 
-def perceive(sweep, profile=None, tuning=None, floor=None, min_score=None,
-             require_floor=True):
+def perceive(sweep, target=None, tuning=None, floor=None, min_score=None,
+             require_floor=True, library_path=None):
     """The whole chain. Returns a Perception, including why it found nothing.
 
-    profile=None is discovery mode: measure everything, judge nothing. That is
-    how you learn what your target's numbers actually are - put the real thing
-    in the water and read them off the viewer.
+    target says WHAT to look for, and nothing in this file decides that. It is
+    whatever library.resolve() accepts: the name of an object you measured, a
+    "height_m=1.5,brightness=140" string, a profile dict, or None.
+
+    target=None is discovery mode: measure everything, judge nothing. Every
+    candidate comes back with its numbers and score left as None, and the viewer
+    then draws no rings, because there is nothing to be confident ABOUT. That is
+    how you learn what a target's numbers really are - put the thing in the
+    water and read them off the viewer.
 
     floor= lets you assert a floor instead of measuring one, for the shallow
     pool where the bottom is inside the blind zone.
@@ -237,6 +245,8 @@ def perceive(sweep, profile=None, tuning=None, floor=None, min_score=None,
     scoring - but it answers "where is that thing", which is what you want the
     first time you point new hardware at real water.
     """
+    profile = L.resolve(target, **({"path": library_path} if library_path else {}))
+
     t = dict(S.DETECT)
     if tuning:
         t.update(tuning)

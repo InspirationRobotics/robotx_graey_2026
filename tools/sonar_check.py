@@ -8,11 +8,14 @@ Needs the package importable, either way round:
     source /root/robotx_ws/install/setup.bash   # on Graey
     PYTHONPATH=. python3 tools/sonar_check.py   # from a plain checkout
 """
+import json as _json
 import os
 import sys
+import time as _time
 
 import cv2
 
+from robotx_graey_2026.api.sonar import library as _lib
 from robotx_graey_2026.api.sonar import settings as S
 from robotx_graey_2026.api.sonar.detect import ACROSS, ALONG, NO_FLOOR, perceive
 from robotx_graey_2026.api.sonar.driver import APPROACH, Driver, FOLLOW, ORIENT, SEARCH
@@ -22,6 +25,16 @@ from robotx_graey_2026.api.sonar.viewer import render
 
 FLOOR_Z = -4.0
 PIPE_Z = -2.5           # 1.5 m above the floor
+
+# The object these checks hunt. A test owns its fixtures. This used to be
+# imported from settings.py, which is exactly the thing that is now gone: the
+# sonar package no longer ships with any particular object baked into it, so a
+# test that wants one has to say so.
+TARGET = {
+    "height_m":   {"min": 0.4, "ideal": 1.5, "max": 2.8},
+    "brightness": {"min": 70,  "ideal": 140, "max": 255},
+}
+
 results = []
 
 
@@ -50,7 +63,7 @@ print("--- geometry ---")
 
 # a pipe running fore-aft (north-south), 0.8 m to starboard
 along = Scene([((0.8, -4.0, PIPE_Z), (0.8, 4.0, PIPE_Z))], floor_z=FLOOR_Z)
-p = perceive(sweep_of(along), profile=S.PIPELINE_PROFILE)
+p = perceive(sweep_of(along), target=TARGET)
 
 check("floor depth", p.floor.depth_m if p.floor else None, 4.0, 0.25)
 check_true("pipe detected", p.best is not None)
@@ -62,7 +75,7 @@ if p.best:
 
 # the same pipe turned across the view (east-west)
 across = Scene([((-3.0, 0.0, PIPE_Z), (3.0, 0.0, PIPE_Z))], floor_z=FLOOR_Z)
-q = perceive(sweep_of(across), profile=S.PIPELINE_PROFILE)
+q = perceive(sweep_of(across), target=TARGET)
 check_true("across pipe detected", q.best is not None)
 if q.best and p.best:
     check_true("span is wider across than along",
@@ -74,16 +87,16 @@ if q.best and p.best:
 print("\n--- failure modes ---")
 
 empty = Scene([], floor_z=FLOOR_Z)
-r = perceive(sweep_of(empty), profile=S.PIPELINE_PROFILE)
+r = perceive(sweep_of(empty), target=TARGET)
 check_true("floor alone gives no candidates", r.best is None, f"reason: {r.reason}")
 
 # nothing at all: no floor, no pipe
 void = Scene([], floor_z=-40.0)
-v = perceive(sweep_of(void), profile=S.PIPELINE_PROFILE)
+v = perceive(sweep_of(void), target=TARGET)
 check_true("no floor is reported as such", v.reason == NO_FLOOR, f"reason: {v.reason}")
 
 # asserted floor, for the shallow pool where the bottom is inside the blind zone
-w = perceive(sweep_of(along), profile=S.PIPELINE_PROFILE,
+w = perceive(sweep_of(along), target=TARGET,
              floor=Floor.from_known_depth(4.0))
 check_true("asserted floor still detects the pipe", w.best is not None)
 
@@ -92,12 +105,12 @@ print("\n--- state machine ---")
 
 scene = Scene.zigzag(start=(1.3, 0.0), z=PIPE_Z, floor_z=FLOOR_Z, first_heading_deg=90.0)
 sonar = FakeSonar(scene, sub_pos=(0.0, 0.0, 0.0), heading_deg=0.0, seed=3)
-driver = Driver(S.PIPELINE_PROFILE)
+driver = Driver(TARGET)
 
 seen_states = []
 for step in range(90):
     sweep = sonar.sweep_for_state(driver.sweep_state(), sonar.heading_deg)
-    per = perceive(sweep, profile=S.PIPELINE_PROFILE)
+    per = perceive(sweep, target=TARGET)
     action = driver.tick(per, sonar.heading_deg)
     seen_states.append(driver.state)
     sonar.apply(action)
@@ -210,7 +223,6 @@ check_true("radar resets when the range changes", _r.polar.shape[1] == 200)
 print("\n--- object library ---")
 import tempfile as _tf
 
-from robotx_graey_2026.api.sonar import library as _lib
 from robotx_graey_2026.api.sonar.detect import Detection as _Det
 
 
@@ -259,7 +271,142 @@ with _tf.NamedTemporaryFile(suffix=".json", delete=False) as _fh:
     _path = _fh.name
 _lib.save(_L, _path)
 check_true("library survives a save and load", _lib.load(_path) == _L)
+
+# ----------------------------------------------------------- target resolution
+# One function decides what a target argument means, so the viewer, the state
+# machine and every tool agree. If these drift apart the radar can show rings
+# for one object while the sub swims after another.
+print("\n--- target resolution ---")
+
+check_true("no target resolves to nothing", _lib.resolve(None) is None
+           and _lib.resolve("") is None and _lib.resolve({}) is None)
+check_true("a profile dict passes straight through",
+           _lib.resolve(TARGET) is TARGET)
+check_true("a name resolves out of the library",
+           _lib.resolve("pvc_pipe", path=_path) == _prof)
+
+_typed = _lib.resolve("height_m=1.5,brightness=140", tolerance=0.5)
+check_true("typed ideals become a profile",
+           _typed["height_m"]["ideal"] == 1.5 and _typed["brightness"]["ideal"] == 140)
+check_true("typed ideals get edges either side",
+           _typed["height_m"]["min"] == 0.75 and _typed["height_m"]["max"] == 2.25,
+           f"{_typed['height_m']}")
+check_true("tolerance is what sets how fussy it is",
+           _lib.resolve("height_m=1.5", tolerance=0.1)["height_m"]["max"] == 1.65)
+check_true("ideals are clamped to what a feature can physically be",
+           _lib.resolve("brightness=200,solidity=0.9")["brightness"]["max"] == 255
+           and _lib.resolve("solidity=0.9")["solidity"]["max"] == 1.0)
+
+for _bad, _why in (("height_m", "no equals sign"), ("nonsense=3", "unknown feature"),
+                   ("height_m=tall", "not a number")):
+    try:
+        _lib.resolve(_bad)
+        check_true(f"a bad target is rejected ({_why})", False)
+    except (ValueError, KeyError):
+        check_true(f"a bad target is rejected ({_why})", True)
+
+try:
+    _lib.resolve("no_such_object", path=_path)
+    check_true("an unknown name names what IS in the library", False)
+except KeyError as _exc:
+    check_true("an unknown name names what IS in the library",
+               "pvc_pipe" in str(_exc), str(_exc))
+
+try:
+    Driver(None)
+    check_true("a Driver refuses to run with no target", False)
+except ValueError:
+    check_true("a Driver refuses to run with no target", True)
+check_true("a Driver resolves a name into a profile",
+           Driver("pvc_pipe", library_path=_path).profile == _prof)
 os.unlink(_path)
+
+# ------------------------------------------------------- rings follow the score
+# The radar must not draw a ring for a candidate nobody asked about, and a ring
+# it does draw has to darken with confidence. Both are measured off the pixels
+# rather than read off the code, because that is the part that can rot.
+print("\n--- rings follow the score ---")
+
+_scene = Scene([((0.8, -4.0, PIPE_Z), (0.8, 4.0, PIPE_Z))], floor_z=FLOOR_Z)
+_blind = perceive(sweep_of(_scene))                  # no target at all
+_judged = perceive(sweep_of(_scene), target=TARGET)
+check_true("without a target, candidates are still measured",
+           len(_blind.candidates) > 0 and _blind.candidates[0].score is None,
+           f"{len(_blind.candidates)} candidates, all unscored")
+check_true("without a target, best is left empty", _blind.best is None)
+
+# Counting black pixels will not do: the range rings, the floor line and the
+# blind-zone dashes are black furniture and swamp any ring. Compare against the
+# SAME radar with the candidate list emptied, so the only pixels that can differ
+# are the ones a candidate put there.
+_bare = _Per(sweep=_blind.sweep, floor=_blind.floor, candidates=[], best=None,
+             reason=_blind.reason)
+_bare_img = _rad(_bare, 520)
+check_true("without a target a candidate draws nothing at all",
+           _np.array_equal(_rad(_blind, 520), _bare_img))
+check_true("with a target it does draw something",
+           not _np.array_equal(_rad(_judged, 520), _bare_img))
+
+from robotx_graey_2026.api.sonar.viewer import confidence_colour as _conf
+check_true("a sure match is shaded darker than a poor one",
+           _conf(1.0)[0] < _conf(0.5)[0] < _conf(0.0)[0],
+           f"{_conf(1.0)[0]} < {_conf(0.5)[0]} < {_conf(0.0)[0]}")
+check_true("confidence shading is clamped, not wrapped",
+           _conf(5.0) == _conf(1.0) and _conf(-2.0) == _conf(0.0))
+
+
+# and the same thing end to end, on the pixels themselves rather than on the
+# colour function: over exactly the pixels the two renders disagree about, the
+# sure-match render must be the darker one.
+def _canvas(score):
+    _p2 = perceive(sweep_of(_scene), target=TARGET)
+    for _d in _p2.candidates:
+        _d.score = score
+    return _rad(_p2, 520).astype(int)
+
+
+_sure_img, _weak_img = _canvas(1.0), _canvas(0.05)
+_ring = _np.abs(_sure_img - _weak_img).sum(axis=2) > 30
+check_true("the shading reaches the canvas, not just the colour function",
+           _ring.any() and _sure_img[_ring].mean() < _weak_img[_ring].mean(),
+           f"sure {_sure_img[_ring].mean():.0f} vs weak {_weak_img[_ring].mean():.0f} "
+           f"over {int(_ring.sum())} px")
+
+# --------------------------------------------------------- the target box
+# The one setting the radar page carries. It is the only way to change what is
+# scored without restarting, so it is worth a real socket rather than a mock.
+print("\n--- the target box ---")
+try:
+    import urllib.request as _url
+
+    from robotx_graey_2026.api.sonar import webview as _wv
+
+    _wv.set_target("height_m=1.5")
+    _wv.serve(8099)
+    _time.sleep(0.5)
+    _base = "http://127.0.0.1:8099"
+
+    check_true("the page carries a target box",
+               b'id="t"' in _url.urlopen(_base + "/").read())
+    check_true("the box starts on whatever --target gave it",
+               _json.loads(_url.urlopen(_base + "/state").read())["target"] == "height_m=1.5")
+
+    _url.urlopen(_url.Request(_base + "/target", data=b"  brightness=140  ",
+                              method="POST"))
+    check_true("typing a target reaches the tool", _wv.target() == "brightness=140")
+    check_true("and it resolves to a profile the detector can use",
+               _lib.resolve(_wv.target())["brightness"]["ideal"] == 140)
+
+    _url.urlopen(_url.Request(_base + "/target", data=b"", method="POST"))
+    check_true("emptying the box means no target at all",
+               _wv.target() == "" and _lib.resolve(_wv.target() or None) is None)
+
+    # it listens on 0.0.0.0, so anything on the tether network can post to it
+    _url.urlopen(_url.Request(_base + "/target", data=b"x" * 5000, method="POST"))
+    check_true("an oversized body is capped, not swallowed whole",
+               len(_wv.target()) == 1024)
+except OSError as _exc:
+    print(f"SKIP  target box checks ({_exc}) - port 8099 busy?")
 
 print(f"\n{sum(results)}/{len(results)} checks passed")
 sys.exit(0 if all(results) else 1)

@@ -10,7 +10,7 @@ carries over, and the traps that have already cost a day.
 | `DOWN_GRADIAN` | the sonar is unbolted or remounted | it describes how the sonar sits on the sub, nothing else |
 | `SPEED_OF_SOUND` | the water changes type | fresh is about 1480 m/s, salt about 1520. Every range scales with it |
 | `DETECT["threshold"]` | **every new location** | it is the local background level and travels worst of all |
-| `PIPELINE_PROFILE["brightness"]` | every new location | same reason. It lives in mission code, not here |
+| every object's `brightness` | **every new location** | same reason. Re-record the object with `tools/sonar_record.py`; the profile rebuilds itself from the new samples |
 | `ALIGNED_SPAN_FRACTION` | rarely | span is geometry, so it barely cares about the water |
 
 Ranked by how well they transfer: span ratio best, then speed of sound, then

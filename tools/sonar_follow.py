@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
 """Sonar search-and-approach: let the state machine drive the sub.
 
-    python3 tools/sonar_follow.py --udp 127.0.0.1:9092            # DRY RUN
-    python3 tools/sonar_follow.py --udp 127.0.0.1:9092 --live     # actually moves
+    python3 tools/sonar_follow.py --udp 127.0.0.1:9092 --target pvc_pipe
+    python3 tools/sonar_follow.py --udp 127.0.0.1:9092 --target pvc_pipe --live
+
+--target is required and has no default. This tool moves the sub towards
+whatever matches it, so "what am I hunting" is not something to leave implied:
+a wrong default here is a sub swimming confidently at the wrong object. Pass a
+name from the object library, or ideals typed straight in - say
+--target height_m=1.5,brightness=140 for something pipeline-shaped you have not
+measured yet.
 
 SAFETY, copied from mission_base.py because the reasoning is the same: dry run
 is the DEFAULT. It prints every target it would command and sends nothing. Pass
@@ -42,6 +49,7 @@ import time
 
 from robotx_graey_2026.api.navigation.frames import body_to_world
 from robotx_graey_2026.api.pixhawk.mavlink import Link
+from robotx_graey_2026.api.sonar import library as lib
 from robotx_graey_2026.api.sonar import settings as S
 from robotx_graey_2026.api.sonar import webview
 from robotx_graey_2026.api.sonar.detect import perceive
@@ -112,6 +120,13 @@ def main():
     p.add_argument("--udp", help="host:port of pingproxy, e.g. 127.0.0.1:9092")
     p.add_argument("--device", help="serial by-id path, if not using pingproxy")
     p.add_argument("--mavlink", default="udpout:127.0.0.1:14553")
+    p.add_argument("--target", required=True,
+                   help="what to hunt: a name from the object library, or "
+                        "ideals like 'height_m=1.5,brightness=140'")
+    p.add_argument("--library", default=lib.DEFAULT_PATH)
+    p.add_argument("--tolerance", type=float, default=lib.TOLERANCE,
+                   help="half-width of an ideals-only target, as a fraction of "
+                        "the ideal")
     p.add_argument("--down-gradian", type=int, default=S.DOWN_GRADIAN)
     p.add_argument("--threshold", type=int, default=S.DETECT["threshold"])
     p.add_argument("--no-floor", action="store_true",
@@ -131,6 +146,13 @@ def main():
         host, port = args.udp.split(":")
         udp = (host, int(port))
 
+    # Fail on a bad target before touching the sonar or the vehicle.
+    try:
+        profile = lib.resolve(args.target, path=args.library,
+                              tolerance=args.tolerance)
+    except (KeyError, ValueError) as exc:
+        sys.exit(f"bad --target: {exc}")
+
     sonar = Sonar(device=args.device, udp=udp, down_gradian=args.down_gradian)
     link = Link(args.mavlink, 191)
     pose = {'pos': None, 'yaw': None}
@@ -145,8 +167,11 @@ def main():
                  "feeds it, so check the DVL is reachable and dvl_node and "
                  "nav_ekf_bridge are up. Drop --live to rehearse without it.")
 
-    driver = Driver(profile=S.PIPELINE_PROFILE,
-                    start_heading_deg=math.degrees(pose['yaw']))
+    driver = Driver(profile, start_heading_deg=math.degrees(pose['yaw']))
+    print(f"[INFO] hunting '{args.target}':")
+    for name, spec in sorted(driver.profile.items()):
+        print(f"       {name:<13} min {spec['min']:>8.3f}   "
+              f"ideal {spec['ideal']:>8.3f}   max {spec['max']:>8.3f}")
     if args.web:
         webview.serve(args.port)
         print(f"[INFO] view on http://0.0.0.0:{args.port}")
@@ -174,7 +199,9 @@ def main():
 
         state = driver.state
         sweep = sonar.sweep_for_state(driver.sweep_state(), heading_deg)
-        per = perceive(sweep, profile=S.PIPELINE_PROFILE, tuning=tuning,
+        # driver.profile, not args.target: one resolved profile, so the state
+        # machine cannot be steering towards something the detector never scored.
+        per = perceive(sweep, target=driver.profile, tuning=tuning,
                        require_floor=not args.no_floor)
         action = driver.tick(per, heading_deg)
 
@@ -184,7 +211,8 @@ def main():
               f"{'' if action.value is None else f'{action.value:+.2f}'}: {action.why}")
 
         if args.web:
-            webview.publish(render(per, driver.memory, state=driver.state))
+            webview.publish(render(per, driver.memory, state=driver.state,
+                                   target=args.target))
 
         if action.kind == FINISHED:
             print("[INFO] driver reports finished")
