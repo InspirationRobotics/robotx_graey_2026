@@ -133,6 +133,30 @@ def pick(candidates, near=None, index=None, bearing=None):
                                         _xy(d.range_m, d.angle_deg)[1] - wy))
 
 
+WRAPS_DEG = 90.0        # above this a blob is not a compact object any more
+
+
+def span_note(span_deg, have_bearing):
+    """Lines to print about a suspiciously wide blob, or None.
+
+    A blob spanning most of the circle is a wall, or reverberation, or both.
+    Whether that is a mistake depends ENTIRELY on what you meant to record, and
+    this cannot know - so it describes what it sees and leaves the judgement
+    alone. The first version of this called it "almost certainly the wrong blob"
+    and told you to add --bearing, which was wrong twice over when the wall was
+    the thing being measured and --bearing was already set.
+    """
+    if span_deg <= WRAPS_DEG:
+        return None
+    lines = [f"^^ this blob wraps {span_deg:.0f} degrees of the circle, so it is",
+             "   a wall or reverberation rather than a compact object.",
+             "   Right if that is what you came to measure. Wrong if you"]
+    lines.append("   meant the pipe - "
+                 + ("check the bearing you gave." if have_bearing
+                    else "narrow it down with --bearing."))
+    return lines
+
+
 def main():
     sys.stdout.reconfigure(line_buffering=True)
     p = argparse.ArgumentParser()
@@ -225,7 +249,7 @@ def main():
         webview.serve(args.port)
         print(f"[INFO] watch it on http://0.0.0.0:{args.port}")
 
-    samples, missed = [], 0
+    samples, missed, warned = [], 0, [False]
     for i in range(args.sweeps):
         def live(partial):
             radar.update(partial)
@@ -257,9 +281,11 @@ def main():
               f"span {s.get('span_deg', 0):.0f} deg  "
               f"thick {s.get('thickness_m', 0):.3f} m"
               + (f"  height {s['height_m']:.2f} m" if "height_m" in s else ""))
-        if s.get("span_deg", 0) > 90:
-            print("        ^^ that span is enormous. Almost certainly the "
-                  "reverberation ring, not your object - add --bearing")
+        note = span_note(s.get("span_deg", 0), args.bearing is not None)
+        if note and not warned[0]:
+            warned[0] = True
+            for line in note:
+                print(f"        {line}")
 
     if not samples:
         sys.exit("nothing recorded - was the object in the arc, and above the "

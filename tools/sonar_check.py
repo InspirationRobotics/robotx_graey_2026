@@ -797,5 +797,25 @@ for _bad in (0, -5, 361):
     except ValueError:
         check_true(f"a width of {_bad} is rejected", True)
 
+# ------------------------------------------- what the recorder says about a blob
+# A blob wrapping most of the circle is a wall or reverberation. Whether that is
+# a MISTAKE depends entirely on what you meant to record, which the tool cannot
+# know - the first version asserted it was the wrong blob and told you to add
+# --bearing, while recording a pool wall with --bearing already set.
+print("\n--- what the recorder says about a wide blob ---")
+from tools.sonar_record import WRAPS_DEG as _WRAPS, span_note as _note
+
+check_true("a compact blob draws no comment at all", _note(12, False) is None)
+check_true("and neither does one right on the line", _note(_WRAPS, False) is None)
+check_true("a blob wrapping the circle does get one", _note(310, False) is not None)
+check_true("it says what it saw rather than that you were wrong",
+           "wall or reverberation" in " ".join(_note(310, True)))
+check_true("it allows that a wall may be exactly what you wanted",
+           "Right if that is what you came to measure" in " ".join(_note(310, True)))
+check_true("it does not tell you to add --bearing when you already did",
+           "narrow it down" not in " ".join(_note(310, True)))
+check_true("but it does when you have not",
+           "narrow it down" in " ".join(_note(310, False)))
+
 print(f"\n{sum(results)}/{len(results)} checks passed")
 sys.exit(0 if all(results) else 1)
