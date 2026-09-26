@@ -22,6 +22,8 @@ from urllib.parse import urlparse, parse_qs
 
 from rclpy.node import Node
 from std_msgs.msg import Int32, Bool, Float32, String
+from geometry_msgs.msg import TwistWithCovarianceStamped
+from robotx_graey_2026.api.gui.navigation_view import NavigationView
 
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.pixhawk.mavlink import Link, mavutil
@@ -40,6 +42,7 @@ READ_ONLY = {
     'mavproxy': ('MAVProxy', ['mavproxy.py']),
 }
 FILES = {
+    '/navigation': 'navigation.html',
     '/': 'gui.html',
     '/planner': 'pool_planner.html',
     '/pool.png': 'pool.png',
@@ -91,6 +94,7 @@ web_dir = '/root/robotx_ws/src/robotx_graey_2026/tools'
 link = None
 led_off = False
 control_bridge = None
+navigation = NavigationView()
 
 # Serializes GUI-originated mission changes and watchdog changes.
 operation_lock = threading.Lock()
@@ -602,6 +606,10 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         query = parse_qs(u.query)
 
+        if u.path == '/api/navigation':
+            self.reply_json(200, navigation.snapshot())
+            return
+
         if u.path == '/api/controller':
             self.reply_json(200, control_bridge.snapshot())
             return
@@ -786,6 +794,9 @@ class GuiNode(Node):
         )
 
         self.create_timer(1.0, self.link.heartbeat)
+        self.create_subscription(TwistWithCovarianceStamped, '/graey/dvl/velocity',
+            lambda m: navigation.put('dvl_velocity', {'xyz': [m.twist.twist.linear.x,
+                m.twist.twist.linear.y, m.twist.twist.linear.z], 'frame': m.header.frame_id}), 10)
         self.create_timer(0.1, self.pump)
         self.create_timer(0.2, self.hold_led)
 
@@ -821,16 +832,20 @@ class GuiNode(Node):
         tel['led'], tel['led_t'] = msg.data, time.time()
 
     def on_dvl(self, msg):
+        navigation.put('dvl_valid', {'valid': msg.data})
         tel['dvl_lock'], tel['dvl_t'] = msg.data, time.time()
 
     def on_alt(self, msg):
+        navigation.put('clearance', {'meters': msg.data if msg.data >= 0 else None})
         tel['altitude'] = msg.data
 
     def on_hdg(self, msg):
+        navigation.put('vn_heading', {'degrees': msg.data})
         tel['heading'], tel['hdg_t'] = msg.data, time.time()
 
     def pump(self):
         def consume(kind, msg):
+            navigation.consume(kind, msg)
             if (
                 kind == 'HEARTBEAT'
                 and msg.get_srcSystem() == 1

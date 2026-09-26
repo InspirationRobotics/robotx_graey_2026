@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GRAEY · Navigation</title>
+<style>
+:root{--bg:#111820;--panel:#1b2530;--text:#edf2f7;--dim:#a5b4c4;--grid:#354354;--blue:#67c5ff;--gold:#ffce6a;--bad:#ff9393}
+body.day{--bg:#f3f6fa;--panel:#fff;--text:#132333;--dim:#425369;--grid:#ccd5df;--blue:#005d9d;--gold:#886000;--bad:#ad1824}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui}header{padding:12px 18px;background:var(--panel);display:flex;gap:14px;align-items:center;flex-wrap:wrap}a{color:var(--blue)}button{background:var(--panel);color:var(--text);border:1px solid var(--dim);border-radius:5px;padding:7px;cursor:pointer}button.active{border-color:var(--blue);color:var(--blue)}main{display:grid;grid-template-columns:minmax(0,1fr) 345px;height:calc(100vh - 110px)}#map{position:relative;min-height:400px}#plot{width:100%;height:100%;display:block;touch-action:none}#controls{position:absolute;top:14px;left:14px;display:flex;gap:5px;flex-wrap:wrap;max-width:95%}#legend{position:absolute;bottom:14px;left:14px;background:var(--panel);padding:10px;border-radius:6px;font-size:12px}aside{overflow:auto;padding:12px;background:var(--panel)}section{border-bottom:1px solid var(--grid);padding:0 0 15px;margin-bottom:15px}h2{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--dim)}.value{font:14px ui-monospace,Consolas,monospace;line-height:1.8;white-space:pre-wrap}.note{color:var(--dim);font-size:12px;line-height:1.5}.bad{color:var(--bad)}#health{padding:10px 18px;color:var(--dim)}#attitude{width:100%;height:80px}label{font-size:12px}footer{padding:8px 18px;font-size:12px;color:var(--dim)}@media(max-width:800px){main{display:block;height:auto}#map{height:55vh}aside{overflow:visible}} 
+</style></head><body>
+<header><strong>GRAEY / NAVIGATION</strong><a href="/">Control GUI</a><span id="vehicle">Waiting for Cube</span><button id="theme">Day / night</button><button id="export">Export snapshot</button></header>
+<div id="health" role="status">Waiting for telemetry…</div>
+<main><div id="map"><canvas id="plot" aria-label="Local geographic grid showing global position and raw GPS"></canvas>
+<div id="controls"><button id="follow" class="active">Follow</button><button id="center">Recenter</button><button id="bow">Bow-up</button><button id="in">+</button><button id="out">−</button><label><input id="gpsLayer" type="checkbox" checked>GPS</label><label><input id="trailLayer" type="checkbox" checked>Trails</label></div>
+<div id="legend">Blue: Cube global · Gold: raw GPS<br>Waiting for a geographic reference</div></div>
+<aside><section><h2>Sub pose · Cube estimate</h2><svg id="attitude" viewBox="0 0 300 80" aria-label="Roll indicator"><path id="horizon" d="M45 40 H255" stroke="currentColor" stroke-width="2"/><path d="M110 40 H135 L150 47 L165 40 H190" fill="none" stroke="var(--blue)" stroke-width="4"/></svg><div id="pose" class="value">—</div><div class="note">Down is relative to Cube origin; it is not verified water-surface depth.</div></section>
+<section><h2>Raw M9N GPS</h2><div id="gps" class="value">—</div></section>
+<section><h2>Cube global position</h2><div id="global" class="value">—</div><div class="note">Reported global position does not prove GPS fusion or estimator validity.</div></section>
+<section><h2>Display coordinates / reference</h2><div id="coords" class="value">—</div><div id="origin" class="note">Origin not established.</div><div class="note">N/E/D in meters; display Down uses local MSL-height approximation. Never use this display reference for vehicle commands.</div></section>
+<section><h2>Sensor health</h2><div id="sensors" class="value">—</div></section></aside></main>
+<footer>Offline grid · No vehicle commands · Fixed reference for this GUI process · Unavailable telemetry is shown as —</footer>
+<script>
+'use strict';
+const $=id=>document.getElementById(id), canvas=$('plot'), ctx=canvas.getContext('2d');
+let state=null, arrived=0, follow=true, bow=false, scale=5, center=[0,0], drag=null;
+const fmt=(x,n=2)=>Number.isFinite(x)?x.toFixed(n):'—';
+const vec=v=>v?v.map(x=>fmt(x)).join(' / '):'—';
+function stream(k){const s=state?.streams[k];return s&&s.fresh&&performance.now()-arrived<2000?s.data:null}
+function age(k){const s=state?.streams[k];return s?fmt(s.age+(performance.now()-arrived)/1000,1)+' s':'never received'}
+function geo(k){let v=stream(k);return v?.valid?v:null}
+function update(){
+ const h=stream('heartbeat'),a=stream('attitude'),l=stream('local'),g=geo('gps'),p=geo('global');
+ $('vehicle').textContent=h?(h.armed?'ARMED':'Disarmed')+' · mode ID '+h.mode_id:'Cube heartbeat unavailable';
+ $('health').textContent=(performance.now()-arrived>2000?'CONNECTION STALE · ':'')+'Pose '+(l?'fresh':'unavailable')+' · GPS '+(g?'3D or better':'no current fix')+' · Attitude '+(a?'fresh':'unavailable');
+ $('health').className=(!l||!a)?'bad':'';
+ $('pose').textContent='Roll / Pitch / Yaw (°)\n'+vec(a?.rpy)+'\nCube N / E / D (m)\n'+vec(l?.ned)+'\nVelocity N / E / D (m/s)\n'+vec(l?.velocity)+'\nPosition age '+age('local')+'\nAttitude age '+age('attitude');
+ $('horizon').setAttribute('transform',a?'rotate('+(-a.rpy[0])+' 150 40)':'');$('attitude').style.opacity=a?'1':'.2';
+ const raw=stream('gps');
+ $('gps').textContent=(g?fmt(g.lat,7)+', '+fmt(g.lon,7)+'\nMSL altitude '+fmt(g.alt)+' m':'No valid current coordinates')+'\nFix '+(raw?.fix??'—')+' · satellites '+(raw?.satellites??'—')+'\nH accuracy '+fmt(raw?.accuracy)+' m\nV accuracy '+fmt(raw?.vertical_accuracy)+' m\nHDOP '+fmt(raw?.hdop)+'\nAge '+age('gps');
+ $('global').textContent=(p?fmt(p.lat,7)+', '+fmt(p.lon,7)+'\nMSL altitude '+fmt(p.alt)+' m':'—')+'\nAge '+age('global');
+ $('coords').textContent='Cube global → display N/E/D\n'+vec(p?.ned)+'\nGPS → display N/E/D\n'+vec(g?.ned);
+ $('origin').textContent=state?.origin?'Fixed display origin: '+fmt(state.origin[0],7)+', '+fmt(state.origin[1],7)+'; '+fmt(state.origin[2])+' m MSL. Separate from Cube local origin.':'Waiting for first valid geographic position.';
+ const dv=stream('dvl_valid'),vel=stream('dvl_velocity'),cl=stream('clearance'),vn=stream('vn_heading'),ek=stream('ekf');
+ $('sensors').textContent='DVL '+(dv?(dv.valid?'valid':'invalid'):'unavailable')+' · '+age('dvl_valid')+'\nDVL velocity ('+(vel?.frame??'sensor frame')+')\n'+vec(dv?.valid?vel?.xyz:null)+'\nBottom clearance '+fmt(dv?.valid?cl?.meters:null)+' m\nVN heading '+fmt(vn?.degrees)+'° · '+age('vn_heading')+'\nEKF flags '+(ek?.flags??'unavailable')+' · '+age('ekf');
+ draw();
+}
+function draw(){
+ const rect=canvas.getBoundingClientRect(),dpr=devicePixelRatio||1,W=rect.width,H=rect.height;
+ if(canvas.width!==Math.round(W*dpr)||canvas.height!==Math.round(H*dpr)){canvas.width=Math.round(W*dpr);canvas.height=Math.round(H*dpr)}ctx.setTransform(dpr,0,0,dpr,0,0);
+ const css=getComputedStyle(document.body),color=n=>css.getPropertyValue(n).trim();
+ ctx.fillStyle=color('--bg');ctx.fillRect(0,0,W,H);
+ const p=geo('global'),g=geo('gps'),a=stream('attitude'),heading=a?.rpy?.[2]??p?.heading;
+ const theta=bow&&Number.isFinite(heading)?heading*Math.PI/180:0,c=Math.cos(theta),s=Math.sin(theta);
+ if(follow&&(p||g))center=(p||g).ned.slice(0,2);
+ function xy(n,e){n-=center[0];e-=center[1];return [W/2+(e*c-n*s)*scale,H/2-(n*c+e*s)*scale]}
+ const step=Math.pow(10,Math.floor(Math.log10(100/scale))),radius=Math.hypot(W,H)/scale;
+ ctx.strokeStyle=color('--grid');ctx.lineWidth=1;
+ for(let n=Math.floor((center[0]-radius)/step)*step;n<center[0]+radius;n+=step){ctx.beginPath();ctx.moveTo(...xy(n,center[1]-radius));ctx.lineTo(...xy(n,center[1]+radius));ctx.stroke()}
+ for(let e=Math.floor((center[1]-radius)/step)*step;e<center[1]+radius;e+=step){ctx.beginPath();ctx.moveTo(...xy(center[0]-radius,e));ctx.lineTo(...xy(center[0]+radius,e));ctx.stroke()}
+ if($('trailLayer').checked)for(const key of ['global','gps']){if(key==='gps'&&!$('gpsLayer').checked)continue;ctx.strokeStyle=color(key==='global'?'--blue':'--gold');ctx.globalAlpha=.45;ctx.beginPath();let last=null;for(const pt of state?.trails[key]||[]){const q=xy(pt[0],pt[1]);if(!last||Math.abs(last[3]-pt[3])>2)ctx.moveTo(...q);else ctx.lineTo(...q);last=pt}ctx.stroke();ctx.globalAlpha=1}
+ if(g&&$('gpsLayer').checked){const [x,y]=xy(...g.ned);ctx.strokeStyle=color('--gold');ctx.fillStyle=color('--gold');ctx.beginPath();ctx.arc(x,y,5,0,Math.PI*2);ctx.fill();if(g.accuracy){ctx.beginPath();ctx.arc(x,y,g.accuracy*scale,0,Math.PI*2);ctx.stroke()}}
+ if(p){const [x,y]=xy(...p.ned);ctx.save();ctx.translate(x,y);ctx.fillStyle=color('--blue');if(Number.isFinite(heading)){ctx.rotate(heading*Math.PI/180-theta);ctx.beginPath();ctx.moveTo(0,-17);ctx.lineTo(9,12);ctx.lineTo(0,7);ctx.lineTo(-9,12);ctx.closePath();ctx.fill()}else{ctx.beginPath();ctx.arc(0,0,7,0,Math.PI*2);ctx.fill()}ctx.restore()}
+ ctx.save();ctx.translate(W-40,H-45);ctx.rotate(-theta);ctx.strokeStyle=color('--text');ctx.beginPath();ctx.moveTo(0,15);ctx.lineTo(0,-15);ctx.lineTo(-4,-8);ctx.moveTo(0,-15);ctx.lineTo(4,-8);ctx.stroke();ctx.restore();
+ ctx.fillStyle=color('--text');ctx.font='13px system-ui';ctx.fillText('N',W-45,H-70);
+ $('legend').textContent='Blue: Cube global · Gold: raw GPS / accuracy | Grid '+fmt(step,step<1?2:0)+' m'+(!p?' | No current Cube global marker':'');
+}
+async function poll(){try{const r=await fetch('/api/navigation',{cache:'no-store',signal:AbortSignal.timeout(1500)});if(!r.ok)throw Error(r.status);state=await r.json();arrived=performance.now()}catch(e){}finally{update();setTimeout(poll,200)}}
+setInterval(update,250);poll();
+$('follow').onclick=()=>{follow=!follow;$('follow').classList.toggle('active',follow)};
+$('center').onclick=()=>{follow=true;$('follow').classList.add('active');draw()};
+$('bow').onclick=()=>{bow=!bow;$('bow').classList.toggle('active',bow);draw()};
+function zoom(f){scale=Math.max(.02,Math.min(200,scale*f));draw()}
+$('in').onclick=()=>zoom(1.4);$('out').onclick=()=>zoom(1/1.4);
+canvas.onwheel=e=>{e.preventDefault();zoom(e.deltaY<0?1.15:1/1.15)};
+canvas.onpointerdown=e=>{drag=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId);follow=false;$('follow').classList.remove('active')};
+canvas.onpointermove=e=>{if(!drag)return;let dx=(e.clientX-drag[0])/scale,dy=(e.clientY-drag[1])/scale;const hd=stream('attitude')?.rpy?.[2]??geo('global')?.heading??0,t=bow?hd*Math.PI/180:0;center[0]+=dy*Math.cos(t)+dx*Math.sin(t);center[1]+=dy*Math.sin(t)-dx*Math.cos(t);drag=[e.clientX,e.clientY];draw()};
+canvas.onpointerup=canvas.onpointercancel=()=>drag=null;
+$('theme').onclick=()=>{document.body.classList.toggle('day');draw()};
+$('export').onclick=()=>{if(!state)return;const url=URL.createObjectURL(new Blob([JSON.stringify({exported_at:new Date().toISOString(),snapshot_age_s:(performance.now()-arrived)/1000,...state},null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='graey-navigation.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+window.addEventListener('resize',draw);
+</script></body></html>

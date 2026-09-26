@@ -48,6 +48,7 @@
 </div>
 
 <div id="tabs">
+  <button onclick="window.open('/navigation', '_blank', 'noopener')">Navigation ↗</button>
   <button class="on" onclick="show('nodes')">Nodes</button>
   <button onclick="show('sensors')">Sensors</button>
   <button onclick="show('camera')">Camera</button>
@@ -177,7 +178,7 @@ function show(t){
     document.getElementById(name).style.display = (name === t) ? '' : 'none';
   });
   document.querySelectorAll('#tabs button').forEach(function(b,i){
-    b.classList.toggle('on', TABS[i] === t);
+    b.classList.toggle('on', TABS[i-1] === t);
   });
   if (t === 'camera'){                       // load only when looked at - the stream
     var cam = document.getElementById('cam'); // is a live MJPEG connection
