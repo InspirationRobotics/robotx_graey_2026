@@ -97,7 +97,7 @@ class NavigationView:
             now = self.clock()
             trail = self.trails[name]
             if not trail or now-trail[-1][3] >= .5:
-                trail.append([*ned, now])
+                trail.append([*ned, now, lat, lon])
 
     def snapshot(self):
         with self.lock:
@@ -108,4 +108,4 @@ class NavigationView:
                 streams[name] = {'data': copy.deepcopy(sample['data']), 'age': age,
                                  'fresh': age < (3 if name in ('heartbeat', 'ekf') else 2)}
             return {'streams': streams, 'origin': self.origin, 'session': self.session,
-                    'trails': {k: [[*p[:3], max(0, now-p[3])] for p in v] for k, v in self.trails.items()}}
+                    'trails': {k: [[*p[:3], max(0, now-p[3]), *p[4:]] for p in v] for k, v in self.trails.items()}}

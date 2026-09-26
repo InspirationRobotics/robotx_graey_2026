@@ -46,6 +46,16 @@ class NavigationTests(unittest.TestCase):
         self.gps()
         self.assertFalse(self.view.snapshot()['streams']['gps']['fresh'])
 
+    def test_trails_keep_geographic_coordinates_for_streets(self):
+        self.gps()
+        self.now += 1
+        self.gps(lat=330001000, timestamp=2)
+        points = self.view.snapshot()['trails']['gps']
+        self.assertEqual(points[0][4:], [33, -117])
+        self.assertEqual(points[1][4:], [33.0001, -117])
+        self.assertEqual(points[0][3], 1)
+        self.assertEqual(points[1][3], 0)
+
     def test_snapshot_detached_and_nonfinite_unavailable(self):
         self.view.put('local', {'ned': [float('nan'), 2, 3]})
         snap = self.view.snapshot()

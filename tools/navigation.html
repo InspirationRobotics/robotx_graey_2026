@@ -1,15 +1,20 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>GRAEY · Navigation</title>
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
 <style>
 :root{--bg:#111820;--panel:#1b2530;--text:#edf2f7;--dim:#a5b4c4;--grid:#354354;--blue:#67c5ff;--gold:#ffce6a;--bad:#ff9393}
 body.day{--bg:#f3f6fa;--panel:#fff;--text:#132333;--dim:#425369;--grid:#ccd5df;--blue:#005d9d;--gold:#886000;--bad:#ad1824}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui}header{padding:12px 18px;background:var(--panel);display:flex;gap:14px;align-items:center;flex-wrap:wrap}a{color:var(--blue)}button{background:var(--panel);color:var(--text);border:1px solid var(--dim);border-radius:5px;padding:7px;cursor:pointer}button.active{border-color:var(--blue);color:var(--blue)}main{display:grid;grid-template-columns:minmax(0,1fr) 345px;height:calc(100vh - 110px)}#map{position:relative;min-height:400px}#plot{width:100%;height:100%;display:block;touch-action:none}#controls{position:absolute;top:14px;left:14px;display:flex;gap:5px;flex-wrap:wrap;max-width:95%}#legend{position:absolute;bottom:14px;left:14px;background:var(--panel);padding:10px;border-radius:6px;font-size:12px}aside{overflow:auto;padding:12px;background:var(--panel)}section{border-bottom:1px solid var(--grid);padding:0 0 15px;margin-bottom:15px}h2{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--dim)}.value{font:14px ui-monospace,Consolas,monospace;line-height:1.8;white-space:pre-wrap}.note{color:var(--dim);font-size:12px;line-height:1.5}.bad{color:var(--bad)}#health{padding:10px 18px;color:var(--dim)}#attitude{width:100%;height:80px}label{font-size:12px}footer{padding:8px 18px;font-size:12px;color:var(--dim)}@media(max-width:800px){main{display:block;height:auto}#map{height:55vh}aside{overflow:visible}} 
+#streetmap{position:absolute;inset:0;z-index:0}#streetmap[hidden],#plot[hidden]{display:none}#controls{z-index:1001;background:var(--panel);padding:5px;border-radius:6px}#legend{z-index:1001;max-width:calc(100% - 130px);bottom:30px}#mapnote{padding:8px 18px;font-size:12px;color:var(--dim)}.vessel-icon{background:none;border:0}.leaflet-container{font-family:system-ui;color:#152333}.leaflet-control-attribution{font-size:11px!important}.leaflet-control-attribution a{color:#005d9d}
+@media(min-width:801px){body{height:100dvh;display:flex;flex-direction:column}main{flex:1;min-height:0;height:auto}#map{min-height:0}header,#health,#mapnote,footer{flex:none}}
 </style></head><body>
 <header><strong>GRAEY / NAVIGATION</strong><a href="/">Control GUI</a><span id="vehicle">Waiting for Cube</span><button id="theme">Day / night</button><button id="export">Export snapshot</button></header>
 <div id="health" role="status">Waiting for telemetry…</div>
+<div id="mapnote" role="status">Grid works offline. Streets loads OpenStreetMap tiles over the browser's internet connection and shares the viewed map area with that provider. Background imagery is not a navigation chart.</div>
 <main><div id="map"><canvas id="plot" aria-label="Local geographic grid showing global position and raw GPS"></canvas>
-<div id="controls"><button id="follow" class="active">Follow</button><button id="center">Recenter</button><button id="bow">Bow-up</button><button id="in">+</button><button id="out">−</button><label><input id="gpsLayer" type="checkbox" checked>GPS</label><label><input id="trailLayer" type="checkbox" checked>Trails</label></div>
+<div id="streetmap" hidden aria-label="Online OpenStreetMap streets"></div>
+<div id="controls"><button id="gridView" class="active" aria-pressed="true">Grid</button><button id="streetsView" aria-pressed="false">Streets (online)</button><button id="follow" class="active">Follow</button><button id="center">Recenter</button><button id="bow">Bow-up</button><button id="in">+</button><button id="out">−</button><label><input id="gpsLayer" type="checkbox" checked>GPS</label><label><input id="trailLayer" type="checkbox" checked>Trails</label></div>
 <div id="legend">Blue: Cube global · Gold: raw GPS<br>Waiting for a geographic reference</div></div>
 <aside><section><h2>Sub pose · Cube estimate</h2><svg id="attitude" viewBox="0 0 300 80" aria-label="Roll indicator"><path id="horizon" d="M45 40 H255" stroke="currentColor" stroke-width="2"/><path d="M110 40 H135 L150 47 L165 40 H190" fill="none" stroke="var(--blue)" stroke-width="4"/></svg><div id="pose" class="value">—</div><div class="note">Down is relative to Cube origin; it is not verified water-surface depth.</div></section>
 <section><h2>Raw M9N GPS</h2><div id="gps" class="value">—</div></section>
@@ -21,6 +26,67 @@ body.day{--bg:#f3f6fa;--panel:#fff;--text:#132333;--dim:#425369;--grid:#ccd5df;-
 'use strict';
 const $=id=>document.getElementById(id), canvas=$('plot'), ctx=canvas.getContext('2d');
 let state=null, arrived=0, follow=true, bow=false, scale=5, center=[0,0], drag=null;
+let streets=false, streetMap=null, streetLayers=null, streetLoader=null, tileFailures=0, viewRequest=0;
+
+function loadStreets(){
+ if(window.L)return Promise.resolve();
+ if(!streetLoader)streetLoader=new Promise((resolve,reject)=>{
+  const script=document.createElement('script');script.src='/vendor/leaflet/leaflet.js';
+  script.onload=resolve;script.onerror=()=>{script.remove();streetLoader=null;reject(Error('Map library unavailable'))};document.head.appendChild(script);
+ });
+ return streetLoader;
+}
+function viewMode(on){
+ streets=on;$('streetmap').hidden=!on;canvas.hidden=on;
+ $('gridView').classList.toggle('active',!on);$('gridView').setAttribute('aria-pressed',String(!on));
+ $('streetsView').classList.toggle('active',on);$('streetsView').setAttribute('aria-pressed',String(on));
+ $('bow').disabled=on;$('bow').title=on?'Streets uses north-up. Bow-up is available on Grid.':'';
+ if(!on&&streetMap){streetMap.remove();streetMap=null;streetLayers=null}
+}
+async function selectStreets(){
+ const request=++viewRequest;
+ const position=geo('global')||geo('gps');
+ if(!position&&!state?.origin){$('mapnote').textContent='Streets needs a geographic reference. Waiting for a valid global position or GPS fix.';return}
+ $('streetsView').disabled=true;
+ try{
+  await loadStreets();if(request!==viewRequest)return;viewMode(true);tileFailures=0;
+  streetMap=L.map('streetmap',{zoomControl:false,attributionControl:true}).setView(position?[position.lat,position.lon]:state.origin.slice(0,2),18);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{
+   maxZoom:19,keepBuffer:0,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>'
+  }).on('tileerror',()=>{tileFailures++;$('mapnote').textContent='Some street tiles are unavailable. Telemetry remains independent; select Grid for the offline view.'})
+   .on('loading',()=>{tileFailures=0;$('mapnote').textContent='Loading online street tiles… Grid remains available offline.'})
+   .on('load',()=>{if(!tileFailures)$('mapnote').textContent='Streets · north-up · Internet required for new tiles · OpenStreetMap background is not a navigation chart.'}).addTo(streetMap);
+  streetLayers=L.layerGroup().addTo(streetMap);
+  streetMap.on('dragstart',()=>{follow=false;$('follow').classList.remove('active')});
+  streetMap.invalidateSize();update();
+ }catch(e){viewMode(false);$('mapnote').textContent='Streets could not load. Grid remains available.'}
+ finally{$('streetsView').disabled=false}
+}
+function streetDraw(){
+ if(!streetMap||!streetLayers)return;
+ streetLayers.clearLayers();
+ const p=geo('global'),g=geo('gps'),heading=stream('attitude')?.rpy?.[2]??p?.heading;
+ if(follow&&(p||g)){const point=p||g;streetMap.panTo([point.lat,point.lon],{animate:false})}
+ if($('trailLayer').checked)for(const key of ['global','gps']){
+  if(key==='gps'&&!$('gpsLayer').checked)continue;
+  const segments=[];let segment=[],last=null;
+  for(const pt of state?.trails[key]||[]){
+   if(!Number.isFinite(pt[4])||!Number.isFinite(pt[5]))continue;
+   if(last&&Math.abs(last[3]-pt[3])>2){segments.push(segment);segment=[]}
+   segment.push([pt[4],pt[5]]);last=pt;
+  }segments.push(segment);
+  L.polyline(segments,{color:key==='global'?'#0066ad':'#936000',weight:3,opacity:.65}).addTo(streetLayers);
+ }
+ if(g&&$('gpsLayer').checked){
+  L.circleMarker([g.lat,g.lon],{radius:5,color:'#936000',fillOpacity:1}).addTo(streetLayers);
+  if(g.accuracy)L.circle([g.lat,g.lon],{radius:g.accuracy,color:'#936000',weight:1,fillOpacity:.1}).addTo(streetLayers);
+ }
+ if(p){
+  if(Number.isFinite(heading))L.marker([p.lat,p.lon],{interactive:false,icon:L.divIcon({className:'vessel-icon',iconSize:[32,36],iconAnchor:[16,18],html:'<svg width="32" height="36" viewBox="0 0 32 36"><path transform="rotate('+heading+' 16 18)" d="M16 2 L28 32 L16 25 L4 32 Z" fill="#0066ad" stroke="white" stroke-width="2"/></svg>'})}).addTo(streetLayers);
+  else L.circleMarker([p.lat,p.lon],{radius:7,color:'#0066ad'}).addTo(streetLayers);
+ }
+ $('legend').textContent='North ↑ · Blue: Cube global · Gold: raw GPS / accuracy'+(!p?' · No current Cube global marker':'');
+}
 const fmt=(x,n=2)=>Number.isFinite(x)?x.toFixed(n):'—';
 const vec=v=>v?v.map(x=>fmt(x)).join(' / '):'—';
 function stream(k){const s=state?.streams[k];return s&&s.fresh&&performance.now()-arrived<2000?s.data:null}
@@ -43,6 +109,7 @@ function update(){
  draw();
 }
 function draw(){
+ if(streets){streetDraw();return}
  const rect=canvas.getBoundingClientRect(),dpr=devicePixelRatio||1,W=rect.width,H=rect.height;
  if(canvas.width!==Math.round(W*dpr)||canvas.height!==Math.round(H*dpr)){canvas.width=Math.round(W*dpr);canvas.height=Math.round(H*dpr)}ctx.setTransform(dpr,0,0,dpr,0,0);
  const css=getComputedStyle(document.body),color=n=>css.getPropertyValue(n).trim();
@@ -67,7 +134,7 @@ setInterval(update,250);poll();
 $('follow').onclick=()=>{follow=!follow;$('follow').classList.toggle('active',follow)};
 $('center').onclick=()=>{follow=true;$('follow').classList.add('active');draw()};
 $('bow').onclick=()=>{bow=!bow;$('bow').classList.toggle('active',bow);draw()};
-function zoom(f){scale=Math.max(.02,Math.min(200,scale*f));draw()}
+function zoom(f){if(streets&&streetMap){streetMap.setZoom(streetMap.getZoom()+(f>1?1:-1));return}scale=Math.max(.02,Math.min(200,scale*f));draw()}
 $('in').onclick=()=>zoom(1.4);$('out').onclick=()=>zoom(1/1.4);
 canvas.onwheel=e=>{e.preventDefault();zoom(e.deltaY<0?1.15:1/1.15)};
 canvas.onpointerdown=e=>{drag=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId);follow=false;$('follow').classList.remove('active')};
@@ -75,5 +142,7 @@ canvas.onpointermove=e=>{if(!drag)return;let dx=(e.clientX-drag[0])/scale,dy=(e.
 canvas.onpointerup=canvas.onpointercancel=()=>drag=null;
 $('theme').onclick=()=>{document.body.classList.toggle('day');draw()};
 $('export').onclick=()=>{if(!state)return;const url=URL.createObjectURL(new Blob([JSON.stringify({exported_at:new Date().toISOString(),snapshot_age_s:(performance.now()-arrived)/1000,...state},null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='graey-navigation.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
-window.addEventListener('resize',draw);
+$('gridView').onclick=()=>{viewRequest++;viewMode(false);$('mapnote').textContent='Grid · offline · Streets requests only the map area you view from OpenStreetMap.';draw()};
+$('streetsView').onclick=()=>{if(!streets)selectStreets()};
+window.addEventListener('resize',()=>{if(streetMap)streetMap.invalidateSize();draw()});
 </script></body></html>

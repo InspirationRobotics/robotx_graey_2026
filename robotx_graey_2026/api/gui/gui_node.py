@@ -42,6 +42,8 @@ READ_ONLY = {
     'mavproxy': ('MAVProxy', ['mavproxy.py']),
 }
 FILES = {
+    '/vendor/leaflet/leaflet.js': 'vendor/leaflet/leaflet.js',
+    '/vendor/leaflet/leaflet.css': 'vendor/leaflet/leaflet.css',
     '/navigation': 'navigation.html',
     '/': 'gui.html',
     '/planner': 'pool_planner.html',
@@ -49,6 +51,8 @@ FILES = {
     '/neighbor_pool.png': 'neighbor_pool.png',
 }
 TYPES = {
+    '.js': 'application/javascript',
+    '.css': 'text/css',
     '.html': 'text/html',
     '.png': 'image/png',
 }
