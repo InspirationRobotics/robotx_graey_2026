@@ -9,7 +9,9 @@ body.day{--bg:#f3f6fa;--panel:#fff;--text:#132333;--dim:#425369;--grid:#ccd5df;-
 #streetmap{position:absolute;inset:0;z-index:0}#streetmap[hidden],#plot[hidden]{display:none}#controls{z-index:1001;background:var(--panel);padding:5px;border-radius:6px}#legend{z-index:1001;max-width:calc(100% - 130px);bottom:30px}#mapnote{padding:8px 18px;font-size:12px;color:var(--dim)}.vessel-icon{background:none;border:0}.leaflet-container{font-family:system-ui;color:#152333}.leaflet-control-attribution{font-size:11px!important}.leaflet-control-attribution a{color:#005d9d}
 @media(min-width:801px){body{height:100dvh;display:flex;flex-direction:column}main{flex:1;min-height:0;height:auto}#map{min-height:0}header,#health,#mapnote,footer{flex:none}}
 </style></head><body>
-<header><strong>GRAEY / NAVIGATION</strong><a href="/">Control GUI</a><span id="vehicle">Waiting for Cube</span><button id="theme">Day / night</button><button id="export">Export snapshot</button></header>
+<header><strong>GRAEY / NAVIGATION</strong><a href="/">Control GUI</a><span id="vehicle">Waiting for Cube</span><button id="theme">Day / night</button><button id="export">Export snapshot</button><button id="resetDisplay" title="Clear both displayed trails and use the next new valid GPS fix as the display origin. Applies to all open navigation pages; vehicle navigation is unchanged.">Reset origin &amp; track</button></header>
+<div id="resetStatus" role="status" class="note" style="padding:4px 18px">Display reset affects all open navigation pages. Vehicle navigation is unchanged.</div>
+<nav style="padding:8px 18px"><a href="/navigation-supervisor">Navigation supervisor</a> · <span id="diveReference">No dive-start reference</span></nav>
 <div id="health" role="status">Waiting for telemetry…</div>
 <div id="mapnote" role="status">Grid works offline. Streets loads OpenStreetMap tiles over the browser's internet connection and shares the viewed map area with that provider. Background imagery is not a navigation chart.</div>
 <main><div id="map"><canvas id="plot" aria-label="Local geographic grid showing global position and raw GPS"></canvas>
@@ -27,6 +29,18 @@ body.day{--bg:#f3f6fa;--panel:#fff;--text:#132333;--dim:#425369;--grid:#ccd5df;-
 const $=id=>document.getElementById(id), canvas=$('plot'), ctx=canvas.getContext('2d');
 let state=null, arrived=0, follow=true, bow=false, scale=5, center=[0,0], drag=null;
 let streets=false, streetMap=null, streetLayers=null, streetLoader=null, tileFailures=0, viewRequest=0;
+let resetPosting=false, seenOriginRevision=null, resetError='';
+
+async function resetDisplay(){
+ resetPosting=true;resetError='';$('resetDisplay').disabled=true;
+ $('resetStatus').textContent='Requesting a new display origin…';
+ try{
+  const r=await fetch('/api/navigation/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'reset_display'}),signal:AbortSignal.timeout(5000)});
+  if(!r.ok)throw Error('HTTP '+r.status);
+  const result=await r.json();if(!result.ok)throw Error('Reset was rejected');
+ }catch(e){resetError='Reset response unavailable ('+e.message+'). Check the displayed reset status before retrying.'}
+ finally{resetPosting=false;update()}
+}
 
 function loadStreets(){
  if(window.L)return Promise.resolve();
@@ -65,6 +79,9 @@ async function selectStreets(){
 function streetDraw(){
  if(!streetMap||!streetLayers)return;
  streetLayers.clearLayers();
+ const dive=state?.mission_reference;
+ if(dive)L.marker([dive.gps_lat,dive.gps_lon],{interactive:false,icon:L.divIcon({className:'vessel-icon',iconSize:[180,24],iconAnchor:[8,12],html:'<span style="color:#136c47;background:white;border:2px solid #136c47;padding:3px;white-space:nowrap">⚑ Dive start / mission zero</span>'})}).addTo(streetLayers);
+ if(state?.origin)L.marker(state.origin.slice(0,2),{interactive:false,icon:L.divIcon({className:'vessel-icon',iconSize:[130,24],iconAnchor:[8,12],html:'<span style="color:#753da5;background:white;border:1px solid #753da5;padding:2px 5px;white-space:nowrap">⊕ Display origin</span>'})}).addTo(streetLayers);
  const p=geo('global'),g=geo('gps'),heading=stream('attitude')?.rpy?.[2]??p?.heading;
  if(follow&&(p||g)){const point=p||g;streetMap.panTo([point.lat,point.lon],{animate:false})}
  if($('trailLayer').checked)for(const key of ['global','gps']){
@@ -93,6 +110,19 @@ function stream(k){const s=state?.streams[k];return s&&s.fresh&&performance.now(
 function age(k){const s=state?.streams[k];return s?fmt(s.age+(performance.now()-arrived)/1000,1)+' s':'never received'}
 function geo(k){let v=stream(k);return v?.valid?v:null}
 function update(){
+ const dive=state?.mission_reference,supervisor=stream('supervisor');
+ $('diveReference').textContent=dive?'Dive start: '+fmt(dive.gps_lat,7)+', '+fmt(dive.gps_lon,7)+(dive.live?' · Mission N/E/D '+vec(supervisor?.mission_ned)+' m':' · Historical / unverified reference'):'No dive-start reference';
+ const connected=!!state&&performance.now()-arrived<2000,reset=state?.display_reset;
+ if(connected&&seenOriginRevision!==state.origin_revision){
+  if(seenOriginRevision!==null&&reset?.state==='complete'){follow=true;center=[0,0];$('follow').classList.add('active')}
+  seenOriginRevision=state.origin_revision;
+ }
+ $('resetDisplay').disabled=resetPosting||!connected||reset?.state==='waiting';
+ $('resetDisplay').textContent=reset?.state==='timeout'?'Retry origin reset':'Reset origin & track';
+ if(!resetPosting)$('resetStatus').textContent=!connected?'Reset unavailable: telemetry connection is stale.':
+  reset?.state==='waiting'?'Tracks cleared. Waiting for a new valid GPS fix ('+Math.ceil(reset.remaining_s)+' s)…':
+  reset?.state==='timeout'?'No new valid GPS fix arrived. Display origin remains unset; retry when GPS is available.':
+  resetError||(reset?.state==='complete'?'Display origin reset from a new GPS fix. Tracking resumed.':'Display reset affects all open navigation pages. Vehicle navigation is unchanged.');
  const h=stream('heartbeat'),a=stream('attitude'),l=stream('local'),g=geo('gps'),p=geo('global');
  $('vehicle').textContent=h?(h.armed?'ARMED':'Disarmed')+' · mode ID '+h.mode_id:'Cube heartbeat unavailable';
  $('health').textContent=(performance.now()-arrived>2000?'CONNECTION STALE · ':'')+'Pose '+(l?'fresh':'unavailable')+' · GPS '+(g?'3D or better':'no current fix')+' · Attitude '+(a?'fresh':'unavailable');
@@ -103,7 +133,7 @@ function update(){
  $('gps').textContent=(g?fmt(g.lat,7)+', '+fmt(g.lon,7)+'\nMSL altitude '+fmt(g.alt)+' m':'No valid current coordinates')+'\nFix '+(raw?.fix??'—')+' · satellites '+(raw?.satellites??'—')+'\nH accuracy '+fmt(raw?.accuracy)+' m\nV accuracy '+fmt(raw?.vertical_accuracy)+' m\nHDOP '+fmt(raw?.hdop)+'\nAge '+age('gps');
  $('global').textContent=(p?fmt(p.lat,7)+', '+fmt(p.lon,7)+'\nMSL altitude '+fmt(p.alt)+' m':'—')+'\nAge '+age('global');
  $('coords').textContent='Cube global → display N/E/D\n'+vec(p?.ned)+'\nGPS → display N/E/D\n'+vec(g?.ned);
- $('origin').textContent=state?.origin?'Fixed display origin: '+fmt(state.origin[0],7)+', '+fmt(state.origin[1],7)+'; '+fmt(state.origin[2])+' m MSL. Separate from Cube local origin.':'Waiting for first valid geographic position.';
+ $('origin').textContent=state?.origin?'Fixed display origin: '+fmt(state.origin[0],7)+', '+fmt(state.origin[1],7)+'; '+fmt(state.origin[2])+' m MSL. Separate from Cube local origin.':reset?.state==='waiting'?'Waiting for a new valid GPS fix.':reset?.state==='timeout'?'Origin unset. Retry reset when GPS is available.':'Waiting for first valid geographic position.';
  const dv=stream('dvl_valid'),vel=stream('dvl_velocity'),cl=stream('clearance'),vn=stream('vn_heading'),ek=stream('ekf');
  $('sensors').textContent='DVL '+(dv?(dv.valid?'valid':'invalid'):'unavailable')+' · '+age('dvl_valid')+'\nDVL velocity ('+(vel?.frame??'sensor frame')+')\n'+vec(dv?.valid?vel?.xyz:null)+'\nBottom clearance '+fmt(dv?.valid?cl?.meters:null)+' m\nVN heading '+fmt(vn?.degrees)+'° · '+age('vn_heading')+'\nEKF flags '+(ek?.flags??'unavailable')+' · '+age('ekf');
  draw();
@@ -116,15 +146,19 @@ function draw(){
  ctx.fillStyle=color('--bg');ctx.fillRect(0,0,W,H);
  const p=geo('global'),g=geo('gps'),a=stream('attitude'),heading=a?.rpy?.[2]??p?.heading;
  const theta=bow&&Number.isFinite(heading)?heading*Math.PI/180:0,c=Math.cos(theta),s=Math.sin(theta);
- if(follow&&(p||g))center=(p||g).ned.slice(0,2);
+ const positioned=p?.ned?p:(g?.ned?g:null);
+ if(follow&&positioned)center=positioned.ned.slice(0,2);
  function xy(n,e){n-=center[0];e-=center[1];return [W/2+(e*c-n*s)*scale,H/2-(n*c+e*s)*scale]}
  const step=Math.pow(10,Math.floor(Math.log10(100/scale))),radius=Math.hypot(W,H)/scale;
  ctx.strokeStyle=color('--grid');ctx.lineWidth=1;
  for(let n=Math.floor((center[0]-radius)/step)*step;n<center[0]+radius;n+=step){ctx.beginPath();ctx.moveTo(...xy(n,center[1]-radius));ctx.lineTo(...xy(n,center[1]+radius));ctx.stroke()}
  for(let e=Math.floor((center[1]-radius)/step)*step;e<center[1]+radius;e+=step){ctx.beginPath();ctx.moveTo(...xy(center[0]-radius,e));ctx.lineTo(...xy(center[0]+radius,e));ctx.stroke()}
  if($('trailLayer').checked)for(const key of ['global','gps']){if(key==='gps'&&!$('gpsLayer').checked)continue;ctx.strokeStyle=color(key==='global'?'--blue':'--gold');ctx.globalAlpha=.45;ctx.beginPath();let last=null;for(const pt of state?.trails[key]||[]){const q=xy(pt[0],pt[1]);if(!last||Math.abs(last[3]-pt[3])>2)ctx.moveTo(...q);else ctx.lineTo(...q);last=pt}ctx.stroke();ctx.globalAlpha=1}
- if(g&&$('gpsLayer').checked){const [x,y]=xy(...g.ned);ctx.strokeStyle=color('--gold');ctx.fillStyle=color('--gold');ctx.beginPath();ctx.arc(x,y,5,0,Math.PI*2);ctx.fill();if(g.accuracy){ctx.beginPath();ctx.arc(x,y,g.accuracy*scale,0,Math.PI*2);ctx.stroke()}}
- if(p){const [x,y]=xy(...p.ned);ctx.save();ctx.translate(x,y);ctx.fillStyle=color('--blue');if(Number.isFinite(heading)){ctx.rotate(heading*Math.PI/180-theta);ctx.beginPath();ctx.moveTo(0,-17);ctx.lineTo(9,12);ctx.lineTo(0,7);ctx.lineTo(-9,12);ctx.closePath();ctx.fill()}else{ctx.beginPath();ctx.arc(0,0,7,0,Math.PI*2);ctx.fill()}ctx.restore()}
+ if(state?.origin){const [x,y]=xy(0,0);ctx.strokeStyle=color('--text');ctx.beginPath();ctx.arc(x,y,8,0,Math.PI*2);ctx.moveTo(x-12,y);ctx.lineTo(x+12,y);ctx.moveTo(x,y-12);ctx.lineTo(x,y+12);ctx.stroke();ctx.fillStyle=color('--text');ctx.font='12px system-ui';ctx.fillText('Display origin',x+14,y-12)}
+ const dive=state?.mission_reference;
+ if(dive?.display_ned){const [x,y]=xy(...dive.display_ned);ctx.strokeStyle='#42cf91';ctx.fillStyle='#42cf91';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,y+12);ctx.lineTo(x,y-14);ctx.lineTo(x+13,y-8);ctx.lineTo(x,y-3);ctx.stroke();ctx.font='12px system-ui';ctx.fillText('Dive start / mission zero',x+16,y-10)}
+ if(g?.ned&&$('gpsLayer').checked){const [x,y]=xy(...g.ned);ctx.strokeStyle=color('--gold');ctx.fillStyle=color('--gold');ctx.beginPath();ctx.arc(x,y,5,0,Math.PI*2);ctx.fill();if(g.accuracy){ctx.beginPath();ctx.arc(x,y,g.accuracy*scale,0,Math.PI*2);ctx.stroke()}}
+ if(p?.ned){const [x,y]=xy(...p.ned);ctx.save();ctx.translate(x,y);ctx.fillStyle=color('--blue');if(Number.isFinite(heading)){ctx.rotate(heading*Math.PI/180-theta);ctx.beginPath();ctx.moveTo(0,-17);ctx.lineTo(9,12);ctx.lineTo(0,7);ctx.lineTo(-9,12);ctx.closePath();ctx.fill()}else{ctx.beginPath();ctx.arc(0,0,7,0,Math.PI*2);ctx.fill()}ctx.restore()}
  ctx.save();ctx.translate(W-40,H-45);ctx.rotate(-theta);ctx.strokeStyle=color('--text');ctx.beginPath();ctx.moveTo(0,15);ctx.lineTo(0,-15);ctx.lineTo(-4,-8);ctx.moveTo(0,-15);ctx.lineTo(4,-8);ctx.stroke();ctx.restore();
  ctx.fillStyle=color('--text');ctx.font='13px system-ui';ctx.fillText('N',W-45,H-70);
  $('legend').textContent='Blue: Cube global · Gold: raw GPS / accuracy | Grid '+fmt(step,step<1?2:0)+' m'+(!p?' | No current Cube global marker':'');
@@ -141,6 +175,7 @@ canvas.onpointerdown=e=>{drag=[e.clientX,e.clientY];canvas.setPointerCapture(e.p
 canvas.onpointermove=e=>{if(!drag)return;let dx=(e.clientX-drag[0])/scale,dy=(e.clientY-drag[1])/scale;const hd=stream('attitude')?.rpy?.[2]??geo('global')?.heading??0,t=bow?hd*Math.PI/180:0;center[0]+=dy*Math.cos(t)+dx*Math.sin(t);center[1]+=dy*Math.sin(t)-dx*Math.cos(t);drag=[e.clientX,e.clientY];draw()};
 canvas.onpointerup=canvas.onpointercancel=()=>drag=null;
 $('theme').onclick=()=>{document.body.classList.toggle('day');draw()};
+$('resetDisplay').onclick=resetDisplay;
 $('export').onclick=()=>{if(!state)return;const url=URL.createObjectURL(new Blob([JSON.stringify({exported_at:new Date().toISOString(),snapshot_age_s:(performance.now()-arrived)/1000,...state},null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='graey-navigation.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
 $('gridView').onclick=()=>{viewRequest++;viewMode(false);$('mapnote').textContent='Grid · offline · Streets requests only the map area you view from OpenStreetMap.';draw()};
 $('streetsView').onclick=()=>{if(!streets)selectStreets()};

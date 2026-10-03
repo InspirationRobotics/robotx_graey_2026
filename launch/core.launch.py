@@ -30,5 +30,7 @@ def generate_launch_description():
         Node(package=PKG, executable='dvl_node', name='dvl_node', output='screen', **RESPAWN),
         Node(package=PKG, executable='vn100_node', name='vn100_node', output='screen', **RESPAWN),
         Node(package=PKG, executable='nav_ekf_bridge', name='nav_ekf_bridge', output='screen', **RESPAWN),
+        Node(package=PKG, executable='navigation_supervisor', name='navigation_supervisor',
+             parameters=[{'active': False}], output='screen', **RESPAWN),
         Node(package=PKG, executable='gui_node', name='gui_node', output='screen', **RESPAWN),
     ])

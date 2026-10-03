@@ -39,4 +39,5 @@ mavproxy.py --master=$CUBE --baudrate=115200 $DAEMON \
   --out=udpin:0.0.0.0:14553 \
   --out=udpin:0.0.0.0:14554 \
   --out=udpin:0.0.0.0:14555 \
-  --out=udpin:0.0.0.0:14556
+  --out=udpin:0.0.0.0:14556 \
+  --out=udpin:127.0.0.1:14557

@@ -35,6 +35,33 @@ class NavigationView:
         self.trails = {k: deque(maxlen=600) for k in ('global', 'gps')}
         self.boot_ms = None
         self.session = 0
+        self.reset_state = 'idle'
+        self.reset_deadline = None
+        self.reset_gps_time = None
+        self.origin_revision = 0
+
+    def reset_display(self):
+        """Clear visualization and await a newer GPS fix; no vehicle commands."""
+        with self.lock:
+            self._expire_reset()
+            if self.reset_state == 'waiting':
+                return {'ok': True, 'state': 'waiting'}
+            previous = self.samples.get('gps', {}).get('data', {})
+            self.reset_gps_time = previous.get('receiver_time_us') or None
+            self.reset_deadline = self.clock() + 15
+            self.reset_state = 'waiting'
+            self.origin = None
+            self.session += 1
+            for trail in self.trails.values():
+                trail.clear()
+            for name in ('gps', 'global'):
+                if name in self.samples:
+                    self.samples[name]['data']['ned'] = None
+            return {'ok': True, 'state': 'waiting'}
+
+    def _expire_reset(self):
+        if self.reset_state == 'waiting' and self.clock() >= self.reset_deadline:
+            self.reset_state = 'timeout'
 
     def put(self, name, data):
         # Never serialize NaN/Infinity into the browser's JSON parser.
@@ -56,6 +83,11 @@ class NavigationView:
                     for trail in self.trails.values(): trail.clear()
                     self.origin = None
                     self.session += 1
+                    # A new Cube boot invalidates the old GPS timestamp baseline.
+                    if self.reset_state in ('waiting', 'timeout'):
+                        self.reset_gps_time = None
+                    else:
+                        self.reset_state = 'idle'
                 self.boot_ms = m.time_boot_ms
                 self._geo('global', m.lat/1e7, m.lon/1e7, m.alt/1000,
                           {'velocity': [m.vx/100, m.vy/100, m.vz/100],
@@ -85,15 +117,30 @@ class NavigationView:
                 self.put('cube_origin', {'lat': m.latitude/1e7, 'lon': m.longitude/1e7, 'alt': m.altitude/1000})
 
     def _geo(self, name, lat, lon, alt, extra):
+        self._expire_reset()
         # (0,0) is a real location but also ArduPilot's uninitialized sentinel.
         valid = (-90 <= lat <= 90 and -180 <= lon <= 180
                  and (lat != 0 or lon != 0) and math.isfinite(alt)
                  and (name != 'gps' or extra['fix'] >= 3))
-        if valid and self.origin is None:
+        if self.reset_state == 'waiting' and name == 'gps':
+            gps_time = extra.get('receiver_time_us', 0)
+            if gps_time and self.reset_gps_time is None:
+                # If no measurement existed at click time, the first timestamp
+                # is only a baseline. It might be a cached MAVLink response.
+                self.reset_gps_time = gps_time
+            elif valid and gps_time and gps_time > self.reset_gps_time:
+                self.origin = [lat, lon, alt]
+                self.reset_state = 'complete'
+                self.origin_revision += 1
+                for cached in ('gps', 'global'):
+                    sample = self.samples.get(cached, {}).get('data')
+                    if sample and sample['valid']:
+                        sample['ned'] = offset(sample['lat'], sample['lon'], sample['alt'], self.origin)
+        if valid and self.origin is None and self.reset_state == 'idle':
             self.origin = [lat, lon, alt]
-        ned = offset(lat, lon, alt, self.origin) if valid else None
+        ned = offset(lat, lon, alt, self.origin) if valid and self.origin else None
         self.put(name, dict(lat=lat, lon=lon, alt=alt, valid=valid, ned=ned, **extra))
-        if valid:
+        if ned is not None:
             now = self.clock()
             trail = self.trails[name]
             if not trail or now-trail[-1][3] >= .5:
@@ -101,11 +148,23 @@ class NavigationView:
 
     def snapshot(self):
         with self.lock:
+            self._expire_reset()
             now = self.clock()
             streams = {}
             for name, sample in self.samples.items():
                 age = max(0, now-sample['received'])
                 streams[name] = {'data': copy.deepcopy(sample['data']), 'age': age,
                                  'fresh': age < (3 if name in ('heartbeat', 'ekf') else 2)}
-            return {'streams': streams, 'origin': self.origin, 'session': self.session,
+            supervisor = streams.get('supervisor', {})
+            reference = copy.deepcopy(supervisor.get('data', {}).get('reference'))
+            if reference:
+                reference['display_ned'] = offset(reference['gps_lat'], reference['gps_lon'],
+                    reference['gps_msl_alt'], self.origin) if self.origin else None
+                reference['live'] = bool(supervisor.get('fresh') and
+                    supervisor.get('data', {}).get('reference_current'))
+            return {'streams': streams, 'origin': copy.deepcopy(self.origin), 'session': self.session,
+                    'mission_reference': reference,
+                    'origin_revision': self.origin_revision,
+                    'display_reset': {'state': self.reset_state,
+                        'remaining_s': max(0, self.reset_deadline-now) if self.reset_state == 'waiting' else 0},
                     'trails': {k: [[*p[:3], max(0, now-p[3]), *p[4:]] for p in v] for k, v in self.trails.items()}}

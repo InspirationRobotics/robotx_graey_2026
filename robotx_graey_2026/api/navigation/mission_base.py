@@ -15,12 +15,14 @@ in the water.
 """
 import math
 import time
+import json
+import uuid
 from enum import Enum
 
 import os
 import sys
 from rclpy.node import Node
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, String
 from robotx_graey_2026.api.navigation.frames import body_to_world
 from robotx_graey_2026.api.pixhawk.mavlink import (
     Link, MODE_GUIDED, MODE_MANUAL, mavutil)
@@ -53,6 +55,8 @@ class MissionBase(Node):
         p = self.declare_parameter
         p('mavlink', 'udpout:127.0.0.1:14553')
         p('dry_run', True)
+        p('navigation_supervised', False)
+        p('navigation_abort_policy', '')
         p('depth', 1.5)
         p('gate_forward', 4.0)
         p('marker_forward', 13.0)
@@ -73,6 +77,17 @@ class MissionBase(Node):
 
         g = self.get_parameter
         self.dry = g('dry_run').value
+        self.nav_supervised = g('navigation_supervised').value
+        self.nav_abort_policy = g('navigation_abort_policy').value
+        if self.nav_supervised and not self.dry and self.nav_abort_policy != 'pilot_takeover':
+            raise ValueError('Validate and explicitly select navigation_abort_policy:=pilot_takeover before live supervised missions')
+        self.nav_status = None
+        self.nav_status_time = -math.inf
+        self.nav_run = str(uuid.uuid4())
+        self.nav_sequence = 0
+        self.nav_interrupted = False
+        self.nav_abort_last = -math.inf
+        self.start_z = 0.0
         self.depth = g('depth').value
         self.gate_f = g('gate_forward').value
         self.marker_f = g('marker_forward').value
@@ -110,6 +125,8 @@ class MissionBase(Node):
         self.step = 0                           # waypoint index within MANEUVER
 
         self.auto_pub = self.create_publisher(Bool, '/graey/autonomy_active', 10)
+        self.nav_intent_pub = self.create_publisher(String, '/graey/navigation/intent', 10)
+        self.create_subscription(String, '/graey/navigation/status', self.on_navigation_status, 10)
         self.create_timer(0.1, self.pump_mavlink)
         self.create_timer(0.25, self.tick)
         self.create_timer(5.0, self.request_rc)
@@ -148,6 +165,7 @@ class MissionBase(Node):
         return body_to_world(self.start_x, self.start_y, self.start_yaw, forward, right)
 
     def goto_ned(self, n, e, down, yaw, label):
+        down += self.start_z
         tgt = (n, e, down, yaw)
         changed = (self.target is None
                    or any(abs(a - b) > 0.01 for a, b in zip(tgt[:3], self.target[:3]))
@@ -176,6 +194,7 @@ class MissionBase(Node):
         is what it wants. Heading is a RATE here, not an angle. The dry-run print
         is throttled because 4 Hz would bury the log.
         """
+        down += self.start_z
         self.target = (n, e, down, self.cur_yaw or 0.0)
         if self.dry:
             if self.now() - self.last_send_t > DRY_LOG_S:
@@ -244,6 +263,43 @@ class MissionBase(Node):
         return armed and self.rc.get(channel, 0) > self.rc_high
 
     # ---------- state machine ----------
+
+    def on_navigation_status(self, msg):
+        try:
+            value = json.loads(msg.data)
+            if isinstance(value, dict):
+                self.nav_status = value
+                self.nav_status_time = time.monotonic()
+        except (ValueError, TypeError):
+            pass
+
+    def navigation_gate(self):
+        phase = 'DIVE' if self.state in (S.WAIT_NAV, S.ARM, S.DIVE) else (
+            'SURFACE' if self.state == S.SURFACE else 'UNDERWATER')
+        self.nav_sequence += 1
+        self.nav_intent_pub.publish(String(data=json.dumps(dict(
+            run_id=self.nav_run, phase=phase, sequence=self.nav_sequence))))
+        if not self.nav_supervised:
+            return True
+        s = self.nav_status or {}
+        ready = (time.monotonic()-self.nav_status_time < 1 and
+                 s.get('run_id') == self.nav_run and s.get('navigation_ready') is True and
+                 s.get('reference_current') is True)
+        if self.state == S.WAIT_NAV:
+            return ready
+        if not ready:
+            self.nav_interrupted = True
+        if self.nav_interrupted:
+            self.auto_pub.publish(Bool(data=False))
+            # Opt-in policy: cancel GUIDED instead of silently leaving the last
+            # waypoint running. Never disarm or clear a kill fault here.
+            if self.mode != 'MANUAL' and time.monotonic()-self.nav_abort_last > 1:
+                self.nav_abort_last = time.monotonic()
+                if not self.dry:
+                    self.link.set_mode(MODE_MANUAL)
+                self.get_logger().error('Navigation interrupted: pilot takeover requested; mission latched stopped')
+            return False
+        return True
     def tick(self):
         if self.state == S.WAIT_RC:             # idle on deck, nothing published
             if self.rc_pressed(self.rc_start_ch, self.start_armed):
@@ -280,6 +336,9 @@ class MissionBase(Node):
                 time.sleep(0.25)                # let that publish actually leave
                 os._exit(0)
 
+        if self.state != S.DONE and not self.navigation_gate():
+            return
+
         if (self.state not in (S.WAIT_NAV, S.DONE)
                 and self.now() - self.state_t0 > self.timeout):
             nxt = S.DONE if self.state == S.SURFACE else S.SURFACE
@@ -291,6 +350,8 @@ class MissionBase(Node):
             if self.dry or (self.cur is not None and self.cur_yaw is not None):
                 if self.cur:
                     self.start_x, self.start_y = self.cur[0], self.cur[1]
+                if self.nav_supervised:
+                    self.start_x, self.start_y, self.start_z = self.nav_status['reference']['cube_ned']
                 self.start_yaw = self.cur_yaw if self.cur_yaw is not None else 0.0
                 self.get_logger().info(
                     f'nav ready, start=({self.start_x:.2f},{self.start_y:.2f}) '

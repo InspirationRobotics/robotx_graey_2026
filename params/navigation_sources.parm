@@ -1,0 +1,15 @@
+# Candidate profile. Apply only disarmed after snapshot/readback and frame validation.
+# Underwater: existing external position, velocity and VN-100 yaw.
+EK3_SRC1_POSXY 6
+EK3_SRC1_VELXY 6
+EK3_SRC1_POSZ 1
+EK3_SRC1_VELZ 0
+EK3_SRC1_YAW 6
+# Surface: GPS horizontal position; external DVL velocity and VN-100 yaw.
+EK3_SRC2_POSXY 3
+EK3_SRC2_VELXY 6
+EK3_SRC2_POSZ 1
+EK3_SRC2_VELZ 0
+EK3_SRC2_YAW 6
+# Do not fuse velocity sources from unused sets.
+EK3_SRC_OPTIONS 0

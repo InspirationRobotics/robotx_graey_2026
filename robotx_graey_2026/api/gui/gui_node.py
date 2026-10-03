@@ -45,6 +45,7 @@ FILES = {
     '/vendor/leaflet/leaflet.js': 'vendor/leaflet/leaflet.js',
     '/vendor/leaflet/leaflet.css': 'vendor/leaflet/leaflet.css',
     '/navigation': 'navigation.html',
+    '/navigation-supervisor': 'navigation_supervisor.html',
     '/': 'gui.html',
     '/planner': 'pool_planner.html',
     '/pool.png': 'pool.png',
@@ -553,7 +554,8 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def do_POST(self):
-        if urlparse(self.path).path != '/api/controller':
+        path = urlparse(self.path).path
+        if path not in ('/api/controller', '/api/navigation/reset'):
             self.send_error(404)
             return
 
@@ -575,6 +577,12 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(size))
             if not isinstance(body, dict):
                 raise ValueError('expected object')
+
+            if path == '/api/navigation/reset':
+                if body != {'action': 'reset_display'}:
+                    raise ValueError('invalid display request')
+                self.reply_json(202, navigation.reset_display())
+                return
 
             action = body.get('action')
             source = body.get('source')
@@ -801,6 +809,7 @@ class GuiNode(Node):
         self.create_subscription(TwistWithCovarianceStamped, '/graey/dvl/velocity',
             lambda m: navigation.put('dvl_velocity', {'xyz': [m.twist.twist.linear.x,
                 m.twist.twist.linear.y, m.twist.twist.linear.z], 'frame': m.header.frame_id}), 10)
+        self.create_subscription(String, '/graey/navigation/status', self.on_navigation_status, 10)
         self.create_timer(0.1, self.pump)
         self.create_timer(0.2, self.hold_led)
 
@@ -834,6 +843,14 @@ class GuiNode(Node):
 
     def on_led(self, msg):
         tel['led'], tel['led_t'] = msg.data, time.time()
+
+    def on_navigation_status(self, msg):
+        try:
+            value = json.loads(msg.data)
+            if isinstance(value, dict):
+                navigation.put('supervisor', value)
+        except (ValueError, TypeError):
+            pass
 
     def on_dvl(self, msg):
         navigation.put('dvl_valid', {'valid': msg.data})

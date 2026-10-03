@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GRAEY · Navigation supervisor</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui;background:#111820;color:#edf2f7}body{margin:0}header{padding:18px;background:#1b2530;display:flex;gap:24px;flex-wrap:wrap}a{color:#67c5ff}main{max-width:1050px;margin:auto;padding:24px}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}article{background:#1b2530;padding:20px;border-radius:8px}h2{font-size:14px;color:#a5b4c4}p{line-height:1.6}.value{font-size:22px;white-space:pre-wrap}#reason{border-left:4px solid #ffce6a;padding:16px;background:#1b2530}#reference{font:15px ui-monospace,monospace;white-space:pre-wrap}footer{color:#a5b4c4;font-size:13px;margin-top:24px}
+</style></head><body>
+<header><strong>GRAEY / NAVIGATION SUPERVISOR</strong><a href="/">Control GUI</a><a href="/navigation">GPS map</a></header>
+<main><p id="connection" role="status">Waiting for supervisor…</p>
+<div class="cards"><article><h2>Operating mode</h2><div id="mode" class="value">Unavailable</div></article>
+<article><h2>Navigation state</h2><div id="state" class="value">Unavailable</div></article>
+<article><h2>Mission readiness</h2><div id="ready" class="value">Unavailable</div></article>
+<article><h2>Recommended / requested source</h2><div id="requested" class="value">Unavailable</div></article>
+<article><h2>Reported selected source</h2><div id="confirmed" class="value">Unknown</div></article>
+<article><h2>Calibrated depth</h2><div id="depth" class="value">Unavailable</div></article></div>
+<p id="reason">Waiting for status</p>
+<article><h2>Dive start / mission zero</h2><div id="reference">No dive reference captured</div></article>
+<footer>Observation mode displays recommendations. Source selection alone does not prove GPS fusion. Dive zero uses a Jetson mission reference; the Cube coordinate frame stays continuous.</footer></main>
+<script>
+'use strict';const $=id=>document.getElementById(id);let last=null,received=0;
+function render(){const live=last?.fresh&&performance.now()-received<1500,s=live?last.data:null;
+$('connection').textContent=live?'Supervisor status current':'Supervisor unavailable or stale';
+for(const [id,key] of [['mode','mode'],['state','state'],['requested','requested_source'],['confirmed','confirmed_source']])$(id).textContent=s?.[key]??'Unavailable';
+$('ready').textContent=s?(s.navigation_ready?'Ready':'Waiting / blocked'):'Unavailable';
+$('reason').textContent=s?.reason??'No current supervisor decision. Previous permissions have expired.';
+$('depth').textContent=Number.isFinite(s?.depth_m)?s.depth_m.toFixed(2)+' m':'Calibration or telemetry unavailable';
+const r=s?.reference;
+$('reference').textContent=r?`${s.reference_current?'Current dive':'Historical / unverified reference'}\n${r.gps_lat.toFixed(7)}, ${r.gps_lon.toFixed(7)}\nCaptured: ${r.captured_utc}\nRun: ${r.run_id}\nMission N / E / D: ${s.mission_ned?.map(v=>v.toFixed(2)).join(' / ')??'Unavailable'} m`:'No qualified dive reference captured';}
+async function poll(){try{const r=await fetch('/api/navigation',{cache:'no-store',signal:AbortSignal.timeout(1000)});if(!r.ok)throw Error(r.status);last=(await r.json()).streams.supervisor;received=performance.now()}catch(e){}finally{render();setTimeout(poll,200)}}
+setInterval(render,250);poll();
+</script></body></html>

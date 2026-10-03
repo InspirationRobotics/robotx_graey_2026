@@ -6,9 +6,9 @@ Sends MAVLink ODOMETRY at a fixed 20 Hz carrying:
   - body velocity        (from /graey/dvl/velocity) -> EKF velocity source
   - integrated position  (dead-reckoned when the DVL has bottom lock)
 
-Attitude is sent every tick as long as the VN-100 is publishing, independent of
-the DVL. On a dry bench (no DVL / no bottom lock) position stays at the origin
-and velocity is zero, but heading still tracks - that is the yaw bench test.
+Combined odometry is withheld when either DVL or VN-100 is invalid/stale.
+Missing bottom lock is not a zero-velocity measurement. This also withholds
+external yaw; independent heading-only transport requires separate validation.
 
 self.pos is the only accumulated state in the navigation chain, so THIS NODE MUST
 NOT DIE. Restarting it snaps the dead-reckoned position back to the origin and
@@ -16,10 +16,12 @@ teleports the EKF's external-nav source by however far it had travelled. That is
 why Link reconnects on ECONNREFUSED rather than letting the exception out.
 """
 import math
+import json
+import time
+import uuid
 
 from rclpy.node import Node
-from std_msgs.msg import Bool
-from geometry_msgs.msg import TwistWithCovarianceStamped
+from std_msgs.msg import String
 from sensor_msgs.msg import Imu
 
 from robotx_graey_2026.api.node_util import run
@@ -53,6 +55,7 @@ class NavEKFBridge(Node):
         super().__init__('nav_ekf_bridge')
         self.declare_parameter('mavlink', 'udpout:127.0.0.1:14551')
         self.declare_parameter('yaw_offset_deg', 0.0)   # frame alignment, not a calibration
+        self.declare_parameter('allow_alignment', False)
         self.yaw_off = self.get_parameter('yaw_offset_deg').value
         self.link = Link(self.get_parameter('mavlink').value, 197, self.get_logger())
 
@@ -64,13 +67,20 @@ class NavEKFBridge(Node):
         self.pos = [0.0, 0.0, 0.0]
         self.last_t = None
         self.sent = 0
+        self.imu_received = self.dvl_received = -math.inf
+        self.imu_stamp = -1
+        self.sensor_stamp = None
+        self.reset_counter = 0
+        self.instance = str(uuid.uuid4())
+        self.aligned_id = ''
+        self.status_pub = self.create_publisher(String, '/graey/navigation/bridge_status', 10)
 
         self.create_subscription(Imu, '/graey/vn100/imu', self.on_imu, 20)
-        self.create_subscription(Bool, '/graey/dvl/valid', self.on_valid, 10)
-        self.create_subscription(TwistWithCovarianceStamped, '/graey/dvl/velocity',
-                                 self.on_vel, 20)
+        self.create_subscription(String, '/graey/dvl/sample', self.on_sample, 20)
+        self.create_subscription(String, '/graey/navigation/bridge_request', self.align, 10)
         self.create_timer(0.05, self.send_odom)         # 20 Hz
         self.create_timer(2.0, self.report)
+        self.create_timer(.2, self.publish_status)
 
     def report(self):
         self.get_logger().debug(
@@ -78,31 +88,75 @@ class NavEKFBridge(Node):
             f'pos=({self.pos[0]:.2f},{self.pos[1]:.2f},{self.pos[2]:.2f})')
 
     def on_imu(self, m):
+        stamp = m.header.stamp.sec*1000000000+m.header.stamp.nanosec
+        if stamp <= self.imu_stamp:
+            return
+        self.imu_stamp = stamp
+        q = (m.orientation.w, m.orientation.x, m.orientation.y, m.orientation.z)
+        rates = (m.angular_velocity.x, m.angular_velocity.y, m.angular_velocity.z)
+        if not all(math.isfinite(v) for v in q + rates) or not .9 < sum(v*v for v in q) < 1.1:
+            self.have_att = False
+            return
+        self.imu_received = time.monotonic()
         self.q = yaw_offset_quat((m.orientation.w, m.orientation.x,
                                   m.orientation.y, m.orientation.z), self.yaw_off)
-        self.rates = (m.angular_velocity.x, m.angular_velocity.y, m.angular_velocity.z)
+        self.rates = rates
         self.have_att = True
 
-    def on_valid(self, msg):
-        self.valid = msg.data
+    def on_sample(self, msg):
+        try:
+            d = json.loads(msg.data)
+            t = d['stamp_ns']*1e-9
+            if self.last_t is not None and t <= self.last_t:
+                return
+            sensor_stamp = d.get('sensor_time')
+            if sensor_stamp is not None and sensor_stamp == self.sensor_stamp:
+                return
+            self.sensor_stamp = sensor_stamp
+            self.vb = tuple(float(v) for v in d['velocity'])
+            self.valid = bool(d['valid']) and len(self.vb) == 3 and all(math.isfinite(v) for v in self.vb)
+            self.dvl_received = time.monotonic()
+            if self.last_t is not None and self.valid and self.fresh():
+                dt = t-self.last_t
+                if 0 < dt < .5:
+                    delta = rotate_body_to_world(self.q, self.vb)
+                    self.pos = [a+b*dt for a, b in zip(self.pos, delta)]
+            self.last_t = t
+        except (ValueError, TypeError, KeyError):
+            self.valid = False
 
-    def on_vel(self, msg):
-        self.vb = (msg.twist.twist.linear.x, msg.twist.twist.linear.y,
-                   msg.twist.twist.linear.z)
-        t = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
-        if self.last_t is not None and self.valid:
-            dt = t - self.last_t
-            if 0.0 < dt < 1.0:                          # ignore stalls and clock jumps
-                vw = rotate_body_to_world(self.q, self.vb)
-                for i in range(3):
-                    self.pos[i] += vw[i] * dt
-        self.last_t = t
+    def fresh(self):
+        now = time.monotonic()
+        return self.have_att and self.valid and now-self.imu_received < .5 and now-self.dvl_received < .5
+
+    def publish_status(self):
+        self.status_pub.publish(String(data=json.dumps(dict(instance=self.instance,
+            healthy=self.fresh(), aligned=bool(self.aligned_id), request_id=self.aligned_id,
+            reset_counter=self.reset_counter))))
+
+    def align(self, msg):
+        if not self.get_parameter('allow_alignment').value or not self.fresh():
+            return
+        try:
+            d = json.loads(msg.data)
+            if not 0 < d['expires_at']-time.monotonic() <= .6 or d['request_id'] == self.aligned_id:
+                return
+            position = list(map(float, d['cube_ned']))
+            if len(position) != 3 or not all(math.isfinite(v) for v in position):
+                return
+            # One frame alignment at transition, never continuous EKF feedback.
+            self.pos = position
+            self.reset_counter = (self.reset_counter+1) % 256
+            self.aligned_id = d['request_id']
+            self.publish_status()
+        except (ValueError, TypeError, KeyError):
+            return
 
     def send_odom(self):
-        if not self.have_att:
+        if not self.fresh():
             return
-        v = self.vb if self.valid else (0.0, 0.0, 0.0)
-        self.link.odometry(self.pos, self.q, v, self.rates)
+        self.link.odometry(self.pos, self.q, self.vb, self.rates,
+                           reset_counter=self.reset_counter)
         self.sent += 1
 
 

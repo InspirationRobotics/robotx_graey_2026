@@ -62,7 +62,7 @@ class DemoMission(MissionBase):
         # WAIT_NAV captures start_x and start_y but not depth, so take it here, on
         # the one transition that has both a fix and a mission about to begin.
         if s is S.ARM and self.cur is not None:
-            self.depth = self.cur[2] + self.hold_offset
+            self.depth = self.cur[2] - self.start_z + self.hold_offset
             self.get_logger().info(
                 f'start depth {self.cur[2]:+.2f} m, holding {self.depth:+.2f} m')
         super().enter(s)

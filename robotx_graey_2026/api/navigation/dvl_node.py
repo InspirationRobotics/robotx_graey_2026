@@ -11,7 +11,7 @@ import json
 import socket
 
 from rclpy.node import Node
-from std_msgs.msg import Bool, Float32
+from std_msgs.msg import Bool, Float32, String
 from geometry_msgs.msg import TwistWithCovarianceStamped
 
 from robotx_graey_2026.api.node_util import run
@@ -32,6 +32,7 @@ class DVLNode(Node):
             TwistWithCovarianceStamped, '/graey/dvl/velocity', 10)
         self.pub_valid = self.create_publisher(Bool, '/graey/dvl/valid', 10)
         self.pub_alt = self.create_publisher(Float32, '/graey/dvl/altitude', 10)
+        self.pub_sample = self.create_publisher(String, '/graey/dvl/sample', 10)
 
         self.sock = None
         self.buf = b''
@@ -94,6 +95,12 @@ class DVLNode(Node):
         self.pub_vel.publish(msg)
         self.pub_valid.publish(Bool(data=bool(r.get('velocity_valid', False))))
         self.pub_alt.publish(Float32(data=float(r.get('altitude', -1.0))))
+        # Atomic validity + velocity for consumers that integrate measurements.
+        self.pub_sample.publish(String(data=json.dumps(dict(
+            stamp_ns=msg.header.stamp.sec*1000000000+msg.header.stamp.nanosec,
+            velocity=[msg.twist.twist.linear.x, msg.twist.twist.linear.y, msg.twist.twist.linear.z],
+            valid=bool(r.get('velocity_valid', False)),
+            sensor_time=r.get('time_of_validity', r.get('time'))))))
 
 
 def main():
