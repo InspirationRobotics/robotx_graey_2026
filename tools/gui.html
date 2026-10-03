@@ -11,7 +11,8 @@
   #strip .v { font-family:Consolas, monospace; }
   #strip.stale { opacity:.45; }
   #tabs { display:flex; background:#1d2129; border-bottom:1px solid #2a2f3a; }
-  #tabs button { background:none; border:none; color:#aab; padding:12px 22px; font-size:14px; cursor:pointer; }
+  #tabs { flex-wrap:wrap; }
+  #tabs button { background:none; border:none; color:#aab; padding:12px 18px; font-size:14px; cursor:pointer; }
   #tabs button.on { color:#e8e8e8; background:#14171c; border-bottom:2px solid #5b9bd5; }
   table { border-collapse:collapse; margin:18px; min-width:560px; }
   td, th { padding:10px 16px; border-bottom:1px solid #2a2f3a; text-align:left; font-size:14px; }
@@ -28,6 +29,8 @@
   button.danger { background:#5d2e2e; border-color:#a44; }
   button.danger:hover { border-color:#e57373; }
   iframe { border:none; width:100%; height:calc(100vh - 90px); }
+  .embedded-page { height:calc(100vh - 90px); }
+  .embedded-page iframe { display:block; height:100%; }
   .note { margin:0 18px 18px; color:#778; font-size:12.5px; max-width:680px; line-height:1.5; }
   #logbox { margin:0 18px 18px; background:#0e1116; color:#9ab; border:1px solid #333;
             border-radius:6px; padding:10px; font-family:Consolas, monospace;
@@ -48,14 +51,14 @@
 </div>
 
 <div id="tabs">
-  <button onclick="location.href='/navigation'">GPS map</button>
-  <button onclick="location.href='/navigation-supervisor'">Navigation supervisor</button>
-  <button class="on" onclick="show('nodes')">Nodes</button>
-  <button onclick="show('sensors')">Sensors</button>
-  <button onclick="show('camera')">Camera</button>
-  <button onclick="show('planner')">Mission planner</button>
-  <button onclick="show('logs')">Logs</button>
-  <button onclick="show('system')">System</button>
+  <button data-panel="nodes" class="on" onclick="show('nodes')">Nodes</button>
+  <button data-panel="sensors" onclick="show('sensors')">Sensors</button>
+  <button data-panel="gps" onclick="show('gps')">GPS &amp; Pose</button>
+  <button data-panel="supervisor" onclick="show('supervisor')">Navigation Supervisor</button>
+  <button data-panel="camera" onclick="show('camera')">Camera</button>
+  <button data-panel="planner" onclick="show('planner')">Mission planner</button>
+  <button data-panel="logs" onclick="show('logs')">Logs</button>
+  <button data-panel="system" onclick="show('system')">System</button>
 </div>
 
 <div id="nodes">
@@ -77,6 +80,14 @@
   <div class="note">"Last update" is seconds since that source was last heard from.
   A dash means it has never reported since the GUI started &mdash; check the matching
   stack on the Nodes tab.</div>
+</div>
+
+<div id="gps" class="embedded-page" style="display:none">
+  <iframe title="GPS and vehicle pose map" data-src="/navigation"></iframe>
+</div>
+
+<div id="supervisor" class="embedded-page" style="display:none">
+  <iframe title="Navigation supervisor status" data-src="/navigation-supervisor"></iframe>
 </div>
 
 <div id="camera" style="display:none">
@@ -124,7 +135,7 @@
 </div>
 
 <script>
-var TABS = ['nodes','sensors','camera','planner','logs','system'];
+var TABS = ['nodes','sensors','gps','supervisor','camera','planner','logs','system'];
 var ledOff = false;                          // mirrored from /api/status
 
 // The log is only fetched while its tab is open - no point pulling 60 KB a second
@@ -176,11 +187,16 @@ async function power(what){
 
 function show(t){
   TABS.forEach(function(name){
-    document.getElementById(name).style.display = (name === t) ? '' : 'none';
+    var panel = document.getElementById(name);
+    if (panel) panel.style.display = (name === t) ? '' : 'none';
   });
   document.querySelectorAll('#tabs button').forEach(function(b,i){
-    b.classList.toggle('on', TABS[i-1] === t);
+    b.classList.toggle('on', b.dataset.panel === t);
   });
+  if (t === 'gps' || t === 'supervisor') {
+    var frame = document.querySelector('#' + t + ' iframe');
+    if (frame && !frame.src) frame.src = frame.dataset.src;
+  }
   if (t === 'camera'){                       // load only when looked at - the stream
     var cam = document.getElementById('cam'); // is a live MJPEG connection
     if (cam.src === 'about:blank') cam.src = 'http://' + location.hostname + ':8080/';
