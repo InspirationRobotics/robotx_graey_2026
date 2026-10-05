@@ -30,10 +30,11 @@ coordinates and a steady ~7 m offset from raw GPS suggest a frame or reference
 mismatch is possible, but an independent surveyed location and fresh Cube
 parameter readback are needed before attributing the cause.
 
-ROS log inspection showed repeated VN-100 serial read failures/reopens and more
-than one running DVL/bridge process. Streams were fresh during this capture, so
-those process/log observations are not proof of the sensor being invalid in this
-window. Investigate duplicate process ownership and serial access before dynamic
+ROS log inspection showed repeated VN-100 serial read failures/reopens before
+the capture. Process listing during this check showed ros2-run wrapper/child
+pairs, which is expected and does not establish duplicate sensor nodes. Streams
+were fresh during the capture, so the earlier VN warnings do not prove the sensor
+was invalid in this window. Investigate duplicate process ownership and serial access before dynamic
 fusion testing. No `.BIN` dataflash file was found in the Jetson/container file
 search; request/download the relevant Pixhawk log from QGC or MAVLink FTP to
 inspect XKF innovations and source-selection messages.
