@@ -99,7 +99,12 @@ CONTROL_REQUEST_LIFETIME = 2.0
 # Resolve bundled GUI assets from this source/install layout. On the Jetson this
 # resolves to the same tools directory as the historic absolute path; it also
 # lets the local WSL SITL serve the GUI without a Jetson-specific mount path.
-web_dir = str(Path(__file__).resolve().parents[3] / 'tools')
+_source_tools = Path(__file__).resolve().parents[3] / 'tools'
+if _source_tools.is_dir():
+    web_dir = str(_source_tools)
+else:
+    from ament_index_python.packages import get_package_share_directory
+    web_dir = str(Path(get_package_share_directory('robotx_graey_2026')) / 'tools')
 link = None
 led_off = False
 control_bridge = None
