@@ -37,7 +37,10 @@ class Supervisor:
         self.enter, self.exit = surface_enter, surface_exit
         self.dwell, self.gps_dwell = depth_dwell, gps_dwell
         self.grace, self.timeout = dropout_grace, timeout
-        self.surface = False
+        # Do not guess the vehicle state before a calibrated depth signal has
+        # stayed on one side of the hysteresis band for the dwell time.
+        # ``None`` is deliberately exposed as Unknown to the GUI.
+        self.surface = None
         self.shallow_since = self.deep_since = self.good_since = None
         self.last_good = None
         self.pending = None
@@ -48,7 +51,7 @@ class Supervisor:
         self.dive_since = None
         self.state = 'Initializing'
         self.reason = 'Waiting for navigation telemetry'
-        self.desired = 1
+        self.desired = 0
         self.allowed = False
         self.healthy_since = None
         self.source_since = None
@@ -119,7 +122,13 @@ class Supervisor:
             self.state, self.reason = 'Checking estimate', 'Waiting for stable healthy estimate and selected source'
             return actions
 
-        diving = o.intent in ('DIVE', 'UNDERWATER') or not self.surface
+        if self.surface is None:
+            self.desired = 0
+            self.state = 'Determining surface state'
+            self.reason = 'Waiting for calibrated depth to qualify surface or underwater state'
+            return actions
+
+        diving = o.intent in ('DIVE', 'UNDERWATER') or self.surface is False
         grace = (not o.gps_rejected and self.last_good is not None
                  and now-self.last_good <= self.grace)
         self.desired = 1 if diving else 2 if qualified or (o.source == 2 and grace) else 1
@@ -186,4 +195,6 @@ class Supervisor:
                     requested_source=LABELS.get(self.desired, 'Unknown'),
                     confirmed_source=LABELS.get(o.source, 'Unknown'),
                     navigation_ready=self.allowed, surfaced=self.surface,
+                    surface_state=('Surfaced' if self.surface is True else
+                                   'Submerged' if self.surface is False else 'Unknown'),
                     run_id=self.run_id)

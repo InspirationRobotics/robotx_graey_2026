@@ -11,7 +11,8 @@
 <article><h2>Mission readiness</h2><div id="ready" class="value">Unavailable</div></article>
 <article><h2>Recommended / requested source</h2><div id="requested" class="value">Unavailable</div></article>
 <article><h2>Reported selected source</h2><div id="confirmed" class="value">Unknown</div></article>
-<article><h2>Calibrated depth</h2><div id="depth" class="value">Unavailable</div></article></div>
+<article><h2>Calibrated depth</h2><div id="depth" class="value">Unavailable</div></article>
+<article><h2>Depth-qualified vehicle state</h2><div id="surfaceState" class="value">Unknown</div></article></div>
 <p id="reason">Waiting for status</p>
 <p id="gpsQuality">GPS qualification unavailable</p>
 <article><h2>Dive start / mission zero</h2><div id="reference">No dive reference captured</div></article>
@@ -20,11 +21,14 @@
 'use strict';const $=id=>document.getElementById(id);let last=null,received=0;
 function render(){const live=last?.fresh&&performance.now()-received<1500,s=live?last.data:null;
 $('connection').textContent=live?'Supervisor status current':'Supervisor unavailable or stale';
-for(const [id,key] of [['mode','mode'],['state','state'],['requested','requested_source'],['confirmed','confirmed_source']])$(id).textContent=s?.[key]??'Unavailable';
+for(const [id,key] of [['mode','mode'],['state','state'],['confirmed','confirmed_source']])$(id).textContent=s?.[key]??'Unavailable';
+const depthKnown=Number.isFinite(s?.depth_m);
+$('requested').textContent=depthKnown?(s?.requested_source??'Unknown'):'Unknown';
 $('ready').textContent=s?(s.navigation_ready?'Ready':'Waiting / blocked'):'Unavailable';
 $('reason').textContent=s?.reason??'No current supervisor decision. Previous permissions have expired.';
 $('gpsQuality').textContent='GPS: '+(s?.gps_quality_reason??'Qualification unavailable');
 $('depth').textContent=Number.isFinite(s?.depth_m)?s.depth_m.toFixed(2)+' m':'Calibration or telemetry unavailable';
+$('surfaceState').textContent=depthKnown?(s?.surface_state??(s?.surfaced===true?'Surfaced':s?.surfaced===false?'Submerged':'Unknown')):'Unknown';
 const r=s?.reference;
 $('reference').textContent=r?`${s.reference_current?'Current dive':'Historical / unverified reference'}\n${r.gps_lat.toFixed(7)}, ${r.gps_lon.toFixed(7)}\nCaptured: ${r.captured_utc}\nRun: ${r.run_id}\nMission N / E / D: ${s.mission_ned?.map(v=>v.toFixed(2)).join(' / ')??'Unavailable'} m`:'No qualified dive reference captured';}
 async function poll(){try{const r=await fetch('/api/navigation',{cache:'no-store',signal:AbortSignal.timeout(1000)});if(!r.ok)throw Error(r.status);last=(await r.json()).streams.supervisor;received=performance.now()}catch(e){}finally{render();setTimeout(poll,200)}}

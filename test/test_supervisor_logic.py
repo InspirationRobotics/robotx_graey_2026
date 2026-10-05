@@ -101,6 +101,21 @@ class SupervisorTests(unittest.TestCase):
         r = Rig(); r.o.gps_good = False; r.run(10)
         self.assertEqual(r.commands, [])
 
+    def test_unqualified_depth_is_unknown_and_does_not_request_underwater(self):
+        r = Rig(); r.o.depth_valid = False; r.run(10)
+        snapshot = r.s.snapshot(r.o)
+        self.assertEqual(snapshot['surface_state'], 'Unknown')
+        self.assertIsNone(snapshot['surfaced'])
+        self.assertEqual(snapshot['requested_source'], 'Unknown')
+        self.assertEqual(r.commands, [])
+
+    def test_surface_state_requires_hysteresis_dwell(self):
+        r = Rig(); r.o.depth_valid = False; r.run(1)
+        r.o.depth_valid = True; r.o.depth = .1; r.run(1.9)
+        self.assertEqual(r.s.snapshot(r.o)['surface_state'], 'Unknown')
+        r.run(.2)
+        self.assertEqual(r.s.snapshot(r.o)['surface_state'], 'Surfaced')
+
     def test_stale_health_intent_depth_blocks_changes(self):
         for k in ('healthy', 'depth_valid', 'intent_fresh'):
             r = Rig(); setattr(r.o, k, False); r.run(10)
