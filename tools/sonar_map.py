@@ -197,7 +197,9 @@ def main():
             row = sweep.image[i]
             # a ping that got no reply is all zeros: it saw nothing because it
             # heard nothing, so it must not fade anything
-            if run["state"] == "running" and row.max() > 0:
+            use = run["state"] == "running" and row.max() > 0
+            cur["used"].append(use)             # saved, so a replay uses exactly these
+            if use:
                 cmap.add_ping(sweep.angles_deg[i], row, sweep.metres_per_bin, here,
                               sweep.step_deg, cur["range"], turn)
         cur["done"] = len(sweep.angles_deg)
@@ -259,14 +261,18 @@ def main():
             ping_times=np.array(sweep.ping_times or [], float),
             metres_per_bin=sweep.metres_per_bin, pose_x_y_heading_valid=poses,
             range_m=cur["range"], sector=np.array(cur["sector"]),
-            threshold=cmap.threshold, state=run["state"], map_epoch=run["epoch"],
+            threshold=cmap.threshold, state=run["state"], map_epoch=cur["epoch"],
+            used=np.array(cur["used"], bool),
             sonar_fwd_m=cmap.sonar_fwd_m, sonar_right_m=cmap.sonar_right_m,
             aborted=aborted, wall_time=time.time())
 
     while True:
         buttons()                        # presses between sweeps: a new one starts anyway
         cur.clear()
-        cur.update(done=0, poses=[], range=webview.range_m(), sector=webview.sector())
+        # epoch as the sweep began: Start/Reset end a sweep, so all its pings
+        # belong to the map that was current when it started
+        cur.update(done=0, poses=[], used=[], epoch=run["epoch"],
+                   range=webview.range_m(), sector=webview.sector())
         cmap.threshold = webview.threshold()
         cmap.new_sweep()
         run["sweeps"] += 1

@@ -80,7 +80,7 @@ class CrumbMap:
         None (not known) does not block it."""
         if pose is None or not pose.valid:
             return 0
-        self.turning = turn_dps is not None and abs(turn_dps) > self.max_turn_dps
+        self.turning = bool(turn_dps is not None and abs(turn_dps) > self.max_turn_dps)
         if self.turning:
             self.skipped_turning += 1
             return 0

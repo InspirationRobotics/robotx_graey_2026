@@ -58,6 +58,7 @@ _map_on = False                     # the tool has a breadcrumb map: show the ta
 _map_json = b'{}'                   # latest map snapshot, already encoded
 _map_cmds = []                      # Start/Pause/Resume/Reset presses, oldest first
 _sector = None                      # (start, end) degrees, swept counterclockwise
+_sector_editable = True
 _threshold = None                   # crumb threshold, 0-255
 _rows = []                          # one summary per detection, for the buttons
 _per_page = 10
@@ -186,10 +187,11 @@ def map_commands():
     return cmds
 
 
-def set_sector(start, end):
-    global _sector
+def set_sector(start, end, editable=True):
+    global _sector, _sector_editable
     with _lock:
         _sector = (float(start) % 360.0, float(end) % 360.0)
+        _sector_editable = bool(editable)
 
 
 def sector():
@@ -522,6 +524,11 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(b'ok', 'text/plain')
             return
         if self.path == '/sector':
+            with _lock:
+                locked = not _sector_editable
+            if locked:
+                self._send(b'sector is fixed for this run', 'text/plain')
+                return
             try:
                 a, b = (float(v) for v in text.replace(',', ' ').split())
             except ValueError:
