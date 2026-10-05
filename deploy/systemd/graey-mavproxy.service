@@ -1,7 +1,8 @@
 [Unit]
 Description=Graey MAVProxy - sole owner of the Cube serial port
-After=docker.service
+After=docker.service network-online.target
 Requires=docker.service
+Wants=network-online.target
 
 [Service]
 Type=simple
