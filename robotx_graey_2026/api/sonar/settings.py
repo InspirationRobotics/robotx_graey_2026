@@ -38,6 +38,11 @@ BEAM_FORE_AFT_DEG = 25.0
 MIN_RANGE_M = 0.75          # near-field blanking. Inside this the sonar is
                             # still hearing its own transmit pulse.
 
+# Where the scan plane (the blue band on the Ping360) is relative to the DVL
+# centre, in the sub's frame. Measured by Ruth 2026-10-04: 0.42 m, ahead.
+SONAR_FWD_M = 0.42
+SONAR_RIGHT_M = 0.0
+
 # THE calibration constant. Which hardware gradian points straight down.
 # Every angle this package reports is measured from here, so if the whole
 # picture looks rotated, this is why.

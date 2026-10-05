@@ -115,13 +115,15 @@ class Radar:
     """The picture, kept between frames.
 
     update() writes each ping's samples across the rows its beam covers. Nothing
-    is ever cleared except when the range setting changes, because then the old
-    samples are at a different scale and would be drawn at the wrong distance.
+    is ever cleared. When the range setting changes, the old picture is moved to
+    the new scale, so every echo stays at its true distance, and marked stale:
+    it is drawn grey until a ping at the new range paints over it.
     """
 
     def __init__(self):
         self.polar = None
         self.swept = None
+        self.stale = None
         self.metres_per_bin = None
         self.head_deg = None
 
@@ -131,8 +133,17 @@ class Radar:
         n_bins = sweep.image.shape[1]
         if (self.polar is None or self.polar.shape[1] != n_bins
                 or self.metres_per_bin != sweep.metres_per_bin):
+            old, old_mpb = self.polar, self.metres_per_bin
             self.polar = np.zeros((_POLAR_ROWS, n_bins), np.uint8)
-            self.swept = np.zeros(_POLAR_ROWS, bool)
+            if old is None:
+                self.swept = np.zeros(_POLAR_ROWS, bool)
+                self.stale = np.zeros(_POLAR_ROWS, bool)
+            else:
+                # new bin j is at j * new_mpb metres, which was old bin j * new / old
+                src = np.arange(n_bins) * sweep.metres_per_bin / old_mpb
+                ok = src < old.shape[1]
+                self.polar[:, ok] = old[:, src[ok].astype(int)]
+                self.stale = self.swept.copy()
             self.metres_per_bin = sweep.metres_per_bin
 
         # OpenCV measures polar angle clockwise, this package anticlockwise, so
@@ -144,6 +155,7 @@ class Radar:
             idx = np.arange(lo, hi) % _POLAR_ROWS
             self.polar[idx] = sweep.image[row]
             self.swept[idx] = True
+            self.stale[idx] = False
         self.head_deg = sweep.angles_deg[-1]
 
     @property
@@ -356,6 +368,9 @@ def _paint(canvas, radar, centre, radius):
     swept = np.repeat(radar.swept.astype(np.uint8)[:, None] * 255, cols, 1)
     seen = cv2.warpPolar(swept, (side, side), (radius, radius), radius,
                          cv2.WARP_INVERSE_MAP + cv2.WARP_POLAR_LINEAR)
+    stale = np.repeat(radar.stale.astype(np.uint8)[:, None] * 255, cols, 1)
+    old = cv2.warpPolar(stale, (side, side), (radius, radius), radius,
+                        cv2.WARP_INVERSE_MAP + cv2.WARP_POLAR_LINEAR)
 
     inside = np.zeros((side, side), np.uint8)
     cv2.circle(inside, (radius, radius), radius, 255, -1)
@@ -366,6 +381,11 @@ def _paint(canvas, radar, centre, radius):
     # Ramp applied AFTER the warp, so every pixel is a true ramp colour rather
     # than a blend of two colours the ramp never produces.
     patch[mask] = _LUT[intensity][mask]
+    # Left over from before a range change: no colour, lifted off black so it
+    # reads as greyed out rather than as empty water.
+    grey = mask & (old > 0)
+    lifted = (70 + intensity.astype(np.uint16) * 185 // 255).astype(np.uint8)
+    patch[grey] = cv2.cvtColor(lifted, cv2.COLOR_GRAY2BGR)[grey]
 
 
 def _dashed_circle(img, centre, radius, colour, dashes=40):

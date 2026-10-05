@@ -122,6 +122,10 @@ def warn_settings(target, library_path, current):
     return out
 
 
+class _RangeChanged(Exception):
+    """Raised from inside a sweep to drop it and start again at the new range."""
+
+
 def main():
     # Line-buffer stdout so each sweep prints as it finishes even when piped
     # into tee. Python block-buffers a pipe by default, and since one sweep is
@@ -246,9 +250,12 @@ def main():
         webview.set_target(label)
         webview.set_note("blank = no rings" if profile is None
                          else f"{len(profile)} features")
+        webview.set_range(args.range)
+        webview.set_range_editable(True)
         webview.serve(args.port)
         print(f"[INFO] serving on http://0.0.0.0:{args.port}")
         print("[INFO] the target box on that page changes what is scored, live")
+        print("[INFO] the range box restarts the scan at the new range")
 
     down_gradian = args.down_gradian
     tuning = {"threshold": args.threshold}
@@ -280,9 +287,7 @@ def main():
             print(f"[WARN] ignored target '{wanted}': {exc}")
             return
         label = wanted
-        webview.set_note("blank = no rings" if profile is None
-                         else "  ".join(f"{k} {v['ideal']:g}"
-                                        for k, v in sorted(profile.items())))
+        settings_note()
         print(f"[INFO] target is now '{wanted or '(none)'}'")
 
         # Answer at once. Measuring is the slow half and it does not depend on
@@ -291,6 +296,22 @@ def main():
         if shown[0] is not None:
             rescore(shown[0], profile)
             publish(shown[0], f"RESCORED  down={down_gradian}")
+
+    def settings_note():
+        """The target's ideals beside the box - or a warning, if the target was
+        recorded at other settings (a range typed into the page, say)."""
+        clash = warn_settings(label, args.library,
+                              {"threshold": args.threshold, "range_m": max_range,
+                               "down_gradian": args.down_gradian})
+        for _line in clash:
+            print(f"[WARN] {_line}")
+        if clash:
+            webview.set_note(f"'{label}' was recorded with different settings "
+                             f"- scores are not trustworthy")
+        else:
+            webview.set_note("blank = no rings" if profile is None
+                             else "  ".join(f"{k} {v['ideal']:g}"
+                                            for k, v in sorted(profile.items())))
 
     # A sweep takes many seconds, so publish partial frames while the head is
     # still moving. Without this the browser shows one frozen picture and you
@@ -313,20 +334,33 @@ def main():
 
     def live(partial):
         retarget()
+        if webview.range_m() != max_range:
+            raise _RangeChanged
         radar.update(partial)
         per = shown[0]
         if per is None:
             per = perceive(partial, target=profile, tuning=tuning, floor=None,
                            require_floor=False)
-        publish(per, f"SCANNING  down={down_gradian}")
+        publish(per, f"SCANNING  down={down_gradian}  range={max_range:g}m")
 
+    max_range = args.range
     while True:
         if args.web:
             retarget()                  # in case a sweep returns with no pings
+            # live() also checks this after every ping and drops the sweep, so
+            # a new range lands here within one ping of pressing enter.
+            if webview.range_m() != max_range:
+                max_range = webview.range_m()
+                print(f"[INFO] range is now {max_range:g} m")
+                settings_note()
+                shown[0] = None         # its blobs were found at the old range
         sonar.down_gradian = down_gradian
         t0 = time.time()
-        sweep = sonar.sweep(start_deg, end_deg, args.step, args.range,
-                            on_ping=live if args.web else None)
+        try:
+            sweep = sonar.sweep(start_deg, end_deg, args.step, max_range,
+                                on_ping=live if args.web else None)
+        except _RangeChanged:
+            continue
         radar.update(sweep)
         floor = Floor.from_known_depth(args.assume_floor) if args.assume_floor else None
 
@@ -348,7 +382,7 @@ def main():
         view = None
         if not args.headless:
             page, selected = webview.view() if args.web else (0, ())
-            view = render(per, None, state=f"POLE TEST  down={down_gradian}",
+            view = render(per, None, state=f"POLE TEST  down={down_gradian}  range={max_range:g}m",
                           radar=radar, target=label, page=page,
                           selected=selected, size=args.size)
             cv2.putText(view, f"sweep {elapsed:.1f}s", (16, view.shape[0] - 18),
@@ -382,7 +416,7 @@ def main():
         # thing you can actually read back to someone.
         _print_sweep(per, elapsed, down_gradian)
         if args.web:
-            publish(per, f"POLE TEST  down={down_gradian}")
+            publish(per, f"POLE TEST  down={down_gradian}  range={max_range:g}m")
         elif view is not None:
             webview.publish(view)
         if args.once:

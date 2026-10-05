@@ -9,6 +9,7 @@ of the file, so Sweep and everything that reads a Sweep stays importable on a
 machine with no sonar library installed.
 """
 import math
+import time
 
 import numpy as np
 
@@ -23,19 +24,24 @@ class Sweep:
                  270=down convention.
     heading_deg  the sub's compass heading when this sweep was taken, or None.
                  Carried along so later sweeps can be compared to earlier ones.
+    ping_times   time.monotonic() just after each row's ping came back, or None.
+                 The breadcrumb map looks up where the sub was at each one.
     """
 
-    def __init__(self, image, angles_deg, metres_per_bin, heading_deg=None):
+    def __init__(self, image, angles_deg, metres_per_bin, heading_deg=None,
+                 ping_times=None):
         self.image = image
         self.angles_deg = list(angles_deg)
         self.metres_per_bin = metres_per_bin
         self.heading_deg = heading_deg
+        self.ping_times = None if ping_times is None else list(ping_times)
 
     @property
     def step_deg(self):
         if len(self.angles_deg) < 2:
             return S.BEAM_IN_PLANE_DEG
-        return abs(self.angles_deg[1] - self.angles_deg[0])
+        # wrapped, so a sweep that starts at 359 with 1 deg steps gives 1, not 359
+        return abs((self.angles_deg[1] - self.angles_deg[0] + 180.0) % 360.0 - 180.0)
 
     def row_to_angle_deg(self, row):
         r = int(round(row))
@@ -164,9 +170,10 @@ class Sonar:
             angles.append(a % 360.0)
             a += step_deg
 
-        rows = []
+        rows, times = [], []
         for ang in angles:
             resp = self._ping.transmitAngle(angle_deg_to_gradian(ang, self.down_gradian))
+            times.append(time.monotonic())
             data = getattr(resp, "data", None)
             if data is None:
                 rows.append(np.zeros(self.n_samples, dtype=np.uint8))
@@ -178,10 +185,10 @@ class Sonar:
 
             if on_ping is not None:
                 on_ping(Sweep(np.vstack(rows), angles[:len(rows)],
-                              self.metres_per_bin, heading_deg))
+                              self.metres_per_bin, heading_deg, times))
 
         image = np.vstack(rows) if rows else np.zeros((0, 1), dtype=np.uint8)
-        return Sweep(image, angles, self.metres_per_bin, heading_deg)
+        return Sweep(image, angles, self.metres_per_bin, heading_deg, times)
 
     def sweep_for_state(self, state, heading_deg=None, on_ping=None):
         """Sweep using the settings for whichever state the driver is in.

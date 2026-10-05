@@ -35,6 +35,11 @@ of a screenshot with a circle drawn on it in red.
 
 Selecting is never locked, even on a tool that moves the sub: looking at a
 detection changes nothing about what the vehicle does.
+
+THE RANGE BOX. Only shown when the tool calls set_range(), and only editable
+when it also calls set_range_editable(True). The tool checks it after every
+ping, so a new range restarts the scan straight away. What was drawn before
+stays on the picture in grey until the new scan paints over it.
 """
 import json
 import threading
@@ -47,6 +52,13 @@ _frame = None
 _target = ""
 _note = ""
 _editable = True
+_range = None                       # metres; None = the tool doesn't show a range box
+_range_editable = False
+_map_on = False                     # the tool has a breadcrumb map: show the tabs
+_map_json = b'{}'                   # latest map snapshot, already encoded
+_map_cmds = []                      # Start/Pause/Resume/Reset presses, oldest first
+_sector = None                      # (start, end) degrees, swept counterclockwise
+_threshold = None                   # crumb threshold, 0-255
 _rows = []                          # one summary per detection, for the buttons
 _per_page = 10
 _view = {"page": 0, "selected": []}
@@ -114,6 +126,88 @@ def set_note(text):
         _note = text or ""
 
 
+# Below 1 m almost everything is inside the 0.75 m blind zone; 50 m is the
+# Ping360's own limit. A tool can narrow it with set_range_limits().
+RANGE_MIN_M, RANGE_MAX_M = 1.0, 50.0
+_range_lo, _range_hi = RANGE_MIN_M, RANGE_MAX_M
+
+
+def set_range_limits(lo, hi):
+    """What the range box accepts, e.g. 2-20 m for the map."""
+    global _range_lo, _range_hi
+    with _lock:
+        _range_lo, _range_hi = float(lo), float(hi)
+
+
+def set_range(metres):
+    """Show the range box, seeded with the range the tool is using."""
+    global _range
+    with _lock:
+        _range = float(metres)
+
+
+def range_m():
+    """The range last set from the browser (or by set_range)."""
+    with _lock:
+        return _range
+
+
+def set_range_editable(flag):
+    """Let the browser change the range. Off by default, like the target box."""
+    global _range_editable
+    with _lock:
+        _range_editable = bool(flag)
+
+
+# ---- the breadcrumb map (Map tab) ------------------------------------------
+# Only there when the tool calls enable_map(). The tool draws nothing for it: it
+# hands over a snapshot (set_map) and the page draws it, so zooming the map is
+# instant and costs the Jetson nothing.
+
+def enable_map():
+    global _map_on
+    with _lock:
+        _map_on = True
+
+
+def set_map(snapshot):
+    """Latest map state for the page. A dict of plain numbers and lists."""
+    global _map_json
+    data = json.dumps(snapshot, separators=(',', ':')).encode()
+    with _lock:
+        _map_json = data
+
+
+def map_commands():
+    """Button presses since last asked, oldest first, then forgotten."""
+    global _map_cmds
+    with _lock:
+        cmds, _map_cmds = _map_cmds, []
+    return cmds
+
+
+def set_sector(start, end):
+    global _sector
+    with _lock:
+        _sector = (float(start) % 360.0, float(end) % 360.0)
+
+
+def sector():
+    with _lock:
+        return _sector
+
+
+def set_threshold(value):
+    global _threshold
+    with _lock:
+        _threshold = int(value)
+
+
+def threshold():
+    with _lock:
+        return _threshold
+
+
 # Fills the window, keeping the aspect ratio. The frame is rendered large to
 # begin with, so on a laptop this is at or near native size rather than a blurry
 # stretch of a small image.
@@ -121,12 +215,20 @@ PAGE = b"""<html><head><meta charset="utf-8"><title>Graey sonar</title></head>
 <body style="margin:0;background:#161412;height:100vh;display:flex;flex-direction:column">
 <div style="display:flex;gap:10px;align-items:center;padding:7px 12px;background:#221f1c;
 font:13px/1.4 ui-monospace,Menlo,monospace;color:#ddd">
+<span id="tabs" style="display:none;white-space:nowrap"><b style="color:#fff">Radar</b>
+<a href="/map" style="color:#8bd">Map</a></span>
 <label for="t">target</label>
 <input id="t" spellcheck="false" placeholder="blank = no rings. or a name, or height_m=1.5,brightness=140"
 style="flex:1;background:#0e0c0b;color:#eee;border:1px solid #444;border-radius:3px;
 padding:5px 7px;font:13px ui-monospace,Menlo,monospace">
 <button id="go" style="background:#3a3632;color:#eee;border:1px solid #555;border-radius:3px;
 padding:5px 12px;font:13px ui-monospace,Menlo,monospace;cursor:pointer">apply</button>
+<span id="rgw" style="display:none;white-space:nowrap">range
+<input id="rg" type="number" step="0.5" min="1" max="50" style="width:62px;background:#0e0c0b;
+color:#eee;border:1px solid #444;border-radius:3px;padding:5px;font:13px ui-monospace,Menlo,monospace"> m
+<button id="rgo" style="background:#3a3632;color:#eee;border:1px solid #555;border-radius:3px;
+padding:5px 10px;font:13px ui-monospace,Menlo,monospace;cursor:pointer">set</button>
+<span id="rgn" style="color:#8ea"></span></span>
 <span id="note" style="color:#8ea;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 max-width:45vw"></span></div>
 <img src="/stream" style="flex:1;min-height:0;width:100%;object-fit:contain">
@@ -146,6 +248,12 @@ g=document.getElementById('go');
 function send(){if(!t.disabled)fetch('/target',{method:'POST',body:t.value});}
 g.onclick=send;
 t.addEventListener('keydown',function(e){if(e.key==='Enter')send();});
+var rgw=document.getElementById('rgw'),rg=document.getElementById('rg'),
+rgo=document.getElementById('rgo'),rgn=document.getElementById('rgn');
+function sendRange(){if(rg.disabled)return;fetch('/range',{method:'POST',body:rg.value})
+.then(function(r){return r.text();}).then(function(x){rgn.textContent=x;});}
+rgo.onclick=sendRange;
+rg.addEventListener('keydown',function(e){if(e.key==='Enter')sendRange();});
 var pg=document.getElementById('pg'),blobs=document.getElementById('blobs'),
 page=0,sel=[],rows=[],per=10,drawn='';
 function push(){fetch('/view',{method:'POST',
@@ -181,8 +289,129 @@ if(t.disabled!==lock){t.disabled=g.disabled=lock;
 t.style.opacity=g.style.opacity=lock?'0.45':'1';
 t.placeholder=lock?'fixed for this run':
 'blank = no rings. or a name, or height_m=1.5,brightness=140';}
+rgw.style.display=(s.range===null||s.range===undefined)?'none':'inline';
+if(s.range!==null&&document.activeElement!==rg)rg.value=s.range;
+rg.min=s.rangeMin;rg.max=s.rangeMax;
+document.getElementById('tabs').style.display=s.map?'inline':'none';
+rg.disabled=rgo.disabled=!s.rangeEditable;
 rows=s.rows||[];per=s.perPage||10;paint();})
 .catch(function(){}).then(function(){setTimeout(poll,1000);});})();
+</script></body></html>"""
+
+# The Map tab. Top-down, y = forward along the heading at Start, x = right.
+# Range, sector and threshold go to the tool; map area and follow are only how
+# this page draws, so they never touch the sonar.
+MAP_PAGE = b"""<html><head><meta charset="utf-8"><title>Graey sonar map</title><style>
+body{margin:0;background:#161412;height:100vh;display:flex;flex-direction:column;
+font:13px/1.4 ui-monospace,Menlo,monospace;color:#ddd}
+.bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:7px 12px;background:#221f1c}
+input{background:#0e0c0b;color:#eee;border:1px solid #444;border-radius:3px;padding:5px;
+font:inherit;width:58px}
+button{background:#3a3632;color:#eee;border:1px solid #555;border-radius:3px;padding:5px 12px;
+font:inherit;cursor:pointer}
+a{color:#8bd}
+#wrap{flex:1;min-height:0;position:relative}
+canvas{position:absolute;left:0;top:0;width:100%;height:100%}
+#banner{position:absolute;left:50%;top:12px;transform:translateX(-50%);padding:6px 14px;
+border-radius:4px;color:#fff;display:none}
+</style></head><body>
+<div class="bar">
+<span style="white-space:nowrap"><a href="/">Radar</a> <b style="color:#fff">Map</b></span>
+<button id="go">Start</button><button id="rs">Reset</button>
+<span>range <input id="rg" type="number" step="0.5" min="2" max="20"> m</span>
+<span>sector <input id="s0" type="number" step="1" min="0" max="359"> to
+<input id="s1" type="number" step="1" min="0" max="359"></span>
+<span>threshold <input id="th" type="number" step="5" min="1" max="255"></span>
+<button id="set">set</button>
+<span>map area <input id="ar" type="number" step="1" min="1" max="200" value="10"> m</span>
+<label style="white-space:nowrap"><input id="fo" type="checkbox" checked style="width:auto"> follow sub</label>
+<span id="msg" style="color:#8ea"></span></div>
+<div class="bar" style="padding-top:0"><span id="st" style="color:#bbb"></span></div>
+<div id="wrap"><canvas id="cv"></canvas><div id="banner"></div></div>
+<div class="bar" style="color:#bbb">
+<span>crumb: weak <span style="display:inline-block;width:90px;height:10px;vertical-align:middle;
+background:linear-gradient(90deg,hsl(210,95%,58%),hsl(105,95%,58%),hsl(0,95%,58%))"></span> strong</span>
+<span><span style="opacity:.3">&#9679;</span> half faded</span>
+<span style="color:#3cb4e6">&#9473; sub's track</span><span>&#9650; sub</span>
+<span style="color:#78dca0">&#9473; sonar slice</span><span>&#9675; start (0,0)</span>
+<span>grid <span id="gl"></span></span>
+<span style="color:#888">sector: counterclockwise, 0 right 90 up 180 left 270 down, same = full circle</span></div>
+<script>
+var $=function(i){return document.getElementById(i);};
+var cv=$('cv'),ctx=cv.getContext('2d'),D=null,dirty={};
+function post(path,body){return fetch(path,{method:'POST',body:body})
+.then(function(r){return r.text();});}
+['rg','s0','s1','th'].forEach(function(i){
+$(i).addEventListener('input',function(){dirty[i]=1;});
+$(i).addEventListener('keydown',function(e){if(e.key==='Enter')apply();});});
+function apply(){var jobs=[];
+if(dirty.rg)jobs.push(post('/range',$('rg').value).then(function(x){return 'range: '+x;}));
+if(dirty.s0||dirty.s1)jobs.push(post('/sector',$('s0').value+' '+$('s1').value)
+.then(function(x){return 'sector: '+x;}));
+if(dirty.th)jobs.push(post('/threshold',$('th').value).then(function(x){return 'threshold: '+x;}));
+dirty={};
+if(!jobs.length){$('msg').textContent='nothing changed';return;}
+Promise.all(jobs).then(function(m){$('msg').textContent=m.join('   ');});}
+$('set').onclick=apply;
+$('go').onclick=function(){var c={waiting:'start',running:'pause',paused:'resume'}[D&&D.state];
+if(c)post('/mapcmd',c);};
+$('rs').onclick=function(){post('/mapcmd','reset');};
+$('ar').addEventListener('input',draw);$('fo').addEventListener('change',draw);
+window.addEventListener('resize',draw);
+function fill(i,v){var e=$(i);
+if(!dirty[i]&&document.activeElement!==e&&v!==null&&v!==undefined)e.value=v;}
+function nice(a){var s=[0.1,0.25,0.5,1,2,5,10,25,50];
+for(var i=0;i<s.length;i++)if(a/s[i]<=14)return s[i];return 100;}
+function hue(b,th){var f=Math.max(0,Math.min(1,(b-th)/Math.max(1,255-th)));
+return 'hsl('+Math.round(210-210*f)+',95%,58%)';}
+function draw(){
+var r=cv.getBoundingClientRect(),k=window.devicePixelRatio||1;
+cv.width=Math.round(r.width*k);cv.height=Math.round(r.height*k);ctx.setTransform(k,0,0,k,0,0);
+var W=r.width,H=r.height;ctx.fillStyle='#161412';ctx.fillRect(0,0,W,H);
+if(!D)return;
+var area=Math.max(1,parseFloat($('ar').value)||10),px=Math.min(W,H)/area;
+var c=($('fo').checked&&D.pose)?D.pose:[0,0];
+var X=function(x){return W/2+(x-c[0])*px;},Y=function(y){return H/2-(y-c[1])*px;};
+var g=nice(area),xa=c[0]-W/2/px,xb=c[0]+W/2/px,ya=c[1]-H/2/px,yb=c[1]+H/2/px,v;
+ctx.lineWidth=1;
+for(v=Math.ceil(xa/g)*g;v<=xb;v+=g){ctx.strokeStyle=Math.abs(v)<g/2?'#5d6b73':'#2e2a27';
+ctx.beginPath();ctx.moveTo(X(v),0);ctx.lineTo(X(v),H);ctx.stroke();}
+for(v=Math.ceil(ya/g)*g;v<=yb;v+=g){ctx.strokeStyle=Math.abs(v)<g/2?'#5d6b73':'#2e2a27';
+ctx.beginPath();ctx.moveTo(0,Y(v));ctx.lineTo(W,Y(v));ctx.stroke();}
+$('gl').textContent=g+' m';
+ctx.strokeStyle='#ddd';ctx.beginPath();ctx.arc(X(0),Y(0),6,0,7);ctx.stroke();
+var th=D.threshold||100,R=Math.max(2.5,Math.min(5,px*0.05));
+[1,0].forEach(function(faded){ctx.globalAlpha=faded?0.3:1;
+D.crumbs.forEach(function(q){if((q[3]>0?1:0)!==faded)return;
+ctx.fillStyle=hue(q[2],th);ctx.beginPath();ctx.arc(X(q[0]),Y(q[1]),R,0,7);ctx.fill();});});
+ctx.globalAlpha=1;
+if(D.track.length>1){ctx.strokeStyle='#3cb4e6';ctx.lineWidth=2;ctx.beginPath();
+D.track.forEach(function(p,i){if(i)ctx.lineTo(X(p[0]),Y(p[1]));else ctx.moveTo(X(p[0]),Y(p[1]));});
+ctx.stroke();}
+if(D.pose&&D.sonar){var h=D.pose[2]*Math.PI/180,rx=Math.cos(h),ry=-Math.sin(h),s=D.sonar;
+ctx.strokeStyle='rgba(120,220,160,0.6)';ctx.lineWidth=2;ctx.beginPath();
+ctx.moveTo(X(s[0]-rx*D.slice[0]),Y(s[1]-ry*D.slice[0]));
+ctx.lineTo(X(s[0]+rx*D.slice[1]),Y(s[1]+ry*D.slice[1]));ctx.stroke();}
+if(D.pose){var a=D.pose[2]*Math.PI/180,sx=X(D.pose[0]),sy=Y(D.pose[1]),fx=Math.sin(a),fy=-Math.cos(a);
+ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(sx+fx*14,sy+fy*14);
+ctx.lineTo(sx-fx*8-fy*7,sy-fy*8+fx*7);ctx.lineTo(sx-fx*8+fy*7,sy-fy*8-fx*7);
+ctx.closePath();ctx.fill();}}
+(function poll(){fetch('/mapdata').then(function(r){return r.json();}).then(function(d){
+D=d;fill('rg',d.range);
+if(d.sector){fill('s0',Math.round(d.sector[0]));fill('s1',Math.round(d.sector[1]));}
+fill('th',d.threshold);
+$('go').textContent={waiting:'Start',running:'Pause',paused:'Resume'}[d.state]||'Start';
+var p=d.pose;
+$('st').textContent=d.state+'   sweep '+d.sweep+'   '+d.count+' crumbs   DVL '+d.dvl+
+(p?'   x '+p[0].toFixed(2)+'  y '+p[1].toFixed(2)+'  heading '+p[2].toFixed(0)+'\\u00b0':'');
+var msg='',bg='';
+if(d.dvl==='no data'){msg='no VectorNav / DVL data yet - is pose_relay.py running?';bg='#7a2a1a';}
+else if(d.dvl==='lost'){msg='DVL lost - not adding crumbs';bg='#8a1a1a';}
+else if(d.state==='waiting'){msg='press Start: (0,0) will be where the sub is then';bg='#2a4a5a';}
+else if(d.turning){msg='turning fast - not adding crumbs';bg='#5a3a6a';}
+else if(d.state==='paused'){msg='paused - map frozen, sub still tracked';bg='#5a4a1a';}
+var b=$('banner');b.style.display=msg?'block':'none';b.textContent=msg;b.style.background=bg;
+draw();}).catch(function(){}).then(function(){setTimeout(poll,400);});})();
 </script></body></html>"""
 
 # OpenCV's default is already 95. 98 trims the last of the ringing around thin
@@ -213,12 +442,16 @@ class _Handler(BaseHTTPRequestHandler):
         return self.rfile.read(length)
 
     def do_POST(self):
-        """Two settings come back from the page: the target, and the view.
+        """Settings that come back from the pages: the target, the range, the
+        view, and on the Map tab the sector, the threshold and its buttons.
 
         Bodies are capped: this listens on 0.0.0.0 so anything on the tether
-        network can reach it, and both of these are short.
+        network can reach it, and all of these are short.
         """
-        global _target
+        global _target, _range, _sector, _threshold
+        if self.path in ('/sector', '/threshold', '/mapcmd'):
+            self._map_post()
+            return
         if self.path == '/view':
             # Which page to show and which detections to highlight. Never
             # locked, because looking at something changes nothing - you can
@@ -234,6 +467,26 @@ class _Handler(BaseHTTPRequestHandler):
                 _view["selected"] = sorted(
                     {int(i) for i in want.get("selected", [])
                      if 0 <= int(i) < len(_rows)})[:32]
+            self._send(b'ok', 'text/plain')
+            return
+        if self.path == '/range':
+            with _lock:
+                locked = not _range_editable
+            if locked:
+                self._send(b'range is fixed for this run', 'text/plain')
+                return
+            try:
+                want = float(self._body().decode('utf-8', 'replace').strip())
+            except ValueError:
+                want = float('nan')
+            # NaN fails both comparisons, so it is refused here too.
+            with _lock:
+                lo, hi = _range_lo, _range_hi
+            if not lo <= want <= hi:
+                self._send(f'need {lo:g}-{hi:g} m'.encode(), 'text/plain')
+                return
+            with _lock:
+                _range = want
             self._send(b'ok', 'text/plain')
             return
         if self.path != '/target':
@@ -252,13 +505,64 @@ class _Handler(BaseHTTPRequestHandler):
             _target = text
         self._send(b'ok', 'text/plain')
 
+    def _map_post(self):
+        global _sector, _threshold
+        with _lock:
+            on = _map_on
+        if not on:
+            self.send_error(404)
+            return
+        text = self._body().decode('utf-8', 'replace').strip()
+        if self.path == '/mapcmd':
+            if text not in ('start', 'pause', 'resume', 'reset'):
+                self._send(b'unknown button', 'text/plain')
+                return
+            with _lock:
+                _map_cmds.append(text)
+            self._send(b'ok', 'text/plain')
+            return
+        if self.path == '/sector':
+            try:
+                a, b = (float(v) for v in text.replace(',', ' ').split())
+            except ValueError:
+                a = b = float('nan')
+            if not (0 <= a < 360 and 0 <= b < 360):
+                self._send(b'need two angles, 0-359', 'text/plain')
+                return
+            with _lock:
+                _sector = (a, b)
+            self._send(b'ok', 'text/plain')
+            return
+        try:
+            want = int(float(text))
+        except ValueError:
+            want = -1
+        if not 1 <= want <= 255:
+            self._send(b'need 1-255', 'text/plain')
+            return
+        with _lock:
+            _threshold = want
+        self._send(b'ok', 'text/plain')
+
     def do_GET(self):
         if self.path == '/':
             self._send(PAGE, 'text/html')
             return
+        if self.path in ('/map', '/mapdata'):
+            with _lock:
+                on, data = _map_on, _map_json
+            if not on:
+                self.send_error(404)
+            elif self.path == '/map':
+                self._send(MAP_PAGE, 'text/html')
+            else:
+                self._send(data, 'application/json')
+            return
         if self.path == '/state':
             with _lock:
                 state = {'target': _target, 'note': _note, 'editable': _editable,
+                         'range': _range, 'rangeEditable': _range_editable,
+                         'rangeMin': _range_lo, 'rangeMax': _range_hi, 'map': _map_on,
                          'rows': _rows, 'perPage': _per_page,
                          'page': _view["page"], 'selected': _view["selected"]}
             self._send(json.dumps(state).encode(), 'application/json')
