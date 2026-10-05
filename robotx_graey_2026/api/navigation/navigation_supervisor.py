@@ -8,11 +8,13 @@ from pathlib import Path
 
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
+from std_msgs.msg import Float32
 from geometry_msgs.msg import TwistWithCovarianceStamped
 from sensor_msgs.msg import Imu
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.pixhawk.mavlink import Link
 from robotx_graey_2026.api.navigation.mission_reference import MissionReference
+from robotx_graey_2026.api.navigation.gps_quality import GPSQuality
 from robotx_graey_2026.api.navigation.supervisor_logic import Observation, Supervisor
 
 PROFILE = {'EK3_SRC1_POSXY': 6, 'EK3_SRC1_VELXY': 6, 'EK3_SRC1_POSZ': 1,
@@ -27,9 +29,11 @@ class NavigationSupervisor(Node):
         defaults = dict(mavlink='udpout:127.0.0.1:14557', active=False,
                         vehicle_validation_complete=False, surface_pressure_hpa=0.,
                         pressure_message='SCALED_PRESSURE2', water_density=1025.,
+                        depth_topic='',
                         reference_file='~/robotx_ws/logs/navigation_reference.json',
                         surface_enter_m=.15, surface_exit_m=.4, depth_dwell_s=2.,
-                        gps_dwell_s=3., dropout_grace_s=3.)
+                        gps_dwell_s=3., dropout_grace_s=3.,
+                        gps_max_accuracy_m=3., gps_motion_margin_m=2., gps_motion_window_s=10.)
         for k, v in defaults.items():
             self.declare_parameter(k, v)
         self.settings = {k: self.get_parameter(k).value for k in defaults}
@@ -52,6 +56,8 @@ class NavigationSupervisor(Node):
         self.alignment_id = ''
         self.last_gps = None
         self.last_gps_time = None
+        self.gps_quality = GPSQuality(self.settings['gps_max_accuracy_m'],
+            self.settings['gps_motion_margin_m'], self.settings['gps_motion_window_s'])
         self.baseline = None
         self.pub = self.create_publisher(String, '/graey/navigation/status', 10)
         self.align_pub = self.create_publisher(String, '/graey/navigation/bridge_request', 10)
@@ -59,7 +65,10 @@ class NavigationSupervisor(Node):
         self.create_subscription(String, '/graey/navigation/bridge_status', self.bridge_status, 10)
         self.create_subscription(Bool, '/graey/dvl/valid', lambda m: self.put('dvl_valid', m.data), 10)
         self.create_subscription(TwistWithCovarianceStamped, '/graey/dvl/velocity', self.dvl, 20)
+        self.create_subscription(String, '/graey/dvl/sample', self.dvl_sample, 20)
         self.create_subscription(Imu, '/graey/vn100/imu', self.vn, 20)
+        if self.settings['depth_topic']:
+            self.create_subscription(Float32, self.settings['depth_topic'], self.sim_depth, 10)
         self.create_timer(.1, self.tick)
         self.create_timer(1., self.link.heartbeat)
         self.create_timer(5., self.request_telemetry)
@@ -91,6 +100,32 @@ class NavigationSupervisor(Node):
         if self.advancing('vn', stamp):
             self.put('vn', math.isfinite(norm) and .9 < norm < 1.1)
 
+    def dvl_sample(self, msg):
+        try:
+            d = json.loads(msg.data)
+            if not self.advancing('gps_dvl', d['stamp_ns']):
+                return
+            sensor = d.get('sensor_time')
+            if sensor is not None and sensor == self.stamps.get('gps_dvl_sensor'):
+                return
+            self.stamps['gps_dvl_sensor'] = sensor
+            velocity = tuple(float(v) for v in d['velocity'])
+            continuous = self.gps_quality.motion(time.monotonic(), velocity,
+                                                bool(d['valid']) and len(velocity) == 3)
+            if not continuous:
+                self.put('gps_good', False)
+                self.put('gps_reason', 'DVL motion history interrupted; GPS must requalify')
+        except (ValueError, TypeError, KeyError):
+            self.gps_quality.motion(time.monotonic(), (), False)
+            self.put('gps_good', False)
+            self.put('gps_reason', 'Invalid DVL motion sample')
+
+    def sim_depth(self, msg):
+        """Optional isolated simulator input; production defaults to Cube pressure."""
+        value = float(msg.data)
+        if math.isfinite(value) and -0.25 <= value <= 100:
+            self.put('depth', value)
+
     def intent(self, msg):
         try:
             d = json.loads(msg.data)
@@ -117,7 +152,9 @@ class NavigationSupervisor(Node):
             return
 
     def request_telemetry(self):
-        for mid in (24, 32, 49, 193, 137, 251):
+        # NAV_SRC (message 251) is emitted by the Lua reporter at 5 Hz; it is
+        # not a stream the Cube can enable with SET_MESSAGE_INTERVAL.
+        for mid in (24, 32, 49, 193, 137):
             self.link.command(511, mid, 200000)
         for name in PROFILE:
             self.link.send('param_request_read_send', 1, 1, name.encode(), -1)
@@ -155,27 +192,24 @@ class NavigationSupervisor(Node):
             if m.time_usec < self.stamps.get('gps', -1):
                 self.stamps['gps'] = m.time_usec
                 self.put('gps_good', False)
+                self.put('gps_reason', 'GPS receiver timestamp moved backwards')
                 self.last_gps = None
                 return
             if m.fix_type < 3:
                 self.put('gps_good', False)
+                self.put('gps_reason', 'GPS has no 3D fix')
             if not self.advancing('gps', m.time_usec):
                 return
             d = dict(lat=m.lat/1e7, lon=m.lon/1e7, alt=m.alt/1000,
                      accuracy=getattr(m, 'h_acc', 0)/1000, fix=m.fix_type,
                      receiver_time_us=m.time_usec, received=now)
-            good = (d['fix'] >= 3 and 0 < d['accuracy'] <= 3 and
-                    -90 <= d['lat'] <= 90 and -180 <= d['lon'] <= 180)
-            if self.last_gps is not None:
-                dt = now-self.last_gps_time
-                dn = (d['lat']-self.last_gps['lat'])*111320
-                de = ((d['lon']-self.last_gps['lon']+180)%360-180)*111320*math.cos(math.radians(d['lat']))
-                if dt < 2 and math.hypot(dn, de) > 3*dt + d['accuracy'] + self.last_gps['accuracy']:
-                    good = False
-            self.last_gps, self.last_gps_time = d, now
+            good, reason = self.gps_quality.check(now, d)
+            if good:
+                self.last_gps, self.last_gps_time = d, now
+            self.put('gps_reason', reason)
             self.put('gps', d); self.put('gps_good', good)
         elif kind == self.settings['pressure_message']:
-            if self.advancing('pressure', m.time_boot_ms):
+            if not self.settings.get('depth_topic') and self.advancing('pressure', m.time_boot_ms):
                 base = self.settings['surface_pressure_hpa']
                 rho = self.settings['water_density']
                 depth = (m.press_abs-base)*100/(rho*9.80665) if base > 0 and rho > 0 else float('nan')
@@ -209,6 +243,7 @@ class NavigationSupervisor(Node):
             depth_valid=depth is not None and math.isfinite(depth),
             intent=intent.get('phase', ''), intent_fresh=bool(intent), run_id=intent.get('run_id', ''),
             gps_good=self.fresh('gps_good') is True,
+            gps_rejected=self.fresh('gps_good') is False,
             gps_updated=self.samples.get('gps', (-math.inf,))[0],
             source=self.fresh('source') or 0, source_updated=self.samples.get('source', (-math.inf,))[0],
             ack=self.fresh('ack', 5) or '', ack_updated=self.samples.get('ack', (-math.inf,))[0],
@@ -242,7 +277,9 @@ class NavigationSupervisor(Node):
         status['reference_current'] = ref_ready
         status['depth_m'] = o.depth if o.depth_valid else None
         status['gps_qualified_input'] = o.gps_good
+        status['gps_quality_reason'] = self.fresh('gps_reason') or 'GPS measurement stale or unavailable'
         status['configuration_verified'] = o.configuration_verified
+        status['target_gps'] = intent.get('target_gps')
         self.pub.publish(String(data=json.dumps(status, allow_nan=False)))
 
 

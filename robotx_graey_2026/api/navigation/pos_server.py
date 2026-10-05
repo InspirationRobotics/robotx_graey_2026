@@ -23,7 +23,7 @@ from robotx_graey_2026.api.pixhawk.mavlink import Link
 
 POLE_STALE_S = 2.0                                  # older than this reports pole_ok false
 
-state = {'x': 0.0, 'y': 0.0, 'z': 0.0, 'yaw': 0.0, 't': 0.0,
+state = {'x': 0.0, 'y': 0.0, 'z': 0.0, 'yaw': 0.0, 't': 0.0, 'attitude_t': 0.0,
          'pole_ok': False, 'pole_n': 0.0, 'pole_e': 0.0,
          'pole_fwd': 0.0, 'pole_right': 0.0, 'pole_t': 0.0}
 
@@ -35,7 +35,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         fresh = state['pole_ok'] and time.time() - state['pole_t'] < POLE_STALE_S
         body = json.dumps({
-            'ok': state['t'] > 0,
+            'ok': (state['t'] > 0 and time.time() - state['t'] < 1.0
+                   and state['attitude_t'] > 0 and time.time() - state['attitude_t'] < 1.0),
             'x': state['x'], 'y': state['y'], 'z': state['z'], 'yaw': state['yaw'],
             'age': round(time.time() - state['t'], 2) if state['t'] else -1,
             'pole_ok': fresh, 'pole_n': state['pole_n'], 'pole_e': state['pole_e'],
@@ -86,7 +87,7 @@ class PosServer(Node):
                 state['t'] = time.time()
             elif kind == 'ATTITUDE':
                 state['yaw'] = m.yaw
-                state['t'] = time.time()
+                state['attitude_t'] = time.time()
         self.link.drain(handle)
 
 

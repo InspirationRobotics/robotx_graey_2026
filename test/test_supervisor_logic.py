@@ -57,17 +57,36 @@ class SupervisorTests(unittest.TestCase):
         self.assertEqual(r.commands, [2])
         self.assertEqual(r.s.state, 'Surface GPS degraded')
 
-    def test_long_gps_loss_blocks_transit_without_source_chatter(self):
+    def test_long_gps_loss_blocks_transit_and_leaves_gps_source(self):
         r = Rig().run(5); r.o.gps_good = False; r.run(5)
         self.assertFalse(r.s.allowed)
+        self.assertEqual(r.commands, [2, 1])
+        r.run(20)
+        self.assertEqual(r.commands, [2, 1])
+
+    def test_suspect_fix_has_no_dropout_grace(self):
+        r = Rig().run(5)
+        r.o.gps_good = False
+        r.o.gps_rejected = True
+        r.run(.1)
+        self.assertFalse(r.s.allowed)
+        r.run(1)
+        self.assertEqual(r.commands, [2, 1])
+
+    def test_bad_gps_cannot_force_switch_with_unhealthy_external_navigation(self):
+        r = Rig().run(5)
+        r.o.gps_good = False; r.o.gps_rejected = True; r.o.healthy = False
+        r.run(10)
         self.assertEqual(r.commands, [2])
+        self.assertFalse(r.s.allowed)
 
     def test_recovery_requires_qualification_again(self):
         r = Rig().run(5); r.o.gps_good = False; r.run(5)
         r.o.gps_good = True; r.run(1)
         # Recovery must not refresh dropout permission before qualification.
         self.assertFalse(r.s.allowed)
-        r.run(3); self.assertTrue(r.s.allowed)
+        r.run(4); self.assertTrue(r.s.allowed)
+        self.assertEqual(r.commands, [2, 1, 2])
 
     def test_waves_and_sustained_depth(self):
         r = Rig().run(5)

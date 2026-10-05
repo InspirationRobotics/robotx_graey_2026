@@ -82,6 +82,8 @@ function streetDraw(){
  const dive=state?.mission_reference;
  if(dive)L.marker([dive.gps_lat,dive.gps_lon],{interactive:false,icon:L.divIcon({className:'vessel-icon',iconSize:[180,24],iconAnchor:[8,12],html:'<span style="color:#136c47;background:white;border:2px solid #136c47;padding:3px;white-space:nowrap">⚑ Dive start / mission zero</span>'})}).addTo(streetLayers);
  if(state?.origin)L.marker(state.origin.slice(0,2),{interactive:false,icon:L.divIcon({className:'vessel-icon',iconSize:[130,24],iconAnchor:[8,12],html:'<span style="color:#753da5;background:white;border:1px solid #753da5;padding:2px 5px;white-space:nowrap">⊕ Display origin</span>'})}).addTo(streetLayers);
+ const target=state?.mission_target;
+ if(target&&Number.isFinite(target.lat)&&Number.isFinite(target.lon))L.marker([target.lat,target.lon],{interactive:false,icon:L.divIcon({className:'vessel-icon',iconSize:[150,24],iconAnchor:[8,12],html:'<span style="color:#7a2c79;background:white;border:2px solid #7a2c79;padding:2px 5px;white-space:nowrap">◎ Mission waypoint</span>'})}).addTo(streetLayers);
  const p=geo('global'),g=geo('gps'),heading=stream('attitude')?.rpy?.[2]??p?.heading;
  if(follow&&(p||g)){const point=p||g;streetMap.panTo([point.lat,point.lon],{animate:false})}
  if($('trailLayer').checked)for(const key of ['global','gps']){
@@ -102,7 +104,7 @@ function streetDraw(){
   if(Number.isFinite(heading))L.marker([p.lat,p.lon],{interactive:false,icon:L.divIcon({className:'vessel-icon',iconSize:[32,36],iconAnchor:[16,18],html:'<svg width="32" height="36" viewBox="0 0 32 36"><path transform="rotate('+heading+' 16 18)" d="M16 2 L28 32 L16 25 L4 32 Z" fill="#0066ad" stroke="white" stroke-width="2"/></svg>'})}).addTo(streetLayers);
   else L.circleMarker([p.lat,p.lon],{radius:7,color:'#0066ad'}).addTo(streetLayers);
  }
- $('legend').textContent='North ↑ · Blue: Cube global · Gold: raw GPS / accuracy'+(!p?' · No current Cube global marker':'');
+ $('legend').textContent='North ↑ · Blue: Cube global · Gold: raw GPS · Purple: mission waypoint'+(!p?' · No current Cube global marker':'');
 }
 const fmt=(x,n=2)=>Number.isFinite(x)?x.toFixed(n):'—';
 const vec=v=>v?v.map(x=>fmt(x)).join(' / '):'—';
@@ -130,8 +132,9 @@ function update(){
  $('pose').textContent='Roll / Pitch / Yaw (°)\n'+vec(a?.rpy)+'\nCube N / E / D (m)\n'+vec(l?.ned)+'\nVelocity N / E / D (m/s)\n'+vec(l?.velocity)+'\nPosition age '+age('local')+'\nAttitude age '+age('attitude');
  $('horizon').setAttribute('transform',a?'rotate('+(-a.rpy[0])+' 150 40)':'');$('attitude').style.opacity=a?'1':'.2';
  const raw=stream('gps');
- $('gps').textContent=(g?fmt(g.lat,7)+', '+fmt(g.lon,7)+'\nMSL altitude '+fmt(g.alt)+' m':'No valid current coordinates')+'\nFix '+(raw?.fix??'—')+' · satellites '+(raw?.satellites??'—')+'\nH accuracy '+fmt(raw?.accuracy)+' m\nV accuracy '+fmt(raw?.vertical_accuracy)+' m\nHDOP '+fmt(raw?.hdop)+'\nAge '+age('gps');
- $('global').textContent=(p?fmt(p.lat,7)+', '+fmt(p.lon,7)+'\nMSL altitude '+fmt(p.alt)+' m':'—')+'\nAge '+age('global');
+ $('gps').textContent=(raw?fmt(raw.lat,7)+', '+fmt(raw.lon,7)+'\nMSL altitude '+fmt(raw.alt)+' m':'No current coordinates')+'\n'+(g?'Raw GPS; not proof of EKF fusion':'GPS quality insufficient: map marker withheld')+'\nFix '+(raw?.fix??'—')+' · satellites '+(raw?.satellites??'—')+'\nH accuracy '+fmt(raw?.accuracy)+' m\nV accuracy '+fmt(raw?.vertical_accuracy)+' m\nHDOP '+fmt(raw?.hdop)+'\nAge '+age('gps');
+ const reported=stream('global');
+ $('global').textContent=(reported?fmt(reported.lat,7)+', '+fmt(reported.lon,7)+'\nMSL altitude '+fmt(reported.alt)+' m':'—')+'\n'+(p?'Healthy position available':'Position untrusted: marker withheld; check EKF and local pose')+'\nAge '+age('global');
  $('coords').textContent='Cube global → display N/E/D\n'+vec(p?.ned)+'\nGPS → display N/E/D\n'+vec(g?.ned);
  $('origin').textContent=state?.origin?'Fixed display origin: '+fmt(state.origin[0],7)+', '+fmt(state.origin[1],7)+'; '+fmt(state.origin[2])+' m MSL. Separate from Cube local origin.':reset?.state==='waiting'?'Waiting for a new valid GPS fix.':reset?.state==='timeout'?'Origin unset. Retry reset when GPS is available.':'Waiting for first valid geographic position.';
  const dv=stream('dvl_valid'),vel=stream('dvl_velocity'),cl=stream('clearance'),vn=stream('vn_heading'),ek=stream('ekf');
@@ -157,11 +160,18 @@ function draw(){
  if(state?.origin){const [x,y]=xy(0,0);ctx.strokeStyle=color('--text');ctx.beginPath();ctx.arc(x,y,8,0,Math.PI*2);ctx.moveTo(x-12,y);ctx.lineTo(x+12,y);ctx.moveTo(x,y-12);ctx.lineTo(x,y+12);ctx.stroke();ctx.fillStyle=color('--text');ctx.font='12px system-ui';ctx.fillText('Display origin',x+14,y-12)}
  const dive=state?.mission_reference;
  if(dive?.display_ned){const [x,y]=xy(...dive.display_ned);ctx.strokeStyle='#42cf91';ctx.fillStyle='#42cf91';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x,y+12);ctx.lineTo(x,y-14);ctx.lineTo(x+13,y-8);ctx.lineTo(x,y-3);ctx.stroke();ctx.font='12px system-ui';ctx.fillText('Dive start / mission zero',x+16,y-10)}
+ const target=state?.mission_target,origin=state?.origin;
+ if(target&&origin&&Number.isFinite(target.lat)&&Number.isFinite(target.lon)){
+  const north=(target.lat-origin[0])*111320,east=((target.lon-origin[1]+540)%360-180)*111320*Math.cos(origin[0]*Math.PI/180);
+  const [x,y]=xy(north,east);ctx.strokeStyle='#bd71d5';ctx.fillStyle='#bd71d5';ctx.lineWidth=2;
+  ctx.beginPath();ctx.arc(x,y,8,0,Math.PI*2);ctx.moveTo(x-12,y);ctx.lineTo(x+12,y);ctx.moveTo(x,y-12);ctx.lineTo(x,y+12);ctx.stroke();
+  ctx.font='12px system-ui';ctx.fillText('Mission waypoint',x+14,y-10)
+ }
  if(g?.ned&&$('gpsLayer').checked){const [x,y]=xy(...g.ned);ctx.strokeStyle=color('--gold');ctx.fillStyle=color('--gold');ctx.beginPath();ctx.arc(x,y,5,0,Math.PI*2);ctx.fill();if(g.accuracy){ctx.beginPath();ctx.arc(x,y,g.accuracy*scale,0,Math.PI*2);ctx.stroke()}}
  if(p?.ned){const [x,y]=xy(...p.ned);ctx.save();ctx.translate(x,y);ctx.fillStyle=color('--blue');if(Number.isFinite(heading)){ctx.rotate(heading*Math.PI/180-theta);ctx.beginPath();ctx.moveTo(0,-17);ctx.lineTo(9,12);ctx.lineTo(0,7);ctx.lineTo(-9,12);ctx.closePath();ctx.fill()}else{ctx.beginPath();ctx.arc(0,0,7,0,Math.PI*2);ctx.fill()}ctx.restore()}
  ctx.save();ctx.translate(W-40,H-45);ctx.rotate(-theta);ctx.strokeStyle=color('--text');ctx.beginPath();ctx.moveTo(0,15);ctx.lineTo(0,-15);ctx.lineTo(-4,-8);ctx.moveTo(0,-15);ctx.lineTo(4,-8);ctx.stroke();ctx.restore();
  ctx.fillStyle=color('--text');ctx.font='13px system-ui';ctx.fillText('N',W-45,H-70);
- $('legend').textContent='Blue: Cube global · Gold: raw GPS / accuracy | Grid '+fmt(step,step<1?2:0)+' m'+(!p?' | No current Cube global marker':'');
+ $('legend').textContent='Blue: Cube global · Gold: raw GPS · Purple: mission waypoint | Grid '+fmt(step,step<1?2:0)+' m'+(!p?' | No current Cube global marker':'');
 }
 async function poll(){try{const r=await fetch('/api/navigation',{cache:'no-store',signal:AbortSignal.timeout(1500)});if(!r.ok)throw Error(r.status);state=await r.json();arrived=performance.now()}catch(e){}finally{update();setTimeout(poll,200)}}
 setInterval(update,250);poll();

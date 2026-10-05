@@ -16,6 +16,7 @@ import subprocess
 import threading
 import time
 import uuid
+from pathlib import Path
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -95,7 +96,10 @@ CONTROL_STATUS_TOPIC = '/graey/control_watchdog/status'
 CONTROL_STATUS_TIMEOUT = 2.0
 CONTROL_REQUEST_LIFETIME = 2.0
 
-web_dir = '/root/robotx_ws/src/robotx_graey_2026/tools'
+# Resolve bundled GUI assets from this source/install layout. On the Jetson this
+# resolves to the same tools directory as the historic absolute path; it also
+# lets the local WSL SITL serve the GUI without a Jetson-specific mount path.
+web_dir = str(Path(__file__).resolve().parents[3] / 'tools')
 link = None
 led_off = False
 control_bridge = None

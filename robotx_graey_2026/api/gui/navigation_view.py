@@ -121,7 +121,10 @@ class NavigationView:
         # (0,0) is a real location but also ArduPilot's uninitialized sentinel.
         valid = (-90 <= lat <= 90 and -180 <= lon <= 180
                  and (lat != 0 or lon != 0) and math.isfinite(alt)
-                 and (name != 'gps' or extra['fix'] >= 3))
+                 and (name != 'gps' or (extra['fix'] >= 3 and
+                      0 < (extra.get('accuracy') or 0) <= 3)))
+        if name == 'global':
+            valid = valid and self.position_healthy()
         if self.reset_state == 'waiting' and name == 'gps':
             gps_time = extra.get('receiver_time_us', 0)
             if gps_time and self.reset_gps_time is None:
@@ -146,6 +149,18 @@ class NavigationView:
             if not trail or now-trail[-1][3] >= .5:
                 trail.append([*ned, now, lat, lon])
 
+    def position_healthy(self):
+        ekf = self.samples.get('ekf', {})
+        local = self.samples.get('local', {})
+        data = ekf.get('data', {})
+        flags = data.get('flags', 0)
+        return (self.clock()-ekf.get('received', -math.inf) < 3
+                and self.clock()-local.get('received', -math.inf) < 2
+                and bool(flags & (8 | 16)) and not flags & (128 | 16384 | 32768)
+                and all(v is not None and math.isfinite(v) for v in local.get('data', {}).get('ned', [None]))
+                and all(v is not None and 0 <= v < 1 for v in
+                        (data.get('horizontal_variance'), data.get('velocity_variance'))))
+
     def snapshot(self):
         with self.lock:
             self._expire_reset()
@@ -155,8 +170,12 @@ class NavigationView:
                 age = max(0, now-sample['received'])
                 streams[name] = {'data': copy.deepcopy(sample['data']), 'age': age,
                                  'fresh': age < (3 if name in ('heartbeat', 'ekf') else 2)}
+            if 'global' in streams:
+                streams['global']['data']['valid'] &= bool(self.position_healthy())
+                streams['global']['data']['position_healthy'] = bool(self.position_healthy())
             supervisor = streams.get('supervisor', {})
             reference = copy.deepcopy(supervisor.get('data', {}).get('reference'))
+            target = copy.deepcopy(supervisor.get('data', {}).get('target_gps'))
             if reference:
                 reference['display_ned'] = offset(reference['gps_lat'], reference['gps_lon'],
                     reference['gps_msl_alt'], self.origin) if self.origin else None
@@ -164,6 +183,7 @@ class NavigationView:
                     supervisor.get('data', {}).get('reference_current'))
             return {'streams': streams, 'origin': copy.deepcopy(self.origin), 'session': self.session,
                     'mission_reference': reference,
+                    'mission_target': target,
                     'origin_revision': self.origin_revision,
                     'display_reset': {'state': self.reset_state,
                         'remaining_s': max(0, self.reset_deadline-now) if self.reset_state == 'waiting' else 0},

@@ -58,8 +58,8 @@ the previous classification. A DIVE/UNDERWATER intent requests underwater aiding
 even while the vehicle is still shallow.
 
 GPS requires advancing receiver timestamps, a 3D fix, reported horizontal
-accuracy greater than zero and at most 3 m, valid coordinates, no implausible
-short-interval jump, and three seconds of continuous qualification. Reported
+accuracy greater than zero and at most 3 m, valid coordinates, displacement
+consistent with fresh valid atomic DVL samples, and three seconds of continuous qualification. Reported
 accuracy is a receiver estimate, not proof of the true position. EKF health adds
 a separate consistency gate; selected-source telemetry is not proof of actual
 GPS fusion. Innovation/log inspection is still required during commissioning.
@@ -69,8 +69,8 @@ GPS fusion. Innovation/log inspection is still required during commissioning.
 | Initializing/unhealthy/stale intent/depth | No switching or mission permission; report reason |
 | Surface, GPS qualifying | Keep existing source; wait for qualification |
 | Surface, qualified GPS | Recommend/select Surface GPS if all activation gates pass |
-| Brief surface GPS dropout | Keep Surface GPS selection; allow at most 3 seconds of DVL continuation while other health checks pass |
-| Longer dropout | Revoke mission permission; no repeated source changes caused by waves |
+| Brief absence of new GPS measurements | Keep Surface GPS selection; allow at most 3 seconds of DVL continuation while other health checks pass |
+| Explicitly rejected GPS or longer dropout | Revoke mission permission; request aligned Underwater external aiding if all health/configuration gates pass; remain there until GPS requalifies |
 | GPS returns | Require qualification again; one good fix cannot renew the grace window |
 | Dive requested | Require a new qualified surfaced GPS measurement, healthy Cube pose, selected Surface GPS and saved mission reference |
 | Returning to Underwater | Align integrated external position once to Cube NED, wait for bridge acknowledgment, then command source change |
@@ -84,6 +84,37 @@ attitude/rates. It withholds combined ODOMETRY when DVL or VN-100 fails, rather
 than sending invalid DVL as zero velocity. This also withholds external yaw.
 Independent heading-only transport is not implemented, so bottom-lock loss can
 block surface navigation even with good GPS.
+
+### October 3 telemetry-driven hardening (local, not deployed)
+
+The GPS motion screen compares accepted geographic anchors over a rolling
+10-second window against integrated DVL speed (path length, including vertical
+motion, a conservative displacement bound), with a 2 m allowance. It requires
+valid atomic DVL samples less than 0.5 seconds old and never uses invalid zero
+velocity as evidence of stationarity. Rejected points do not replace trusted
+anchors. Configurable ROS parameters: `gps_max_accuracy_m` (3),
+`gps_motion_margin_m` (2), `gps_motion_window_s` (10). These are initial screening
+defaults, **not fitted EKF noise parameters or validated pool tolerances**.
+After a DVL gap the motion anchors clear and normal GPS dwell is required by
+the supervisor following rejection. Constant GPS bias and sufficiently slow
+drift cannot be distinguished from truth by this check alone.
+
+An explicit bad fix receives no missing-measurement grace. A source change
+still requires healthy external navigation, frame alignment, commissioning,
+intent, ACK and source feedback. If those are absent, mission permission stays
+blocked and the supervisor cannot promise GPS has been removed from fusion.
+Switching is asynchronous: the M9N feeds the Cube directly, so the Jetson cannot
+veto each individual GPS measurement before the Cube sees it. Existing alignment
+uses current healthy Cube pose; it preserves continuity but does not undo an
+already accumulated geographic error. No automatic re-zero or origin reset was
+added. Cube innovation rejection remains necessary.
+
+The GUI now withholds the blue global marker unless fresh local pose and EKF
+horizontal health support it; raw reported global coordinates remain readable.
+The raw GPS marker and display-origin capture require known accuracy <=3 m.
+The supervisor page shows the GPS admission reason. These GUI changes do not
+alter QGC or Cube fusion. See `gps-telemetry-review-2026-10-03.md` for evidence
+and the remaining live commissioning requirements.
 
 ## Mission zero and GUI
 

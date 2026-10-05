@@ -15,6 +15,7 @@ class Observation:
     intent_fresh: bool = False
     run_id: str = ''
     gps_good: bool = False
+    gps_rejected: bool = False
     gps_updated: float = -math.inf
     source: int = 0
     source_updated: float = -math.inf
@@ -119,7 +120,9 @@ class Supervisor:
             return actions
 
         diving = o.intent in ('DIVE', 'UNDERWATER') or not self.surface
-        self.desired = 1 if diving else 2 if qualified or o.source == 2 else 1
+        grace = (not o.gps_rejected and self.last_good is not None
+                 and now-self.last_good <= self.grace)
+        self.desired = 1 if diving else 2 if qualified or (o.source == 2 and grace) else 1
         if diving:
             self.state = 'Preparing dive' if o.intent == 'DIVE' else 'Underwater'
             if o.intent == 'DIVE' and not o.reference_ready:
@@ -135,6 +138,8 @@ class Supervisor:
                 # sources but never grant a dive permission without a reference.
         else:
             self.state = 'Surface GPS' if qualified and o.source == 2 else 'Acquiring GPS'
+            if o.source == 1 and not qualified:
+                self.state = 'Surface DVL fallback'
             if o.source == 2 and not qualified:
                 self.state = 'Surface GPS degraded'
 
@@ -169,8 +174,7 @@ class Supervisor:
         if self.state == 'Surface GPS degraded':
             self.reason = 'GPS unavailable; bounded DVL continuation'
         permitted = (diving and o.reference_ready and o.reference_saved) or (
-            not diving and o.source == 2 and (qualified or (
-                self.last_good is not None and now-self.last_good <= self.grace)))
+            not diving and o.source == 2 and (qualified or grace))
         if not permitted:
             self.reason = 'Waiting for dive reference' if diving else 'Waiting for reliable GPS'
         self.allowed = bool(self.active and o.configuration_verified and permitted)

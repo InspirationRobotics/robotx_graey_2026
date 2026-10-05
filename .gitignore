@@ -11,6 +11,8 @@ __pycache__/
 *.tlog
 *.tlog.raw
 .cache/
+sitl/logs/
+sitl/run/
 
 # editor and shell leftovers
 *.bak*

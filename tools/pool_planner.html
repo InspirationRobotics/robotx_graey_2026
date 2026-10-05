@@ -134,10 +134,18 @@ function loadImage(src, label){
 const POOLS = ['pool.png', 'neighbor_pool.png'];
 const POOL_NAMES = { 'pool.png': 'lab', 'neighbor_pool.png': 'neighbor' };
 let poolSrc = POOLS[0];
-const savedCal = {};
+// Approximate scale from the 5 m bar in the bundled 1945 x 1340 image.
+// This is image calibration, not surveyed GPS registration.
+const savedCal = {'pool.png': {mPerPx: 5 / 620,
+  calPts: [{x:75,y:96},{x:695,y:96}]}};
+try { Object.assign(savedCal, JSON.parse(localStorage.getItem('graey-pool-cal-v1') || '{}')); }
+catch (_) { /* storage unavailable or invalid: use image scale */ }
 
 function stashCal(){
+  if (poolSrc === 'file') return;
   savedCal[poolSrc] = { mPerPx, calPts, start, headingPt, marker };
+  try { localStorage.setItem('graey-pool-cal-v1', JSON.stringify(savedCal)); }
+  catch (_) { /* calibration still works for this session */ }
 }
 function restoreCal(key){
   const s = savedCal[key] || {};
@@ -153,6 +161,8 @@ function showPool(){
 // differ for a chooser file, whose object URL is new on every pick.
 function usePool(key, src, label){
   stashCal();
+  origin = null; trail = []; lastFix = null; cvPole = null;
+  document.getElementById('bZero').disabled = true;
   poolSrc = key;
   restoreCal(key);
   setMode(null);
@@ -173,7 +183,7 @@ document.getElementById('file').addEventListener('change', e => {
 
 document.getElementById('bFit').onclick = fitView;
 // wait for layout before the first fit, or the iframe reports the wrong size
-window.addEventListener('load', () => { showPool(); loadImage(POOLS[0], POOLS[0]); });
+window.addEventListener('load', () => { restoreCal(POOLS[0]); showPool(); loadImage(POOLS[0], POOLS[0]); update(); });
 
 const i2s = p => ({ x: p.x*view.z + view.ox, y: p.y*view.z + view.oy });
 const s2i = p => ({ x: (p.x - view.ox)/view.z, y: (p.y - view.oy)/view.z });
@@ -224,7 +234,7 @@ cv.addEventListener('mouseup', e => {
 
   if (mode === 'cal' && clicks.length === 2) {
     const m = parseFloat(document.getElementById('calDist').value);
-    if (m > 0) {
+    if (m > 0 && Math.hypot(clicks[1].x-clicks[0].x, clicks[1].y-clicks[0].y) > 1) {
       const px = Math.hypot(clicks[1].x - clicks[0].x, clicks[1].y - clicks[0].y);
       mPerPx = m / px; calPts = [clicks[0], clicks[1]];
       setStatus(`Scale: ${m} m over ${px.toFixed(1)} image px = ${mPerPx.toFixed(4)} m/px. Now 2. Start + heading.`);
@@ -239,6 +249,7 @@ cv.addEventListener('mouseup', e => {
   } else if (mode === 'marker') {
     marker = p; setMode(null); setStatus('Marker set. Command below.');
   }
+  stashCal();
   update();
 });
 
@@ -378,6 +389,12 @@ document.getElementById('bTrack').onclick = () => {
     try {
       const r = await fetch(`http://${ip}:8081/pos`, { cache: 'no-store' });
       const j = await r.json();
+      if (!j.ok || !Number.isFinite(j.age) || j.age < 0 || j.age > 1) {
+        lastFix = null; cvPole = null;
+        document.getElementById('bZero').disabled = true;
+        liveEl.textContent = 'Position unavailable or stale — tracking paused';
+        draw(); return;
+      }
       if (j.ok) {
         lastFix = j;
         document.getElementById('bZero').disabled = false;
@@ -402,7 +419,7 @@ document.getElementById('bTrack').onclick = () => {
         }
         draw();
       }
-    } catch (e) { liveEl.textContent = `live tracking: no response from ${ip}:8081 — is pos_server.py running?`; }
+    } catch (e) { lastFix = null; cvPole = null; document.getElementById('bZero').disabled = true; draw(); liveEl.textContent = `live tracking: no response from ${ip}:8081 — is pos_server.py running?`; }
   }, 200);
   document.getElementById('bTrack').textContent = 'Disconnect tracking';
   document.getElementById('bTrack').classList.add('good');

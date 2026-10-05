@@ -12,6 +12,7 @@ import unittest
 import uuid
 from enum import Enum
 from unittest.mock import Mock
+from robotx_graey_2026.api.navigation.gps_quality import GPSQuality
 
 
 ROOT = Path(__file__).parents[1] / 'robotx_graey_2026/api/navigation'
@@ -94,6 +95,8 @@ class TelemetryTests(unittest.TestCase):
         self.s.boot_ms = self.s.cube_origin = self.s.last_gps = self.s.last_gps_time = None
         self.s.epoch = 'original'
         self.s.logic = NS(fault='')
+        self.s.gps_quality = GPSQuality()
+        self.s.gps_quality.motion(self.clock.now, (0, 0, 0), True)
 
     def receive(self, kind, **fields):
         self.s.consume(kind, NS(get_srcSystem=lambda: 1, get_srcComponent=lambda: 1, **fields))
@@ -122,6 +125,28 @@ class TelemetryTests(unittest.TestCase):
         self.s.settings['surface_pressure_hpa'] = 1013.
         self.receive('SCALED_PRESSURE2', time_boot_ms=101, press_abs=1113.)
         self.assertAlmostEqual(self.s.fresh('depth'), .99484, places=4)
+
+    def test_atomic_dvl_replay_does_not_qualify_gps(self):
+        self.s.dvl_sample(NS(data=json.dumps(dict(stamp_ns=100, sensor_time=12,
+                                                velocity=[0, 0, 0], valid=True))))
+        self.clock.now += 1
+        self.s.dvl_sample(NS(data=json.dumps(dict(stamp_ns=101, sensor_time=12,
+                                                velocity=[0, 0, 0], valid=True))))
+        self.gps(stamp=101)
+        self.assertFalse(self.s.fresh('gps_good'))
+        self.assertIn('DVL', self.s.fresh('gps_reason'))
+
+    def test_atomic_invalid_dvl_cannot_claim_stationarity(self):
+        self.s.dvl_sample(NS(data=json.dumps(dict(stamp_ns=100,
+                                                velocity=[0, 0, 0], valid=False))))
+        self.gps()
+        self.assertFalse(self.s.fresh('gps_good'))
+
+    def test_simulated_depth_topic_isolated_from_cube_pressure(self):
+        self.s.settings['depth_topic'] = '/graey/sitl/depth_m'
+        self.s.sim_depth(NS(data=.5))
+        self.receive('SCALED_PRESSURE2', time_boot_ms=101, press_abs=1200.)
+        self.assertEqual(self.s.fresh('depth'), .5)
 
     def test_cube_reboot_and_origin_change_invalidate_frame(self):
         self.receive('LOCAL_POSITION_NED', time_boot_ms=10000, x=0., y=0., z=0.)

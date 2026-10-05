@@ -21,7 +21,24 @@ class NavigationTests(unittest.TestCase):
 
     def gps(self, fix=3, lat=330000000, timestamp=1):
         self.message('GPS_RAW_INT', lat=lat, lon=-1170000000, alt=100000,
-            fix_type=fix, satellites_visible=16, eph=100, time_usec=timestamp)
+            fix_type=fix, satellites_visible=16, eph=100, time_usec=timestamp, h_acc=1000)
+
+    def test_unhealthy_global_cannot_create_marker_or_origin(self):
+        self.view.put('local', {'ned': [0, 0, 0]})
+        self.view.put('ekf', dict(flags=167, horizontal_variance=0., velocity_variance=0.))
+        self.view._geo('global', 33, -117, 100, {})
+        self.assertIsNone(self.view.origin)
+        self.assertFalse(self.view.snapshot()['streams']['global']['data']['valid'])
+        self.assertEqual(len(self.view.trails['global']), 0)
+        self.view.put('ekf', dict(flags=831, horizontal_variance=.1, velocity_variance=.1))
+        self.view._geo('global', 33, -117, 100, {})
+        self.assertTrue(self.view.snapshot()['streams']['global']['data']['valid'])
+        self.now += 2.1
+        self.assertFalse(self.view.snapshot()['streams']['global']['data']['valid'])
+
+    def test_three_dimensional_fix_with_bad_accuracy_cannot_reset_origin(self):
+        self.view._geo('gps', 33, -117, 100, dict(fix=3, accuracy=71.127))
+        self.assertIsNone(self.view.origin)
 
     def test_no_fix_never_establishes_origin(self):
         self.gps(fix=1)
@@ -127,6 +144,8 @@ class NavigationTests(unittest.TestCase):
         self.assertEqual(self.view.session, 1)
 
     def test_reset_rebases_cached_global_without_refreshing_its_age(self):
+        self.view.put('local', {'ned': [0, 0, 0]})
+        self.view.put('ekf', dict(flags=831, horizontal_variance=.1, velocity_variance=.1))
         self.view._geo('global', 33, -117, 100, {})
         self.gps(timestamp=100)
         self.view.reset_display()

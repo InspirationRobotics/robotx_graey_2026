@@ -16,6 +16,8 @@ job is Mission Task 2 (Infrastructure Survey & Repair). Its Proof of Readiness
 GPS/navigation supervisor implementation and commissioning limits:
 [Navigation supervisor](docs/navigation-supervisor.md). The supervisor starts in
 observation mode; automatic source switching and supervised missions are opt-in.
+The local ArduSub software-in-the-loop workflow is documented in
+[SITL validation](docs/sitl-validation.md).
 
 - **Computer:** NVIDIA Jetson Orin Nano (JetPack 6.2). Code lives on the Jetson at
   `~/robotx_ws` and is bind-mounted into a Docker container named `graey` (ROS 2

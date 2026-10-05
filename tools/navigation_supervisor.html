@@ -13,6 +13,7 @@
 <article><h2>Reported selected source</h2><div id="confirmed" class="value">Unknown</div></article>
 <article><h2>Calibrated depth</h2><div id="depth" class="value">Unavailable</div></article></div>
 <p id="reason">Waiting for status</p>
+<p id="gpsQuality">GPS qualification unavailable</p>
 <article><h2>Dive start / mission zero</h2><div id="reference">No dive reference captured</div></article>
 <footer>Observation mode displays recommendations. Source selection alone does not prove GPS fusion. Dive zero uses a Jetson mission reference; the Cube coordinate frame stays continuous.</footer></main>
 <script>
@@ -22,6 +23,7 @@ $('connection').textContent=live?'Supervisor status current':'Supervisor unavail
 for(const [id,key] of [['mode','mode'],['state','state'],['requested','requested_source'],['confirmed','confirmed_source']])$(id).textContent=s?.[key]??'Unavailable';
 $('ready').textContent=s?(s.navigation_ready?'Ready':'Waiting / blocked'):'Unavailable';
 $('reason').textContent=s?.reason??'No current supervisor decision. Previous permissions have expired.';
+$('gpsQuality').textContent='GPS: '+(s?.gps_quality_reason??'Qualification unavailable');
 $('depth').textContent=Number.isFinite(s?.depth_m)?s.depth_m.toFixed(2)+' m':'Calibration or telemetry unavailable';
 const r=s?.reference;
 $('reference').textContent=r?`${s.reference_current?'Current dive':'Historical / unverified reference'}\n${r.gps_lat.toFixed(7)}, ${r.gps_lon.toFixed(7)}\nCaptured: ${r.captured_utc}\nRun: ${r.run_id}\nMission N / E / D: ${s.mission_ned?.map(v=>v.toFixed(2)).join(' / ')??'Unavailable'} m`:'No qualified dive reference captured';}

@@ -12,6 +12,7 @@ setup(
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
+        (os.path.join('share', package_name, 'sitl'), glob('sitl/*.parm')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -34,6 +35,8 @@ setup(
             'prequal_mission = robotx_graey_2026.api.navigation.prequal_mission:main',
             'prequal_mission_cv = robotx_graey_2026.api.navigation.prequal_mission_cv:main',
             'demo_mission = robotx_graey_2026.api.navigation.demo_mission:main',
+            'sitl_sensor_sim = robotx_graey_2026.api.navigation.sitl_sensor_sim:main',
+            'sitl_mission = robotx_graey_2026.api.navigation.sitl_mission:main',
         ],
     },
 )
