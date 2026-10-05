@@ -56,7 +56,7 @@
   <button data-panel="gps" onclick="show('gps')">GPS &amp; Pose</button>
   <button data-panel="supervisor" onclick="show('supervisor')">Navigation Supervisor</button>
   <button data-panel="camera" onclick="show('camera')">Camera</button>
-  <button data-panel="planner" onclick="show('planner')">Mission planner</button>
+  <button data-panel="planner" onclick="show('planner')">Pool map</button>
   <button data-panel="logs" onclick="show('logs')">Logs</button>
   <button data-panel="system" onclick="show('system')">System</button>
 </div>
@@ -94,7 +94,7 @@
   <iframe id="cam" src="about:blank"></iframe>
 </div>
 
-<div id="planner" style="display:none"><iframe src="/planner"></iframe></div>
+<div id="planner" class="embedded-page" style="display:none"><iframe title="Graey pool map and tracking" data-src="/planner"></iframe></div>
 
 <div id="logs" style="display:none">
   <div style="margin:14px 18px 8px; display:flex; gap:14px; align-items:center">
@@ -193,7 +193,7 @@ function show(t){
   document.querySelectorAll('#tabs button').forEach(function(b,i){
     b.classList.toggle('on', b.dataset.panel === t);
   });
-  if (t === 'gps' || t === 'supervisor') {
+  if (t === 'gps' || t === 'supervisor' || t === 'planner') {
     var frame = document.querySelector('#' + t + ' iframe');
     if (frame && !frame.src) frame.src = frame.dataset.src;
   }

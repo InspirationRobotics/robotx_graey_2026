@@ -56,7 +56,8 @@
   <span class="hint">scroll = zoom &nbsp;Â·&nbsp; drag = pan &nbsp;Â·&nbsp; click = place (in active mode)</span>
 </div>
 <div id="status">Load the pool image to begin.</div>
-<div id="live">live tracking: off</div>
+<div id="live">Connecting to vehicle position…</div>
+<div style="padding:10px 14px;background:#263244">To place Graey: select <b>2. Start + heading</b>, click its actual location on the image, then click in its forward direction. When live position is available, click <b>Zero at start point</b>. The image alone cannot locate the vehicle. Mission controls below are for the prequalification orbit mission.</div>
 <canvas id="cv"></canvas>
 <div id="out">
   <div id="info"></div>
@@ -397,7 +398,7 @@ document.getElementById('bTrack').onclick = () => {
       }
       if (j.ok) {
         lastFix = j;
-        document.getElementById('bZero').disabled = false;
+        document.getElementById('bZero').disabled = !missionFrame();
         if (origin) {
           const c = Math.cos(origin.yaw), s = Math.sin(origin.yaw);
           const dN = j.x - origin.x, dE = j.y - origin.y;
@@ -425,10 +426,13 @@ document.getElementById('bTrack').onclick = () => {
   document.getElementById('bTrack').classList.add('good');
 };
 
+window.addEventListener('load', () => document.getElementById('bTrack').click());
+
 document.getElementById('bZero').onclick = () => {
-  if (!lastFix) return;
+  if (!lastFix || !missionFrame()) return;
   origin = { x: lastFix.x, y: lastFix.y, yaw: lastFix.yaw };
-  trail = [];
+  trail = [{f:0,r:0}];
+  draw();
   document.getElementById('bClear').disabled = false;
   setStatus('Origin zeroed â€” the sub is now drawn at the blue start dot. Run the mission command.');
 };
@@ -439,6 +443,13 @@ function draw(){
   ctx.clearRect(0,0,cv.width,cv.height);
   if (!img) return;
   ctx.drawImage(img, view.ox, view.oy, img.width*view.z, img.height*view.z);
+  if (!lastFix || !origin) {
+    const message = !lastFix ? 'GRAEY POSITION UNAVAILABLE — waiting for fresh local position'
+      : 'GRAEY NOT ANCHORED — select Start + heading, then Zero at start point';
+    ctx.fillStyle = '#14171cee'; ctx.fillRect(12, 12, Math.min(cv.width-24, 710), 42);
+    ctx.fillStyle = '#ffd479'; ctx.font = '14px Segoe UI';
+    ctx.fillText(message, 22, 39, Math.max(100, cv.width-44));
+  }
 
   if (calPts) { sline(calPts[0], calPts[1], '#ffd479', 2, [6,4]); sdot(calPts[0],'#ffd479',4); sdot(calPts[1],'#ffd479',4); }
   for (const c of clicks) sdot(c, '#ffffff', 4);
@@ -494,7 +505,7 @@ function draw(){
   }
 
   // live trail + sub
-  if (mf && origin && trail.length) {
+  if (mf && origin && trail.length && lastFix) {
     spath(trail.map(p => m2i(p.f, p.r, mf)), '#7fd4ff', 2);
     const cur = trail[trail.length-1];
     const pos = m2i(cur.f, cur.r, mf);
