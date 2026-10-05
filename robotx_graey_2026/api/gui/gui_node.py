@@ -49,6 +49,8 @@ FILES = {
     '/navigation-supervisor': 'navigation_supervisor.html',
     '/': 'gui.html',
     '/planner': 'pool_planner.html',
+    '/pool-map': 'pool_map.html',
+    '/pool_reference.png': 'pool_reference.png',
     '/pool.png': 'pool.png',
     '/neighbor_pool.png': 'neighbor_pool.png',
 }

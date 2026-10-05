@@ -1,0 +1,24 @@
+<!doctype html><meta charset="utf-8"><title>Registered pool map</title>
+<style>body{margin:0;background:#111820;color:#edf2f7;font:13px system-ui;height:100vh;display:flex;flex-direction:column}#status{padding:58px 12px 8px}canvas{width:100%;flex:1;min-height:0}footer{padding:8px}button{float:right}</style>
+<div id="status">Waiting for navigation telemetry</div><canvas id="map"></canvas><footer>North ↑ · Gold: raw GPS ± reported accuracy · Blue: healthy Cube estimate<br>User reference: 32.923570, −117.038550 · Approximate screenshot registration, not surveyed. No manual vehicle zero required.</footer>
+<script>
+const canvas=document.getElementById('map'),ctx=canvas.getContext('2d'),img=new Image();
+// Original user screenshot: 1920x1032, 10 ft scale between x69 and x219.
+// Green reference center (924,850). Crop is presentation only; calibration stays in original pixels.
+const ref={lat:32.92357,lon:-117.03855,x:924,y:850,mpp:3.048/150};
+let state=null,received=0;
+function sample(k){const s=state?.streams?.[k];return s?.fresh&&performance.now()-received<2000?s.data:null}
+function point(p){return {x:ref.x+(p.lon-ref.lon)*Math.PI/180*6378137*Math.cos(ref.lat*Math.PI/180)/ref.mpp,y:ref.y-(p.lat-ref.lat)*Math.PI/180*6378137/ref.mpp}}
+function draw(){const r=canvas.getBoundingClientRect(),d=devicePixelRatio||1;canvas.width=Math.max(1,r.width*d);canvas.height=Math.max(1,r.height*d);ctx.setTransform(d,0,0,d,0,0);const z=Math.min(r.width/1100,r.height/850),ox=(r.width-1100*z)/2,oy=(r.height-850*z)/2;
+if(!img.complete||!img.naturalWidth)return;ctx.drawImage(img,400,150,1100,850,ox,oy,1100*z,850*z);
+function xy(p){return [ox+(p.x-400)*z,oy+(p.y-150)*z]}
+// Hide the historical vehicle glyph baked into the screenshot, never present it as live.
+let a=xy({x:1040,y:330});ctx.fillStyle='#26313f';ctx.fillRect(a[0],a[1],85*z,78*z);ctx.fillStyle='white';ctx.font='10px system-ui';ctx.fillText('image overlay',a[0],a[1]+15*z);
+function dot(p,color,label,accuracy){const q=xy(point(p));ctx.strokeStyle=color;ctx.fillStyle=color;if(accuracy){ctx.beginPath();ctx.arc(q[0],q[1],accuracy/ref.mpp*z,0,7);ctx.stroke()}ctx.beginPath();ctx.arc(q[0],q[1],6,0,7);ctx.fill();ctx.fillText(label,q[0]+9,q[1]-9);return q}
+ctx.font='12px system-ui';dot(ref,'#73ef9a','Reference');const gps=sample('gps'),global=sample('global'),att=sample('attitude');
+if(gps?.valid)dot(gps,'#ffce6a','Raw GPS',gps.accuracy);
+if(global?.valid){const q=dot(global,'#67c5ff','Cube estimate');if(Number.isFinite(att?.rpy?.[2])){const h=att.rpy[2]*Math.PI/180;ctx.beginPath();ctx.moveTo(q[0],q[1]);ctx.lineTo(q[0]+25*Math.sin(h),q[1]-25*Math.cos(h));ctx.strokeStyle='#67c5ff';ctx.stroke()}}
+document.getElementById('status').textContent=(global?.valid?'Healthy Cube position':'Cube position unavailable/untrusted')+' · '+(gps?.valid?'Raw GPS shown; not fused-position proof':'GPS unavailable')+' · Map accuracy limited by reference and imagery';}
+img.onload=draw;img.src='/pool_reference.png';window.addEventListener('resize',draw);
+async function poll(){try{const r=await fetch('/api/navigation',{cache:'no-store',signal:AbortSignal.timeout(1500)});if(!r.ok)throw Error(r.status);state=await r.json();received=performance.now()}catch(e){}draw();setTimeout(poll,300)}poll();
+</script>

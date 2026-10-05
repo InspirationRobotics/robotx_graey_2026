@@ -15,7 +15,7 @@ body.day{--bg:#f3f6fa;--panel:#fff;--text:#132333;--dim:#425369;--grid:#ccd5df;-
 <div id="health" role="status">Waiting for telemetry…</div>
 <div id="mapnote" role="status">Grid works offline. Streets loads OpenStreetMap tiles over the browser's internet connection and shares the viewed map area with that provider. Background imagery is not a navigation chart.</div>
 <main><div id="map"><canvas id="plot" aria-label="Local geographic grid showing global position and raw GPS"></canvas>
-<iframe id="poolmap" title="Pool map using navigation telemetry" src="/planner?navigation=1" hidden style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>
+<iframe id="poolmap" title="Pool map using navigation telemetry" src="/pool-map" hidden style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>
 <div id="streetmap" hidden aria-label="Online OpenStreetMap streets"></div>
 <div id="controls"><button id="poolView">Pool</button><button id="gridView" class="active" aria-pressed="true">Grid</button><button id="streetsView" aria-pressed="false">Streets (online)</button><button id="follow" class="active">Follow</button><button id="center">Recenter</button><button id="bow">Bow-up</button><button id="in">+</button><button id="out">−</button><label><input id="gpsLayer" type="checkbox" checked>GPS</label><label><input id="trailLayer" type="checkbox" checked>Trails</label></div>
 <div id="legend">Blue: Cube global · Gold: raw GPS<br>Waiting for a geographic reference</div></div>
@@ -193,7 +193,7 @@ $('theme').onclick=()=>{document.body.classList.toggle('day');draw()};
 $('resetDisplay').onclick=resetDisplay;
 $('export').onclick=()=>{if(!state)return;const url=URL.createObjectURL(new Blob([JSON.stringify({exported_at:new Date().toISOString(),snapshot_age_s:(performance.now()-arrived)/1000,...state},null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='graey-navigation.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
 $('gridView').onclick=()=>{viewRequest++;viewMode(false);$('mapnote').textContent='Grid · offline · Streets requests only the map area you view from OpenStreetMap.';draw()};
-$('poolView').onclick=()=>{viewRequest++;viewMode(false);pool=true;canvas.hidden=true;$('poolmap').hidden=false;$('poolView').classList.add('active');$('gridView').classList.remove('active');$('legend').hidden=true;$('mapnote').textContent='Pool image: supplied 5 m scale. Geographic registration is not established. Uses the same Cube pose and health stream as Grid and Streets.';};
+$('poolView').onclick=()=>{viewRequest++;viewMode(false);pool=true;canvas.hidden=true;$('poolmap').hidden=false;$('poolView').classList.add('active');$('gridView').classList.remove('active');$('legend').hidden=true;$('mapnote').textContent='Pool image: supplied 5 m scale. Registered to the user reference, north-up, using the screenshot 10 ft scale. Uses the same Cube pose and health stream as Grid and Streets.';};
 $('streetsView').onclick=()=>{if(!streets)selectStreets()};
 window.addEventListener('resize',()=>{if(streetMap)streetMap.invalidateSize();draw()});
 </script></body></html>
