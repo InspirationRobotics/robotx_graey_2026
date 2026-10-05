@@ -38,10 +38,10 @@ sudo udevadm control --reload-rules
 sudo systemctl daemon-reload
 sudo systemctl enable --now graey-mavproxy.service graey-ros.service \
                             graey-reboot.path graey-shutdown.path \
-                            graey-usb-watchdog.timer
+                            graey-usb-watchdog.timer graey-sonar-launcher.service
 ```
 
-**Enable exactly those five and no others.** The remaining units are deliberately
+**Enable exactly those six and no others.** The remaining units are deliberately
 triggered rather than enabled, and none of them has an `[Install]` section:
 
 - `graey-mavproxy-restart.service` — fired by the udev rule's `SYSTEMD_WANTS`
@@ -51,10 +51,15 @@ triggered rather than enabled, and none of them has an `[Install]` section:
 Enabling a triggered unit directly would run it once at every boot, which for the
 shutdown unit means powering the Jetson straight back off.
 
+`graey-sonar-launcher.service` (added Oct 2026) runs `tools/gui_sonar_launcher.py` on
+the host, not in the container: the sonar tools need the Ping360 library, which
+only the host has. It lets the GUI's Sonar tab start and stop them (port 8096) and
+does nothing until a button is pressed.
+
 ## Verify
 
 ```bash
-systemctl is-enabled graey-mavproxy graey-ros graey-reboot.path graey-shutdown.path
+systemctl is-enabled graey-mavproxy graey-ros graey-reboot.path graey-shutdown.path graey-sonar-launcher
 systemctl list-timers graey-usb-watchdog.timer --no-pager   # NEXT must be < 30 s away
 journalctl -u graey-ros -n 30
 ```

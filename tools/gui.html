@@ -51,6 +51,7 @@
   <button class="on" onclick="show('nodes')">Nodes</button>
   <button onclick="show('sensors')">Sensors</button>
   <button onclick="show('camera')">Camera</button>
+  <button onclick="show('sonar')">Sonar</button>
   <button onclick="show('planner')">Mission planner</button>
   <button onclick="show('logs')">Logs</button>
   <button onclick="show('system')">System</button>
@@ -79,6 +80,16 @@
 
 <div id="camera" style="display:none">
   <iframe id="cam" src="about:blank"></iframe>
+</div>
+
+<div id="sonar" style="display:none">
+  <div class="sub" style="padding:4px 0">
+    <button class="act" onclick="sonarCmd('start?tool=map')">Start map</button>
+    <button class="act" onclick="sonarCmd('start?tool=radar')">Start radar</button>
+    <button class="act" onclick="sonarCmd('stop')">Stop</button>
+    <button class="act" onclick="sonarLoad()">reload page</button>
+    <span id="sonarSt"></span></div>
+  <iframe id="sonarf" src="about:blank" style="height:calc(100vh - 125px)"></iframe>
 </div>
 
 <div id="planner" style="display:none"><iframe src="/planner"></iframe></div>
@@ -122,7 +133,7 @@
 </div>
 
 <script>
-var TABS = ['nodes','sensors','camera','planner','logs','system'];
+var TABS = ['nodes','sensors','camera','sonar','planner','logs','system'];
 var ledOff = false;                          // mirrored from /api/status
 
 // The log is only fetched while its tab is open - no point pulling 60 KB a second
@@ -183,7 +194,38 @@ function show(t){
     var cam = document.getElementById('cam'); // is a live MJPEG connection
     if (cam.src === 'about:blank') cam.src = 'http://' + location.hostname + ':8080/';
   }
+  if (t === 'sonar') sonarCheck();
 }
+// The sonar tools run on the Jetson itself, outside the container, so this GUI
+// can't start them: tools/gui_sonar_launcher.py (port 8096) does it for us. The tools
+// serve their page on 8095, shown in the frame whenever it is up.
+function sonarUrl(port, path){ return 'http://' + location.hostname + ':' + port + '/' + (path || ''); }
+function sonarLoad(){ document.getElementById('sonarf').src = sonarUrl(8095); }
+var sonarRun = null;                         // which launcher run the frame shows
+function sonarShow(s){
+  var st = document.getElementById('sonarSt'), f = document.getElementById('sonarf');
+  if (!s){ st.textContent = 'launcher not reachable on port 8096 - is graey-sonar-launcher.service installed?'; return; }
+  var txt = 'stopped';
+  if (s.running) txt = s.running + (s.webUp ? ' running' : ' starting...');
+  else if (s.others.length) txt = 'started in a terminal (stop it there): ' + s.others[0];
+  else if (s.last && s.exit && !s.asked) txt = s.last + ' stopped by itself (exit ' + s.exit + '): ' + (s.log[s.log.length - 1] || '');
+  st.textContent = (s.msg && s.msg !== 'ok' ? s.msg + '  |  ' : '') + txt;
+  var blank = f.src === 'about:blank';
+  if (s.webUp && (blank || (s.running && s.since !== sonarRun))){ sonarRun = s.since; sonarLoad(); }
+  if (!s.webUp && !blank) f.src = 'about:blank';
+}
+function sonarCmd(p){
+  document.getElementById('sonarSt').textContent = '...';
+  fetch(sonarUrl(8096, p), {method: 'POST'}).then(function(r){ return r.json(); })
+    .then(sonarShow).catch(function(){ sonarShow(null); });
+}
+function sonarCheck(){
+  fetch(sonarUrl(8096, 'status')).then(function(r){ return r.json(); })
+    .then(sonarShow).catch(function(){ sonarShow(null); });
+}
+setInterval(function(){                       // only while the Sonar tab is open
+  if (document.getElementById('sonar').style.display !== 'none') sonarCheck();
+}, 1500);
 
 function age(a){ return (a < 0) ? '--' : a.toFixed(1) + ' s'; }
 
