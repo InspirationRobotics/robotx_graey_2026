@@ -15,19 +15,21 @@ body.day{--bg:#f3f6fa;--panel:#fff;--text:#132333;--dim:#425369;--grid:#ccd5df;-
 <div id="health" role="status">Waiting for telemetry…</div>
 <div id="mapnote" role="status">Grid works offline. Streets loads OpenStreetMap tiles over the browser's internet connection and shares the viewed map area with that provider. Background imagery is not a navigation chart.</div>
 <main><div id="map"><canvas id="plot" aria-label="Local geographic grid showing global position and raw GPS"></canvas>
+<iframe id="poolmap" title="Pool map using navigation telemetry" src="/planner?navigation=1" hidden style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>
 <div id="streetmap" hidden aria-label="Online OpenStreetMap streets"></div>
-<div id="controls"><button id="gridView" class="active" aria-pressed="true">Grid</button><button id="streetsView" aria-pressed="false">Streets (online)</button><button id="follow" class="active">Follow</button><button id="center">Recenter</button><button id="bow">Bow-up</button><button id="in">+</button><button id="out">−</button><label><input id="gpsLayer" type="checkbox" checked>GPS</label><label><input id="trailLayer" type="checkbox" checked>Trails</label></div>
+<div id="controls"><button id="poolView">Pool</button><button id="gridView" class="active" aria-pressed="true">Grid</button><button id="streetsView" aria-pressed="false">Streets (online)</button><button id="follow" class="active">Follow</button><button id="center">Recenter</button><button id="bow">Bow-up</button><button id="in">+</button><button id="out">−</button><label><input id="gpsLayer" type="checkbox" checked>GPS</label><label><input id="trailLayer" type="checkbox" checked>Trails</label></div>
 <div id="legend">Blue: Cube global · Gold: raw GPS<br>Waiting for a geographic reference</div></div>
 <aside><section><h2>Sub pose · Cube estimate</h2><svg id="attitude" viewBox="0 0 300 80" aria-label="Roll indicator"><path id="horizon" d="M45 40 H255" stroke="currentColor" stroke-width="2"/><path d="M110 40 H135 L150 47 L165 40 H190" fill="none" stroke="var(--blue)" stroke-width="4"/></svg><div id="pose" class="value">—</div><div class="note">Down is relative to Cube origin; it is not verified water-surface depth.</div></section>
 <section><h2>Raw M9N GPS</h2><div id="gps" class="value">—</div></section>
 <section><h2>Cube global position</h2><div id="global" class="value">—</div><div class="note">Reported global position does not prove GPS fusion or estimator validity.</div></section>
 <section><h2>Display coordinates / reference</h2><div id="coords" class="value">—</div><div id="origin" class="note">Origin not established.</div><div class="note">N/E/D in meters; display Down uses local MSL-height approximation. Never use this display reference for vehicle commands.</div></section>
-<section><h2>Sensor health</h2><div id="sensors" class="value">—</div></section></aside></main>
+<section><h2>Navigation supervisor</h2><div id="navSummary" class="value">�</div></section><section><h2>Sensor health</h2><div id="sensors" class="value">—</div></section></aside></main>
 <footer>Offline grid · No vehicle commands · Fixed reference for this GUI process · Unavailable telemetry is shown as —</footer>
 <script>
 'use strict';
 const $=id=>document.getElementById(id), canvas=$('plot'), ctx=canvas.getContext('2d');
 let state=null, arrived=0, follow=true, bow=false, scale=5, center=[0,0], drag=null;
+let pool=false;
 let streets=false, streetMap=null, streetLayers=null, streetLoader=null, tileFailures=0, viewRequest=0;
 let resetPosting=false, seenOriginRevision=null, resetError='';
 
@@ -51,6 +53,7 @@ function loadStreets(){
  return streetLoader;
 }
 function viewMode(on){
+ pool=false;$('poolmap').hidden=true;$('poolView').classList.remove('active');$('legend').hidden=false;
  streets=on;$('streetmap').hidden=!on;canvas.hidden=on;
  $('gridView').classList.toggle('active',!on);$('gridView').setAttribute('aria-pressed',String(!on));
  $('streetsView').classList.toggle('active',on);$('streetsView').setAttribute('aria-pressed',String(on));
@@ -137,11 +140,13 @@ function update(){
  $('global').textContent=(reported?fmt(reported.lat,7)+', '+fmt(reported.lon,7)+'\nMSL altitude '+fmt(reported.alt)+' m':'—')+'\n'+(p?'Healthy position available':'Position untrusted: marker withheld; check EKF and local pose')+'\nAge '+age('global');
  $('coords').textContent='Cube global → display N/E/D\n'+vec(p?.ned)+'\nGPS → display N/E/D\n'+vec(g?.ned);
  $('origin').textContent=state?.origin?'Fixed display origin: '+fmt(state.origin[0],7)+', '+fmt(state.origin[1],7)+'; '+fmt(state.origin[2])+' m MSL. Separate from Cube local origin.':reset?.state==='waiting'?'Waiting for a new valid GPS fix.':reset?.state==='timeout'?'Origin unset. Retry reset when GPS is available.':'Waiting for first valid geographic position.';
+ $('navSummary').textContent=(supervisor?.state??'Unavailable')+'\n'+(supervisor?.mode??'')+'\n'+(supervisor?.reason??'')+'\nGPS: '+(supervisor?.gps_quality_reason??'No assessment');
  const dv=stream('dvl_valid'),vel=stream('dvl_velocity'),cl=stream('clearance'),vn=stream('vn_heading'),ek=stream('ekf');
  $('sensors').textContent='DVL '+(dv?(dv.valid?'valid':'invalid'):'unavailable')+' · '+age('dvl_valid')+'\nDVL velocity ('+(vel?.frame??'sensor frame')+')\n'+vec(dv?.valid?vel?.xyz:null)+'\nBottom clearance '+fmt(dv?.valid?cl?.meters:null)+' m\nVN heading '+fmt(vn?.degrees)+'° · '+age('vn_heading')+'\nEKF flags '+(ek?.flags??'unavailable')+' · '+age('ekf');
  draw();
 }
 function draw(){
+ if(pool)return;
  if(streets){streetDraw();return}
  const rect=canvas.getBoundingClientRect(),dpr=devicePixelRatio||1,W=rect.width,H=rect.height;
  if(canvas.width!==Math.round(W*dpr)||canvas.height!==Math.round(H*dpr)){canvas.width=Math.round(W*dpr);canvas.height=Math.round(H*dpr)}ctx.setTransform(dpr,0,0,dpr,0,0);
@@ -188,6 +193,7 @@ $('theme').onclick=()=>{document.body.classList.toggle('day');draw()};
 $('resetDisplay').onclick=resetDisplay;
 $('export').onclick=()=>{if(!state)return;const url=URL.createObjectURL(new Blob([JSON.stringify({exported_at:new Date().toISOString(),snapshot_age_s:(performance.now()-arrived)/1000,...state},null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='graey-navigation.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
 $('gridView').onclick=()=>{viewRequest++;viewMode(false);$('mapnote').textContent='Grid · offline · Streets requests only the map area you view from OpenStreetMap.';draw()};
+$('poolView').onclick=()=>{viewRequest++;viewMode(false);pool=true;canvas.hidden=true;$('poolmap').hidden=false;$('poolView').classList.add('active');$('gridView').classList.remove('active');$('legend').hidden=true;$('mapnote').textContent='Pool image: supplied 5 m scale. Geographic registration is not established. Uses the same Cube pose and health stream as Grid and Streets.';};
 $('streetsView').onclick=()=>{if(!streets)selectStreets()};
 window.addEventListener('resize',()=>{if(streetMap)streetMap.invalidateSize();draw()});
 </script></body></html>

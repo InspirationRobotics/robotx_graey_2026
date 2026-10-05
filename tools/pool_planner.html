@@ -49,6 +49,7 @@
 <div id="bar2">
   <label>Jetson <input type="text" id="jip" value="192.168.2.2"></label>
   <button id="bTrack">Connect live tracking</button>
+  <button onclick="document.getElementById('bStart').click()">Set display anchor</button>
   <button id="bZero" disabled>Zero at start point</button>
   <button id="bClear" disabled>Clear trail</button>
   <button id="bPool">Pool: lab</button>
@@ -77,6 +78,8 @@
 </div>
 
 <script>
+const navigationOnly = new URLSearchParams(location.search).has('navigation');
+if(navigationOnly){document.getElementById('out').hidden=true;document.getElementById('bar').style.display='none';document.getElementById('bar2').style.paddingTop='60px';}
 const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
 const statusEl = document.getElementById('status'), info = document.getElementById('info');
 const liveEl = document.getElementById('live'), cmdBox = document.getElementById('cmd');
@@ -104,7 +107,7 @@ function setMode(m){
 // tiny canvas inside the GUI iframe, which had not been laid out yet.
 function sizeCanvas(){
   cv.width = Math.max(320, window.innerWidth - 4);
-  cv.height = Math.max(420, window.innerHeight - 320);
+  cv.height = Math.max(150, window.innerHeight - cv.getBoundingClientRect().top - 8);
 }
 function fitView(){
   sizeCanvas();
@@ -113,7 +116,7 @@ function fitView(){
   view = { z: f, ox: (cv.width - img.width*f)/2, oy: (cv.height - img.height*f)/2 };
   draw();
 }
-window.addEventListener('resize', () => { sizeCanvas(); draw(); });   // keep zoom/pan
+window.addEventListener('resize', () => fitView());   // keep zoom/pan
 
 function loadImage(src, label){
   img = new Image();
@@ -388,8 +391,12 @@ document.getElementById('bTrack').onclick = () => {
   const ip = document.getElementById('jip').value.trim();
   polling = setInterval(async () => {
     try {
-      const r = await fetch(`http://${ip}:8081/pos`, { cache: 'no-store' });
-      const j = await r.json();
+      const r = await fetch('/api/navigation', { cache: 'no-store', signal: AbortSignal.timeout(1500) });
+      const nav = await r.json(), streams = nav.streams || {};
+      const local = streams.local, attitude = streams.attitude, global = streams.global;
+      const ned = local?.data?.ned, rpy = attitude?.data?.rpy;
+      const j = {ok: !!(local?.fresh && attitude?.fresh && global?.fresh && global.data.valid && ned && rpy),
+        x:ned?.[0],y:ned?.[1],z:ned?.[2],yaw:(rpy?.[2] ?? 0)*Math.PI/180,age:local?.age,pole_ok:false};
       if (!j.ok || !Number.isFinite(j.age) || j.age < 0 || j.age > 1) {
         lastFix = null; cvPole = null;
         document.getElementById('bZero').disabled = true;
