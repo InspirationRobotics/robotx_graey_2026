@@ -8,6 +8,8 @@ never depends on the Cube or its EKF. It is kept in the MAP's frame:
   y        forward, along the heading the sub had at that moment
   x        to the right of that
   heading  degrees clockwise from +y, so 90 = facing +x
+  roll     degrees, + = right side down       } straight from the VN-100,
+  pitch    degrees, + = nose up               } measured from level
 
 Only heading CHANGES since reset() matter, so a constant heading offset (a
 mis-set yaw_offset_deg, magnetic declination) cancels out.
@@ -35,7 +37,7 @@ STALE_S = 1.0           # no DVL velocity for this long = not valid
 MAX_GAP_S = 0.5         # pose_at() won't guess further than this past the data
 RECORD_S = 0.05         # attitude comes fast; keep at most one pose per this
 
-Pose = namedtuple("Pose", "t x y heading_deg valid")
+Pose = namedtuple("Pose", "t x y heading_deg valid roll_deg pitch_deg", defaults=(0.0, 0.0))
 
 
 def _quat_mul(a, b):
@@ -59,6 +61,15 @@ def heading_of(q):
     """Compass-style heading in degrees, 0-360, from a (w, x, y, z) quaternion."""
     w, x, y, z = q
     return math.degrees(math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))) % 360.0
+
+
+def roll_pitch_of(q):
+    """(roll, pitch) in degrees from a (w, x, y, z) quaternion, the same
+    yaw-pitch-roll order vn100_node builds it in."""
+    w, x, y, z = q
+    roll = math.degrees(math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y)))
+    pitch = math.degrees(math.asin(max(-1.0, min(1.0, 2 * (w * y - z * x)))))
+    return roll, pitch
 
 
 def wrap180(deg):
@@ -137,7 +148,9 @@ class DeadReckoner:
             f = 0.0 if b.t == a.t else (t - a.t) / (b.t - a.t)
             return Pose(t, a.x + f * (b.x - a.x), a.y + f * (b.y - a.y),
                         (a.heading_deg + f * wrap180(b.heading_deg - a.heading_deg)) % 360.0,
-                        a.valid and b.valid)
+                        a.valid and b.valid,
+                        a.roll_deg + f * (b.roll_deg - a.roll_deg),
+                        a.pitch_deg + f * (b.pitch_deg - a.pitch_deg))
 
     def turn_rate(self, t, window=0.3):
         """How fast the sub was turning just before t, degrees per second
@@ -168,7 +181,7 @@ class DeadReckoner:
         x = -n * math.sin(a) + e * math.cos(a)
         fresh = self._last_vel_t is not None and t - self._last_vel_t < STALE_S
         return Pose(t, x, y, (heading_of(self._q) - self._yaw0) % 360.0,
-                    self._dvl_ok and fresh)
+                    self._dvl_ok and fresh, *roll_pitch_of(self._q))
 
     def _record(self, t):
         if self._times and t <= self._times[-1]:

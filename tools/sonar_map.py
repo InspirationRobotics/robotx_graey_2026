@@ -260,6 +260,8 @@ def main():
             image=sweep.image, angles_deg=np.array(sweep.angles_deg),
             ping_times=np.array(sweep.ping_times or [], float),
             metres_per_bin=sweep.metres_per_bin, pose_x_y_heading_valid=poses,
+            pose_roll_pitch=np.array([[q.roll_deg, q.pitch_deg] if q else [np.nan] * 2
+                                      for q in cur["poses"]], float),
             range_m=cur["range"], sector=np.array(cur["sector"]),
             threshold=cmap.threshold, state=run["state"], map_epoch=cur["epoch"],
             used=np.array(cur["used"], bool),

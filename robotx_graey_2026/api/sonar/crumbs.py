@@ -35,6 +35,13 @@ Map frame and pose are pose.py's: x right, y forward at start, heading
 clockwise from +y. The pose is the DVL's; the sonar sits SONAR_FWD_M ahead of
 it and SONAR_RIGHT_M to its right (settings.py), and every crumb is measured
 from the sonar.
+
+TILT. The scan angles are the sub's own (DOWN_GRADIAN is how the sonar is
+bolted on, measured with the sub upright), so each echo is turned into the map
+with the VN-100's roll and pitch as well as the heading. A sub rolled 9 deg
+would otherwise put a wall 2 m away ~0.3 m off in height and a little off in
+distance, and its "straight down" ~0.25 m to one side. "up" is height relative
+to the DVL, measured against gravity.
 """
 import math
 
@@ -50,6 +57,16 @@ FADE_SWEEPS = 2         # newer sweeps that must look at a crumb to wipe it out
 MAX_TURN_DPS = 10.0     # turning faster than this, deg/s: ping ignored
 
 _FIELDS = ("x", "y", "up", "brightness", "range_m", "sweep", "seen", "faded_by")
+
+
+def body_to_map(pose):
+    """3x3 matrix turning a vector in the sub's frame (forward, right, down)
+    into the map's (+y, +x, down), from the pose's heading, pitch and roll."""
+    r, p, y = (math.radians(v) for v in (pose.roll_deg, pose.pitch_deg, pose.heading_deg))
+    cr, sr, cp, sp, cy, sy = math.cos(r), math.sin(r), math.cos(p), math.sin(p), math.cos(y), math.sin(y)
+    return np.array([[cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+                     [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+                     [-sp, cp * sr, cp * cr]])
 
 
 class CrumbMap:
@@ -105,12 +122,17 @@ class CrumbMap:
     def __len__(self):
         return len(self._c["x"])
 
+    def sonar_at(self, pose):
+        """Where the sonar is when the DVL is at pose: (x, y, up), and the
+        body-to-map matrix for that pose."""
+        m = body_to_map(pose)
+        n, e, d = m @ (self.sonar_fwd_m, self.sonar_right_m, 0.0)
+        return pose.x + e, pose.y + n, -d, m
+
     def sonar_xy(self, pose):
         """Where the sonar is on the map when the DVL is at pose."""
-        h = math.radians(pose.heading_deg)
-        f, r = self.sonar_fwd_m, self.sonar_right_m
-        return (pose.x + f * math.sin(h) + r * math.cos(h),
-                pose.y + f * math.cos(h) - r * math.sin(h))
+        x, y, _, _ = self.sonar_at(pose)
+        return x, y
 
     # ---- inside -----------------------------------------------------------
     def _fade(self, a_deg, pose, step_deg, max_range_m):
@@ -120,13 +142,10 @@ class CrumbMap:
         older = (c["sweep"] < self.sweep_id) & (c["faded_by"] < self.sweep_id)
         if not older.any():
             return
-        # every crumb, as seen from where the sonar is now
-        h = math.radians(pose.heading_deg)
-        sx, sy = self.sonar_xy(pose)
-        dx, dy = c["x"] - sx, c["y"] - sy
-        fwd = dx * math.sin(h) + dy * math.cos(h)
-        right = dx * math.cos(h) - dy * math.sin(h)
-        up = c["up"]
+        # every crumb, as seen from where the sonar is now, in the sub's frame
+        sx, sy, sup, m = self.sonar_at(pose)
+        fwd, right, down = m.T @ np.vstack([c["y"] - sy, c["x"] - sx, sup - c["up"]])
+        up = -down
         across = np.hypot(right, up)
         bearing = np.degrees(np.arctan2(up, right))
         half = max(step_deg, S.BEAM_IN_PLANE_DEG) / 2.0
@@ -159,12 +178,13 @@ class CrumbMap:
         peaks = sorted(peaks, key=lambda b: -sm[b])[:self.max_per_ping]
 
         r = np.array(peaks) * metres_per_bin
-        a, h = math.radians(a_deg), math.radians(pose.heading_deg)
-        right, up = r * math.cos(a), r * math.sin(a)
-        sx, sy = self.sonar_xy(pose)
-        new = {"x": sx + right * math.cos(h),
-               "y": sy - right * math.sin(h),
-               "up": up,
+        a = math.radians(a_deg)
+        sx, sy, sup, m = self.sonar_at(pose)
+        # the echo in the sub's frame: in the scan plane, so forward = 0
+        n, e, d = m @ np.vstack([np.zeros_like(r), r * math.cos(a), -r * math.sin(a)])
+        new = {"x": sx + e,
+               "y": sy + n,
+               "up": sup - d,
                "brightness": sm[peaks],
                "range_m": r,
                "sweep": np.full(len(r), self.sweep_id),

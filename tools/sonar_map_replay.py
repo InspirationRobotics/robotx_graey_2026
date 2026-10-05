@@ -134,6 +134,7 @@ def main():
         for n, s in enumerate(sweeps, 1):
             cmap.new_sweep()
             poses, times = s["pose_x_y_heading_valid"], s["ping_times"]
+            tilt = s.get("pose_roll_pitch")     # not in runs saved before Oct 5
             for i, ang in enumerate(s["angles_deg"]):
                 while True:                     # wait here while paused
                     restart = controls(cmap)
@@ -152,7 +153,8 @@ def main():
                 x, y, h, ok = (float(v) for v in poses[i])
                 if math.isnan(x):
                     continue
-                here = Pose(t, x, y, h, bool(ok))
+                roll, pitch = (0.0, 0.0) if tilt is None else (float(v) for v in tilt[i])
+                here = Pose(t, x, y, h, bool(ok), roll, pitch)
                 # turn rate from the saved headings, over the same window as live
                 recent = [r for r in recent if r[0] > t - 1.0] + [(t, h)]
                 before = [r for r in recent[:-1] if r[0] <= t - TURN_WINDOW_S] or recent[:1]
