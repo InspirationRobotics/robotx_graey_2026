@@ -51,6 +51,10 @@ class SitlMission(Node):
         self.stage = 'WAIT_SURFACE_GPS'
         self.stage_started = time.monotonic()
         self.status = {}
+        self.status_received = -math.inf
+        self.last_target = None
+        self.last_target_time = -math.inf
+        self.target_yaw = None
         self.last_status_summary = None
         self.local = None
         self.attitude = None
@@ -80,6 +84,10 @@ class SitlMission(Node):
     def on_status(self, msg):
         try:
             self.status = json.loads(msg.data)
+            if not isinstance(self.status, dict):
+                self.status = {}
+                return
+            self.status_received = time.monotonic()
             source = self.status.get('confirmed_source')
             if source and (not self.source_history or source != self.source_history[-1]):
                 self.source_history.append(source)
@@ -157,8 +165,21 @@ class SitlMission(Node):
         self.get_logger().info(f'SCENARIO RESULT {json.dumps(result, allow_nan=False)}')
 
     def command_target(self, n, e, down):
-        yaw = self.attitude if self.attitude is not None else 0.0
-        self.link.goto_ned(n, e, down, yaw)
+        target = (n, e, down)
+        now = time.monotonic()
+        if self.target_yaw is None:
+            self.target_yaw = self.attitude if self.attitude is not None else 0.0
+        if target != self.last_target or now-self.last_target_time >= 3.:
+            self.link.goto_ned(n, e, down, self.target_yaw)
+            self.last_target, self.last_target_time = target, now
+
+    def fail(self, reason):
+        self.get_logger().error(reason)
+        # This abort is for the isolated simulator, not the live mission policy.
+        self.link.disarm(tries=2, gap=.1)
+        self.link.set_mode(MODE_MANUAL)
+        self.enter('FAULT')
+        self.write_result(False)
 
     def tick(self):
         if not hasattr(self, 'intent_pub'):
@@ -167,12 +188,15 @@ class SitlMission(Node):
         if self.stage in ('COMPLETE', 'FAULT'):
             return
         if time.monotonic()-self.stage_started > self.timeout:
-            self.get_logger().error(f'SCENARIO timeout in {self.stage}; requesting surface and pilot mode')
-            self.link.disarm(tries=2, gap=.1)
-            self.link.set_mode(MODE_MANUAL)
-            self.enter('FAULT')
+            self.fail(f'SCENARIO timeout in {self.stage}; disarming simulator')
             return
         status = self.status
+        if self.stage in ('DIVE_TO_0_5M', 'UNDERWATER_WAYPOINT', 'SURFACING'):
+            if (not 0 <= time.monotonic()-self.status_received < 1.
+                    or status.get('run_id') != self.run_id
+                    or status.get('state') in ('Fault', 'Waiting for healthy navigation')):
+                self.fail('Navigation health lost during simulated mission: '+str(status.get('reason')))
+                return
         if self.stage == 'WAIT_SURFACE_GPS':
             if status.get('state') == 'Surface GPS' and status.get('navigation_ready'):
                 self.enter('WAIT_DIVE_REFERENCE', 'DIVE')

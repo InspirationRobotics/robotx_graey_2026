@@ -19,8 +19,10 @@ def generate_launch_description():
         DeclareLaunchArgument('waypoint_north_m', default_value='1.5'),
         DeclareLaunchArgument('waypoint_east_m', default_value='1.0'),
         Node(package='robotx_graey_2026', executable='nav_ekf_bridge',
+             additional_env={'GRAEY_RUNTIME_SCOPE': 'sitl'},
              name='nav_ekf_bridge', parameters=[{'allow_alignment': True}], output='screen'),
         Node(package='robotx_graey_2026', executable='navigation_supervisor',
+             additional_env={'GRAEY_RUNTIME_SCOPE': 'sitl'},
              name='navigation_supervisor', parameters=[{
                  'active': True, 'vehicle_validation_complete': True,
                  'depth_topic': '/graey/sitl/depth_m',

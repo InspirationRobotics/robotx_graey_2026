@@ -66,7 +66,12 @@ class VN100Node(Node):
             self.buf += self.ser.read(512)
         except OSError as e:
             self.get_logger().warn(f'VN-100 read failed: {e}')
+            try:
+                self.ser.close()
+            except OSError:
+                pass
             self.ser = None
+            self.buf = b''
             return
         while b'\n' in self.buf:
             line, self.buf = self.buf.split(b'\n', 1)
@@ -106,4 +111,4 @@ class VN100Node(Node):
 
 
 def main():
-    run(VN100Node)
+    run(VN100Node, ownership='vn100_node')

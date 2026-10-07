@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -eo pipefail
+# Keep simulated ROS sensor/status topics out of the real vehicle's domain.
+export ROS_DOMAIN_ID=73
+export ROS_LOCALHOST_ONLY=1
+export GRAEY_RUNTIME_SCOPE=sitl
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN_DIR="$ROOT/sitl/run"
@@ -19,7 +23,27 @@ fi
 source /opt/ros/humble/setup.bash
 python3 -c 'import rclpy, pymavlink, serial' >/dev/null
 command -v mavproxy.py >/dev/null
+# Refuse occupied endpoints before launching any simulator or sending commands.
+# Separate scopes alone do not isolate network ports.
+python3 - <<'PY'
+import socket
+held = []
+try:
+    for kind, ports in ((socket.SOCK_STREAM, (5850, 8090)),
+                        (socket.SOCK_DGRAM, range(14551, 14560))):
+        for port in ports:
+            s = socket.socket(socket.AF_INET, kind)
+            held.append(s)
+            s.bind(('127.0.0.1', port))
+finally:
+    for s in held:
+        s.close()
+PY
 cp "$ROOT/sitl/scripts/navigation_source_report.lua" "$RUN_DIR/scripts/"
+# Preserve prior evidence, but never mistake yesterday's result for this run.
+if [[ -f "$LOG_DIR/scenario-result.json" ]]; then
+  mv "$LOG_DIR/scenario-result.json" "$LOG_DIR/scenario-result.previous.$(date +%s%N).json"
+fi
 
 cleanup() {
   for file in ros mavproxy sitl; do
@@ -34,7 +58,7 @@ trap cleanup EXIT INT TERM
 
 (
   cd "$RUN_DIR"
-  "$SITL_BIN" --synthetic-clock --model vectored --sysid 1 --home "${HOME_LAT:-32.9240586},${HOME_LON:--117.0385389},0,0" \
+  "$SITL_BIN" -w --synthetic-clock --model vectored --sysid 1 --home "${HOME_LAT:-32.9240586},${HOME_LON:--117.0385389},0,0" \
     --defaults "$ROOT/params/sitl_graey.parm" --serial0 tcp:5850
 ) >"$LOG_DIR/ardusub.log" 2>&1 &
 echo $! > "$RUN_DIR/sitl.pid"
@@ -87,5 +111,5 @@ wait -n
 child_status=$?
 set -e
 echo "A SITL process exited. Recent logs:" >&2
-tail -80 "$LOG_DIR/ros.log" "$LOG_DIR/mavproxy.log" "$LOG_DIR/ardusub.log" >&2
+tail -n 80 "$LOG_DIR/ros.log" "$LOG_DIR/mavproxy.log" "$LOG_DIR/ardusub.log" >&2
 exit "${child_status:-4}"

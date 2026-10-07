@@ -15,6 +15,7 @@ from std_msgs.msg import Bool, Float32, String
 from geometry_msgs.msg import TwistWithCovarianceStamped
 
 from robotx_graey_2026.api.node_util import run
+from robotx_graey_2026.api.navigation.dvl_report import validate_report
 
 
 class DVLNode(Node):
@@ -76,32 +77,35 @@ class DVLNode(Node):
     def handle_report(self, line):
         try:
             r = json.loads(line)
-        except ValueError:
+            parsed = validate_report(r, self.scale)
+        except (ValueError, TypeError, KeyError, OverflowError):
+            self.pub_valid.publish(Bool(data=False))
+            self.pub_sample.publish(String(data=json.dumps(dict(
+                stamp_ns=self.get_clock().now().nanoseconds,
+                velocity=[0., 0., 0.], valid=False, sensor_time=None))))
             return
-        if 'vx' not in r:
+        if parsed is None:
             return                                  # dead-reckoning report, not velocity
+        velocity, altitude, valid, cov = parsed
 
         msg = TwistWithCovarianceStamped()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = 'dvl'
-        msg.twist.twist.linear.x = float(r['vx']) * self.scale
-        msg.twist.twist.linear.y = float(r['vy']) * self.scale
-        msg.twist.twist.linear.z = float(r['vz']) * self.scale
-        cov = r.get('covariance')
+        msg.twist.twist.linear.x, msg.twist.twist.linear.y, msg.twist.twist.linear.z = velocity
         if cov:
             for i in range(3):
                 for j in range(3):
                     msg.twist.covariance[i * 6 + j] = float(cov[i][j])
         self.pub_vel.publish(msg)
-        self.pub_valid.publish(Bool(data=bool(r.get('velocity_valid', False))))
-        self.pub_alt.publish(Float32(data=float(r.get('altitude', -1.0))))
+        self.pub_valid.publish(Bool(data=valid))
+        self.pub_alt.publish(Float32(data=altitude))
         # Atomic validity + velocity for consumers that integrate measurements.
         self.pub_sample.publish(String(data=json.dumps(dict(
             stamp_ns=msg.header.stamp.sec*1000000000+msg.header.stamp.nanosec,
             velocity=[msg.twist.twist.linear.x, msg.twist.twist.linear.y, msg.twist.twist.linear.z],
-            valid=bool(r.get('velocity_valid', False)),
+            valid=valid,
             sensor_time=r.get('time_of_validity', r.get('time'))))))
 
 
 def main():
-    run(DVLNode)
+    run(DVLNode, ownership='dvl_node')

@@ -27,6 +27,7 @@ from geometry_msgs.msg import TwistWithCovarianceStamped
 from robotx_graey_2026.api.gui.navigation_view import NavigationView
 
 from robotx_graey_2026.api.node_util import run
+from robotx_graey_2026.api.process_ownership import executable_pids
 from robotx_graey_2026.api.pixhawk.mavlink import Link, mavutil
 
 
@@ -39,6 +40,7 @@ GROUPS = {
     'camera': ('Camera tracker', [CAMERA]),
     'planner': ('Planner feed', ['pos_server']),
 }
+CORE_MANAGED_GROUPS = {'nav'}
 READ_ONLY = {
     'mavproxy': ('MAVProxy', ['mavproxy.py']),
 }
@@ -402,10 +404,13 @@ def tail(path, nbytes=60000):
 
 
 def describe(key, label, execs):
-    up = sum(1 for e in execs if pids_for(e))
+    counts = {e: len(executable_pids(e)) for e in execs}
+    up = sum(count > 0 for count in counts.values())
     return {
         'key': key, 'label': label, 'nodes': execs,
         'up': up, 'total': len(execs),
+        'instances': counts, 'duplicate': any(count > 1 for count in counts.values()),
+        'managed': key in CORE_MANAGED_GROUPS,
     }
 
 
@@ -718,6 +723,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path in ('/api/start', '/api/stop'):
             key = query.get('group', [''])[0]
+            if key in CORE_MANAGED_GROUPS:
+                self.reply_json(409, {'ok': False, 'msg':
+                    'Navigation is managed by core launch; GUI start/stop is disabled.'})
+                return
             if key not in GROUPS:
                 self.send_error(400, 'unknown group')
                 return

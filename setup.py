@@ -13,8 +13,10 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         (os.path.join('share', package_name, 'tools'), glob('tools/*.html') + glob('tools/*.png')),
-        (os.path.join('share', package_name, 'params'), glob('params/sitl*.parm')),
-    ],
+        (os.path.join('share', package_name, 'params'), glob('params/*.parm')),
+    ] + [(os.path.join('share', package_name, folder),
+          [os.path.join(folder, name) for name in files])
+         for folder, _, files in os.walk('tools/vendor') if files],
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='Chris',

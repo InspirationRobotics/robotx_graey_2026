@@ -2,11 +2,19 @@
 """Shared entry point. Every node's main() was these same twelve lines."""
 import os
 import sys
+from contextlib import nullcontext
+from robotx_graey_2026.api.process_ownership import ProcessOwnership
 
 import rclpy
 
 
-def run(node_cls):
+def run(node_cls, ownership=None):
+    # Hold ownership across initialization, spinning and hardware cleanup.
+    with ProcessOwnership(ownership) if ownership else nullcontext():
+        _run(node_cls)
+
+
+def _run(node_cls):
     rclpy.init()
     node = node_cls()
     try:

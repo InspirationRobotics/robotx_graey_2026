@@ -24,7 +24,7 @@ class PixhawkLedNode(Node):
     def __init__(self):
         super().__init__('pixhawk_led_node')
         self.declare_parameter('mavlink', 'udpout:127.0.0.1:14552')
-        self.link = Link(self.get_parameter('mavlink').value, 196, self.get_logger())
+        self.link = Link(self.get_parameter('mavlink').value, 193, self.get_logger())
 
         self.armed = False
         self.mode = '?'

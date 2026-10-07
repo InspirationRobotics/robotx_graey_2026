@@ -242,6 +242,7 @@ async function refreshStatus(){
 
 // ---------------- node stacks ----------------
 function stateCell(g){
+  if(g.duplicate) return '<span class="dot down"></span>Duplicate processes — maintenance required';
   var cls = g.up === 0 ? 'down' : (g.up === g.total ? 'up' : 'part');
   var text = g.up === 0 ? 'stopped'
            : (g.up === g.total ? 'running' : 'partial ' + g.up + '/' + g.total);
@@ -249,7 +250,8 @@ function stateCell(g){
 }
 
 function row(g, action){
-  return '<tr><td>' + g.label + '<div class="sub">' + g.nodes.join(', ') + '</div></td>'
+  var details=g.nodes.map(function(n){return n+' ('+(g.instances?.[n]??'?')+')';}).join(', ');
+  return '<tr><td>' + g.label + '<div class="sub">' + details + '</div></td>'
        + '<td>' + stateCell(g) + '</td><td>' + action + '</td></tr>';
 }
 
@@ -257,6 +259,7 @@ async function refreshGroups(){
   try {
     var j = await (await fetch('/api/groups', {cache:'no-store'})).json();
     var live = j.groups.map(function(g){
+      if(g.managed) return row(g, '<span>Managed by core launch</span>');
       var what  = g.up === g.total ? 'stop' : 'start';
       var label = g.up === g.total ? 'Stop' : 'Start';
       return row(g, '<button class="act" onclick="act(\'' + what + '\',\'' + g.key

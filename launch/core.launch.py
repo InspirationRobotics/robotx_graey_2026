@@ -7,7 +7,9 @@ so this normally starts itself on boot; run it by hand only after
 
     ros2 launch robotx_graey_2026 core.launch.py
 
-Every node respawns. ros2 launch does NOT restart a dead node on its own, and
+Sensor/control nodes respawn; the stateful navigation bridge deliberately does
+not. Its position starts at zero, so recovery requires frame revalidation.
+ros2 launch does NOT restart a dead node on its own, and
 graey-ros.service only restarts when the launch PROCESS exits - so before this, one
 node crashing left a permanent hole in the stack while everything else kept running.
 That is how pixhawk_led_node stayed down after QGC had already recovered on
@@ -29,7 +31,7 @@ def generate_launch_description():
         Node(package=PKG, executable='kill_switch', name='kill_switch', output='screen', **RESPAWN),
         Node(package=PKG, executable='dvl_node', name='dvl_node', output='screen', **RESPAWN),
         Node(package=PKG, executable='vn100_node', name='vn100_node', output='screen', **RESPAWN),
-        Node(package=PKG, executable='nav_ekf_bridge', name='nav_ekf_bridge', output='screen', **RESPAWN),
+        Node(package=PKG, executable='nav_ekf_bridge', name='nav_ekf_bridge', output='screen', respawn=False),
         Node(package=PKG, executable='navigation_supervisor', name='navigation_supervisor',
              parameters=[{'active': False}], output='screen', **RESPAWN),
         Node(package=PKG, executable='gui_node', name='gui_node', output='screen', **RESPAWN),

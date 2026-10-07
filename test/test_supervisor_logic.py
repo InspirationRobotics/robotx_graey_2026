@@ -34,6 +34,13 @@ class Rig:
 
 
 class SupervisorTests(unittest.TestCase):
+    def test_nonfinite_depth_cannot_grant_navigation_after_surface_qualification(self):
+        r = Rig().run(5)
+        r.o.depth = float('nan'); r.run(.1)
+        self.assertFalse(r.s.allowed)
+        self.assertEqual(r.s.snapshot(r.o)['surface_state'], 'Unknown')
+        self.assertEqual(r.s.snapshot(r.o)['requested_source'], 'Unknown')
+
     def test_surface_dive_capture_align_switch_sequence(self):
         r = Rig().run(5)
         self.assertTrue(r.s.allowed)

@@ -108,9 +108,9 @@ class Supervisor:
         if self.fault:
             self.state, self.reason = 'Fault', self.fault
             return actions
-        if not o.healthy or not o.depth_valid or not o.intent_fresh:
+        if not o.healthy or not o.depth_valid or not math.isfinite(o.depth) or not o.intent_fresh:
             self.state = 'Waiting for healthy navigation'
-            self.reason = o.reason if not o.healthy else ('Depth reference unavailable' if not o.depth_valid else 'Mission intent unavailable or stale')
+            self.reason = o.reason if not o.healthy else ('Depth reference unavailable' if not o.depth_valid or not math.isfinite(o.depth) else 'Mission intent unavailable or stale')
             return actions
         if self.pending:
             self.state = 'Switching to ' + LABELS[self.pending[0]].lower()
@@ -190,11 +190,13 @@ class Supervisor:
         return actions
 
     def snapshot(self, o):
+        depth_known = o.depth_valid and math.isfinite(o.depth)
+        surface = self.surface if depth_known else None
         return dict(state=self.state, reason=self.reason,
                     mode='Active' if self.active else 'Observation',
-                    requested_source=LABELS.get(self.desired, 'Unknown'),
+                    requested_source=LABELS.get(self.desired, 'Unknown') if depth_known else 'Unknown',
                     confirmed_source=LABELS.get(o.source, 'Unknown'),
-                    navigation_ready=self.allowed, surfaced=self.surface,
-                    surface_state=('Surfaced' if self.surface is True else
-                                   'Submerged' if self.surface is False else 'Unknown'),
+                    navigation_ready=self.allowed, surfaced=surface,
+                    surface_state=('Surfaced' if surface is True else
+                                   'Submerged' if surface is False else 'Unknown'),
                     run_id=self.run_id)

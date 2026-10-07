@@ -16,6 +16,7 @@ from robotx_graey_2026.api.pixhawk.mavlink import Link
 from robotx_graey_2026.api.navigation.mission_reference import MissionReference
 from robotx_graey_2026.api.navigation.gps_quality import GPSQuality
 from robotx_graey_2026.api.navigation.supervisor_logic import Observation, Supervisor
+from robotx_graey_2026.api.navigation.bridge_identity import BridgeIdentity
 
 PROFILE = {'EK3_SRC1_POSXY': 6, 'EK3_SRC1_VELXY': 6, 'EK3_SRC1_POSZ': 1,
            'EK3_SRC1_VELZ': 0, 'EK3_SRC1_YAW': 6, 'EK3_SRC2_POSXY': 3,
@@ -49,6 +50,7 @@ class NavigationSupervisor(Node):
         self.intent_seq = -1
         self.reference = None
         self.bridge_instance = None
+        self.bridge_identity = BridgeIdentity()
         try:
             self.reference = MissionReference.load_history(Path(self.settings['reference_file']).expanduser())
         except (OSError, ValueError, TypeError, KeyError):
@@ -142,8 +144,11 @@ class NavigationSupervisor(Node):
     def bridge_status(self, msg):
         try:
             d = json.loads(msg.data)
-            if self.bridge_instance is not None and d.get('instance') != self.bridge_instance:
-                self.logic.fault = 'Navigation bridge restarted; external frame must be revalidated'
+            if not isinstance(d, dict) or not isinstance(d.get('instance'), str) or not d['instance']:
+                return
+            reason = self.bridge_identity.observe(d.get('instance'), time.monotonic())
+            if reason:
+                self.logic.fault = reason
             self.bridge_instance = d.get('instance')
             self.put('bridge', d)
             if d.get('aligned'):
@@ -284,4 +289,4 @@ class NavigationSupervisor(Node):
 
 
 def main():
-    run(NavigationSupervisor)
+    run(NavigationSupervisor, ownership='navigation_supervisor')

@@ -52,8 +52,11 @@ class SitlSensorSim(Node):
             self.last_request = now
         self.link.drain(self.consume)
         attitude, local = self.latest.get('attitude'), self.latest.get('local')
-        if not attitude or now-self.last_publish < .05:
+        if (not attitude or not 0 <= now-attitude['received'] < .5
+                or now-self.last_publish < .05):
             return
+        if local and not 0 <= now-local['received'] < .5:
+            local = None
         self.last_publish = now
         q = attitude['q']
         world_velocity = self.truth_velocity
@@ -89,7 +92,7 @@ class SitlSensorSim(Node):
         if kind == 'SIMSTATE':
             q = self.euler_to_quat(msg.roll, msg.pitch, msg.yaw)
             if all(math.isfinite(x) for x in q):
-                self.latest['attitude'] = dict(q=q, rates=(0.0, 0.0, 0.0))
+                self.latest['attitude'] = dict(q=q, rates=(0.0, 0.0, 0.0), received=time.monotonic())
                 now = time.monotonic()
                 lat, lon = msg.lat/1e7, msg.lng/1e7
                 previous = self.truth_previous
@@ -103,7 +106,7 @@ class SitlSensorSim(Node):
         elif kind == 'LOCAL_POSITION_NED':
             values = (msg.x, msg.y, msg.z, msg.vx, msg.vy, msg.vz)
             if all(math.isfinite(x) for x in values):
-                self.latest['local'] = dict(position=values[:3], velocity=values[3:])
+                self.latest['local'] = dict(position=values[:3], velocity=values[3:], received=time.monotonic())
 
     @staticmethod
     def euler_to_quat(roll, pitch, yaw):

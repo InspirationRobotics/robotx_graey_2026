@@ -127,7 +127,8 @@ class NavEKFBridge(Node):
 
     def fresh(self):
         now = time.monotonic()
-        return self.have_att and self.valid and now-self.imu_received < .5 and now-self.dvl_received < .5
+        return (self.have_att and self.valid and 0 <= now-self.imu_received < .5
+                and 0 <= now-self.dvl_received < .5)
 
     def publish_status(self):
         self.status_pub.publish(String(data=json.dumps(dict(instance=self.instance,
@@ -161,4 +162,4 @@ class NavEKFBridge(Node):
 
 
 def main():
-    run(NavEKFBridge)
+    run(NavEKFBridge, ownership='nav_ekf_bridge')

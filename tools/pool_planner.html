@@ -57,7 +57,7 @@
   <span class="hint">scroll = zoom &nbsp;Â·&nbsp; drag = pan &nbsp;Â·&nbsp; click = place (in active mode)</span>
 </div>
 <div id="status">Load the pool image to begin.</div>
-<div id="live">Connecting to vehicle position…</div>
+<div id="live">Connecting to vehicle positionâ€¦</div>
 <div style="padding:10px 14px;background:#263244">To place Graey: select <b>2. Start + heading</b>, click its actual location on the image, then click in its forward direction. When live position is available, click <b>Zero at start point</b>. The image alone cannot locate the vehicle. Mission controls below are for the prequalification orbit mission.</div>
 <canvas id="cv"></canvas>
 <div id="out">
@@ -451,8 +451,8 @@ function draw(){
   if (!img) return;
   ctx.drawImage(img, view.ox, view.oy, img.width*view.z, img.height*view.z);
   if (!lastFix || !origin) {
-    const message = !lastFix ? 'GRAEY POSITION UNAVAILABLE — waiting for fresh local position'
-      : 'GRAEY NOT ANCHORED — select Start + heading, then Zero at start point';
+    const message = !lastFix ? 'GRAEY POSITION UNAVAILABLE â€” waiting for fresh local position'
+      : 'GRAEY NOT ANCHORED â€” select Start + heading, then Zero at start point';
     ctx.fillStyle = '#14171cee'; ctx.fillRect(12, 12, Math.min(cv.width-24, 710), 42);
     ctx.fillStyle = '#ffd479'; ctx.font = '14px Segoe UI';
     ctx.fillText(message, 22, 39, Math.max(100, cv.width-44));
