@@ -327,6 +327,7 @@ border-radius:4px;color:#fff;display:none}
 <button id="set">set</button>
 <span>map area <input id="ar" type="number" step="1" min="1" max="200" value="10"> m</span>
 <label style="white-space:nowrap"><input id="fo" type="checkbox" checked style="width:auto"> follow sub</label>
+<label style="white-space:nowrap"><input id="ol" type="checkbox" checked style="width:auto"> outlines</label>
 <span id="msg" style="color:#8ea"></span></div>
 <div class="bar" style="padding-top:0"><span id="st" style="color:#bbb"></span></div>
 <div id="wrap"><canvas id="cv"></canvas><div id="banner"></div></div>
@@ -358,7 +359,7 @@ $('set').onclick=apply;
 $('go').onclick=function(){var c={waiting:'start',running:'pause',paused:'resume'}[D&&D.state];
 if(c)post('/mapcmd',c);};
 $('rs').onclick=function(){post('/mapcmd','reset');};
-$('ar').addEventListener('input',draw);$('fo').addEventListener('change',draw);
+$('ar').addEventListener('input',draw);$('fo').addEventListener('change',draw);$('ol').addEventListener('change',draw);
 window.addEventListener('resize',draw);
 function fill(i,v){var e=$(i);
 if(!dirty[i]&&document.activeElement!==e&&v!==null&&v!==undefined)e.value=v;}
@@ -387,6 +388,14 @@ var th=D.threshold||100,R=Math.max(2.5,Math.min(5,px*0.05));
 D.crumbs.forEach(function(q){if((q[3]>0?1:0)!==faded)return;
 ctx.fillStyle=hue(q[2],th);ctx.beginPath();ctx.arc(X(q[0]),Y(q[1]),R,0,7);ctx.fill();});});
 ctx.globalAlpha=1;
+if($('ol').checked&&D.outlines){ctx.font='12px sans-serif';
+D.outlines.forEach(function(g,i){var best=i===0&&g.score>=0.5;
+ctx.strokeStyle=best?'rgba(255,220,80,0.9)':'rgba(255,255,255,0.45)';ctx.lineWidth=1;ctx.beginPath();
+g.lines.forEach(function(l){ctx.moveTo(X(l[0]),Y(l[1]));ctx.lineTo(X(l[2]),Y(l[3]));});ctx.stroke();
+if(best){ctx.strokeStyle='rgba(255,220,80,0.5)';ctx.lineWidth=4;ctx.beginPath();
+g.spine.forEach(function(p,k){if(k)ctx.lineTo(X(p[0]),Y(p[1]));else ctx.moveTo(X(p[0]),Y(p[1]));});ctx.stroke();}
+if(g.score>=0.2){var m=g.spine[Math.floor(g.spine.length/2)];ctx.fillStyle=best?'#ffdc50':'#ddd';
+ctx.fillText('pipe '+Math.round(g.score*100)+'%',X(m[0])+8,Y(m[1])-8);}});}
 if(D.track.length>1){ctx.strokeStyle='#3cb4e6';ctx.lineWidth=2;ctx.beginPath();
 D.track.forEach(function(p,i){if(i)ctx.lineTo(X(p[0]),Y(p[1]));else ctx.moveTo(X(p[0]),Y(p[1]));});
 ctx.stroke();}

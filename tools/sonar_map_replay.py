@@ -29,6 +29,7 @@ import time
 import numpy as np
 
 from robotx_graey_2026.api.sonar import webview
+from robotx_graey_2026.api.sonar.outlines import Outliner
 from robotx_graey_2026.api.sonar.crumbs import MAX_TURN_DPS, CrumbMap
 from robotx_graey_2026.api.sonar.pose import Pose, wrap180
 from sonar_map import SNAPSHOT_S, TRACK_STEP_M, reach, sector_arc
@@ -105,6 +106,8 @@ def main():
                 return True
         return webview.threshold() != cmap.threshold
 
+    outliner = Outliner()
+
     def snapshot(cmap, track, here, n, s):
         c = cmap.crumbs()
         webview.set_map({
@@ -118,6 +121,7 @@ def main():
                                        np.round(c["brightness"]), c["seen"]]).tolist(),
             "sweep": f"{n}/{len(sweeps)}" + (" (end)" if play["done"] else ""),
             "count": len(c["x"]), "range": float(s["range_m"]),
+            "outlines": outliner.update(c, time.monotonic(), force=play["done"]),
             "sector": [float(v) for v in s["sector"]], "threshold": cmap.threshold,
             "turning": cmap.turning, "skippedTurning": cmap.skipped_turning,
             "slice": reach(*sector_arc(*s["sector"]), float(s["range_m"]))})
@@ -129,6 +133,7 @@ def main():
                         sonar_fwd_m=float(first["sonar_fwd_m"]),
                         sonar_right_m=float(first["sonar_right_m"]))
         track, recent, here = [], [], None
+        outliner.clear()
         last_snap, prev_t, n, s = 0.0, None, 0, first
         restart = False
         for n, s in enumerate(sweeps, 1):

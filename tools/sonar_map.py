@@ -35,6 +35,7 @@ import numpy as np
 
 from robotx_graey_2026.api.sonar import settings as S
 from robotx_graey_2026.api.sonar import webview
+from robotx_graey_2026.api.sonar.outlines import Outliner
 from robotx_graey_2026.api.sonar.crumbs import MAX_TURN_DPS, THRESHOLD, CrumbMap
 from robotx_graey_2026.api.sonar.detect import perceive
 from robotx_graey_2026.api.sonar.pose import RELAY_PORT, UdpPose
@@ -156,6 +157,7 @@ def main():
 
     cmap = CrumbMap(threshold=args.threshold, max_turn_dps=args.max_turn)
     radar = Radar()
+    outliner = Outliner()
     track = []
     run = {"state": "waiting", "epoch": 0, "sweeps": 0}
     cur = {}                    # the sweep in progress
@@ -164,6 +166,7 @@ def main():
     def new_origin():
         pose.reset()
         cmap.clear()
+        outliner.clear()
         track.clear()
         run["epoch"] += 1
 
@@ -221,6 +224,7 @@ def main():
             "sonar": None if now is None else [round(v, 3) for v in cmap.sonar_xy(now)],
             "track": [[round(x, 2), round(y, 2)] for x, y in track[-5000:]],
             "crumbs": crumbs, "sweep": run["sweeps"], "count": len(crumbs),
+            "outlines": outliner.update(c, time.monotonic()),
             "range": cur["range"], "sector": list(cur["sector"]),
             "threshold": cmap.threshold,
             "turning": cmap.turning and run["state"] == "running",
