@@ -5,10 +5,9 @@ Runs Graey's flight controller and Jetson code on a laptop, with no hardware:
 | Piece | In the sim |
 |---|---|
 | Cube Orange | ArduSub **4.5.7** SITL (same version), `vectored_6dof`, Graey's real `params/graey_4.5.7_autonomous_validated.parm` |
-| MAVProxy | Graey's port layout (14551-14556), plus 14557/14558 for sim helpers and QGC on UDP 14550 |
+| MAVProxy | Graey's port layout (14551-14556), plus 14557-14559 for sim helpers and QGC on UDP 14550 |
 | VN-100 + DVL | `sim/sim_sensors.py` publishes the same ROS topics from the simulator's true motion |
 | `nav_ekf_bridge`, `gui_node`, `pos_server` | **Graey's real code, unchanged** |
-
 | Ping360 | `sim/sim_sonar.py`: real beam shape (2 deg x 25 deg), pinged from the sonar's true position and tilt |
 | Sonar map | **`tools/sonar_map.py` and `tools/pose_relay.py`, unchanged** (`sim/sim_sonar_map.py` swaps in the simulated Ping360) |
 
