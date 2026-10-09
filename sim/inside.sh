@@ -4,6 +4,7 @@
 #   MAVProxy with Graey's port layout               (start_mavproxy.sh's job)
 #   sim_sensors.py                                  (stands in for vn100_node + dvl_node)
 #   nav_ekf_bridge, gui_node, pos_server            (Graey's real Jetson code, unchanged)
+#   pose_relay + sonar_map on a simulated Ping360    (sim/sim_sonar.py, a simulated pipeline)
 # Logs go to /tmp/sim/*.log inside the container.
 set -e
 REPO=/root/robotx_ws/src/robotx_graey_2026
@@ -26,7 +27,7 @@ sleep 3
 mavproxy.py --master=tcp:127.0.0.1:5760 --daemon --non-interactive --state-basedir=$LOGS \
     --out=udpin:0.0.0.0:14551 --out=udpin:0.0.0.0:14552 --out=udpin:0.0.0.0:14553 \
     --out=udpin:0.0.0.0:14554 --out=udpin:0.0.0.0:14555 --out=udpin:0.0.0.0:14556 \
-    --out=udpin:0.0.0.0:14557 --out=udpin:0.0.0.0:14558 \
+    --out=udpin:0.0.0.0:14557 --out=udpin:0.0.0.0:14558 --out=udpin:0.0.0.0:14559 \
     --out=udp:host.docker.internal:14550 \
     > $LOGS/mavproxy.log 2>&1 &
 sleep 3
@@ -37,6 +38,12 @@ node robotx_graey_2026.api.navigation.nav_ekf_bridge nav_ekf_bridge
 node robotx_graey_2026.api.gui.gui_node gui_node
 node robotx_graey_2026.api.navigation.pos_server pos_server
 python3 $REPO/sim/set_origin.py --lat "$HOME_LAT" --lon "$HOME_LON" > $LOGS/set_origin.log 2>&1 &
+
+# The sonar side, as on Graey: the relay passes VN-100 + DVL out of ROS (it quits
+# when its input closes, so give it one that stays open), and the map tool runs
+# on the simulated Ping360 and the simulated pipeline.
+tail -f /dev/null | python3 $REPO/tools/pose_relay.py > $LOGS/pose_relay.log 2>&1 &
+python3 $REPO/sim/sim_sonar_map.py > $LOGS/sonar_map.log 2>&1 &
 
 echo "graey-sitl up. QGroundControl: UDP 14550.  GUI: http://localhost:8090"
 wait

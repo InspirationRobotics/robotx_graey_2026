@@ -4,7 +4,9 @@
 #   sim/run.sh                 the lab pool, 2 m deep
 #   WATER_DEPTH=12 sim/run.sh  harbor depth
 #
-# Then: QGroundControl connects by itself (UDP 14550); GUI at http://localhost:8090.
+# Then: QGroundControl connects by itself (UDP 14550); GUI at http://localhost:8090;
+# sonar map (simulated Ping360 and pipeline) at http://localhost:8095/map.
+# PIPE_N / PIPE_E / PIPE_HDG move the simulated pipeline (metres from home, degrees).
 # Stop with:  docker rm -f graey-sitl
 set -e
 cd "$(dirname "$0")/.."
@@ -16,5 +18,6 @@ docker run -d --name graey-sitl \
     -p 8090:8090 -p 8081:8081 -p 8095:8095 -p 14553:14553/udp \
     -e HOME_LAT="$HOME_LAT" -e HOME_LON="$HOME_LON" -e HOME_HDG="${HOME_HDG:-0}" \
     -e WATER_DEPTH="${WATER_DEPTH:-2}" -e DVL_NOISE="${DVL_NOISE:-0}" \
+    -e PIPE_N="${PIPE_N:-3}" -e PIPE_E="${PIPE_E:-2}" -e PIPE_HDG="${PIPE_HDG:-30}" \
     graey-sitl bash sim/inside.sh >/dev/null
 echo "graey-sitl starting. Logs: docker exec graey-sitl tail -f /tmp/sim/sitl.log"
