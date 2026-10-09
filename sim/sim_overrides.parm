@@ -1,0 +1,10 @@
+# Changes to Graey's real parameters that only the simulator needs, applied on
+# top of params/graey_4.5.7_autonomous_validated.parm. Keep this list short and
+# say WHY for each: everything not here is Graey's actual configuration.
+
+# Graey's real thrusters 3, 4 and 6 have reversed props/wiring and the Cube is
+# told so. The simulator's thrusters are all mounted the standard way, so on the
+# real values those three push backwards and the sub spins in place.
+MOT_3_DIRECTION 1
+MOT_4_DIRECTION 1
+MOT_6_DIRECTION 1
