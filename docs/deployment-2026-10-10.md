@@ -87,3 +87,20 @@ stale, configuration unverified; heading references not validated. This session
 baseline is lost when the core launch is recreated/rebooted; do not reuse as an
 automatic zero at unknown depth. Pool water density setting remains1025kg/m3 and
 should be reviewed for quantitative depth commissioning. No persistent code change.
+
+## Actual Cube source readback — 2026-10-10, after surface calibration
+
+Read through diagnostic endpoint14554/component199; no source/parameter writes.
+All requested parameters returned. EKF3 enabled, AHRS_EKF_TYPE=3.
+Underwater set1 matches the proposed profile. Surface set2 has POSXY=0,
+VELXY=0, YAW=0 (expected3,6,6 respectively). EK3_SRC_OPTIONS=1 (expected0).
+SCR_ENABLE=0; zero NAV_SRC reports received during15seconds. Supervisor therefore
+cannot verify actual selected source. Vehicle was armed MANUAL/TETHER.
+Evidence saved on Jetson: /root/robotx_ws/logs/source-readback-20261010.json.
+
+Prepared changes, NOT applied: EK3_SRC2_POSXY=3, EK3_SRC2_VELXY=6,
+EK3_SRC2_YAW=6, EK3_SRC_OPTIONS=0; enable scripting and install the existing
+telemetry-only deploy/scripts/navigation_source_report.lua into Cube APM/scripts.
+Requires disarmed setup/reboot and readback, then actual NAV_SRC confirmation.
+Do not claim heading/frame commissioning from merely matching instantaneous yaw.
+Surface classification is now calibrated but is separate from EKF source selection.
