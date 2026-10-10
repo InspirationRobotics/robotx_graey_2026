@@ -258,6 +258,15 @@ color:#eee;border:1px solid #444;border-radius:3px;padding:5px;font:13px ui-mono
 <button id="rgo" style="background:#3a3632;color:#eee;border:1px solid #555;border-radius:3px;
 padding:5px 10px;font:13px ui-monospace,Menlo,monospace;cursor:pointer">set</button>
 <span id="rgn" style="color:#8ea"></span></span>
+<span id="sow" style="display:none;white-space:nowrap"
+title="counterclockwise from the first to the second: 0 right, 90 up, 180 left, 270 down">sector
+<input id="s0" type="number" step="1" min="0" max="359" style="width:52px;background:#0e0c0b;
+color:#eee;border:1px solid #444;border-radius:3px;padding:5px;font:13px ui-monospace,Menlo,monospace"> to
+<input id="s1" type="number" step="1" min="0" max="359" style="width:52px;background:#0e0c0b;
+color:#eee;border:1px solid #444;border-radius:3px;padding:5px;font:13px ui-monospace,Menlo,monospace">
+<button id="sgo" style="background:#3a3632;color:#eee;border:1px solid #555;border-radius:3px;
+padding:5px 10px;font:13px ui-monospace,Menlo,monospace;cursor:pointer">set</button>
+<span id="sgn" style="color:#8ea"></span></span>
 <span id="note" style="color:#8ea;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 max-width:45vw"></span></div>
 <img src="/stream" style="flex:1;min-height:0;width:100%;object-fit:contain">
@@ -283,6 +292,12 @@ function sendRange(){if(rg.disabled)return;fetch('/range',{method:'POST',body:rg
 .then(function(r){return r.text();}).then(function(x){rgn.textContent=x;});}
 rgo.onclick=sendRange;
 rg.addEventListener('keydown',function(e){if(e.key==='Enter')sendRange();});
+var sow=document.getElementById('sow'),s0=document.getElementById('s0'),s1=document.getElementById('s1'),
+sgo=document.getElementById('sgo'),sgn=document.getElementById('sgn');
+function sendSector(){if(s0.disabled)return;fetch('/sector',{method:'POST',body:s0.value+' '+s1.value})
+.then(function(r){return r.text();}).then(function(x){sgn.textContent=x;});}
+sgo.onclick=sendSector;
+[s0,s1].forEach(function(e){e.addEventListener('keydown',function(ev){if(ev.key==='Enter')sendSector();});});
 var pg=document.getElementById('pg'),blobs=document.getElementById('blobs'),
 page=0,sel=[],rows=[],per=10,drawn='';
 function push(){fetch('/view',{method:'POST',
@@ -322,6 +337,10 @@ rgw.style.display=(s.range===null||s.range===undefined)?'none':'inline';
 if(s.range!==null&&document.activeElement!==rg)rg.value=s.range;
 rg.min=s.rangeMin;rg.max=s.rangeMax;
 document.getElementById('tabs').style.display=s.map?'inline':'none';
+sow.style.display=(s.map&&s.sector)?'inline':'none';
+if(s.sector&&document.activeElement!==s0&&document.activeElement!==s1){
+s0.value=Math.round(s.sector[0]);s1.value=Math.round(s.sector[1]);}
+s0.disabled=s1.disabled=sgo.disabled=!s.sectorEditable;
 rg.disabled=rgo.disabled=!s.rangeEditable;
 rows=s.rows||[];per=s.perPage||10;paint();})
 .catch(function(){}).then(function(){setTimeout(poll,1000);});})();
@@ -668,6 +687,8 @@ class _Handler(BaseHTTPRequestHandler):
                 state = {'target': _target, 'note': _note, 'editable': _editable,
                          'range': _range, 'rangeEditable': _range_editable,
                          'rangeMin': _range_lo, 'rangeMax': _range_hi, 'map': _map_on,
+                         'sector': list(_sector) if _sector else None,
+                         'sectorEditable': _sector_editable,
                          'rows': _rows, 'perPage': _per_page,
                          'page': _view["page"], 'selected': _view["selected"]}
             self._send(json.dumps(state).encode(), 'application/json')
