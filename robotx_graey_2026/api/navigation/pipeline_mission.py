@@ -285,9 +285,12 @@ class PipelineMission(MissionBase):
         return float(-np.max(c[near, 4]))
 
     def locate(self, m):
-        """Far scan: the biggest bunch of crumbs is where the pipe is."""
-        c = np.array(m['crumbs']).reshape(-1, 5)
-        groups = outlines.find(c[:, 0], c[:, 1], c[:, 4], link_m=self.far_link, min_crumbs=4)
+        """Far scan: the biggest bunch of crumbs is where the pipe is. One-look
+        crumbs: from this far the pipe is heard by too few sweeps for looks to
+        agree (3 agreed crumbs in the sim), and a rough "where" is all this needs."""
+        one = m.get('oneLook') or []
+        c = np.array(one if one else m['crumbs'])[:, :2].reshape(-1, 2)
+        groups = outlines.find(c[:, 0], c[:, 1], None, link_m=self.far_link, min_crumbs=4)
         if not groups:
             self.get_logger().warn(f'far scan: {len(c)} crumbs, no bunch of 4 - surfacing')
             self.enter(S.SURFACE)
