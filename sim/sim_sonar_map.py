@@ -43,7 +43,8 @@ def with_truth(snapshot):
             dn, de = nn - n0, ee - e0
             return [round(-dn * s_ + de * c, 3), round(dn * c + de * s_, 3)]
         snapshot["truth"] = {"pipe": [to_map(p[0], p[1]) for p in made[0].centre_line],
-                             "boxes": [to_map(b[0], b[1]) for b in made[0].truth_boxes]}
+                             "boxes": [to_map(b[0], b[1]) for b in made[0].truth_boxes],
+                             "walls": [to_map(*w) for w in made[0].truth_walls or []]}
     set_map(snapshot)
 
 

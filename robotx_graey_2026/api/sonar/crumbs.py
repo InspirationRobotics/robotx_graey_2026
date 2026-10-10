@@ -155,7 +155,8 @@ class CrumbMap:
             arrays = one
             bright = one["brightness"]
         else:
-            arrays = {"x": g["x"], "y": g["y"], "up": g["up"], "seen": np.zeros(len(g["x"]))}
+            arrays = {"x": g["x"], "y": g["y"], "up": g["up"], "seen": np.zeros(len(g["x"])),
+                      "raw": (one["x"], one["y"], one["up"])}
             # more looks agreeing = stronger colour, on the same scale as echoes
             bright = self.threshold + (255 - self.threshold) * np.clip((g["looks"] - 2) / 8.0, 0, 1)
         crumbs = np.column_stack([np.round(arrays["x"], 2), np.round(arrays["y"], 2), np.round(bright),

@@ -265,7 +265,7 @@ def main():
             "turning": cmap.turning and run["state"] == "running",
             "skippedTurning": cmap.skipped_turning,
             "slice": reach(*sector_arc(*cur["sector"]), cur["range"]),
-            "recording": rec.status()})
+            "recording": rec.status(), "missionPoint": webview.mission_point()})
 
     def show(sweep, force=False):
         t = time.monotonic()

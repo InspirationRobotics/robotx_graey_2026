@@ -64,12 +64,14 @@ def _line(a, b, step=0.02):
     return a + (b - a) * np.linspace(0, 1, n)[:, None]
 
 
-def _geometry(depth, n0, e0, hdg_deg):
+def _geometry(depth, n0, e0, hdg_deg, height=None):
     """The pipeline's shape, in NED: elbow corners, tees, and the light boxes'
     centres and along-pipe directions."""
     # in the pipeline's own frame: x along the tee sections, y right, z UP from the floor
     # pipe centre height: base cross on the floor, its socket, the leg, reducer, stub, tee
     h = LEG_R + BASE_TEE_M + LEG_1500 + REDUCER_M + STUB_200 + TEE_M
+    if height is not None:                        # hung some other way (the pool: ropes)
+        h = height
     end_run = PIPE_450 + 2 * TEE_M + PIPE_450     # open end -> tee -> into the elbow
     tee_section = ELBOW_M + end_run + ELBOW_M     # elbow corner to elbow corner
     connector = ELBOW_M + PIPE_1000 + ELBOW_M
@@ -112,10 +114,10 @@ def _geometry(depth, n0, e0, hdg_deg):
             "boxes": [(to_ned(c)[0], dir_ned(u)) for c, u in boxes], "to_ned": to_ned}
 
 
-def build_world(depth, n0, e0, hdg_deg):
+def build_world(depth, n0, e0, hdg_deg, height=None):
     """Points (N, E, D) for each kind of object, plus the pipe's centre line
     (its open ends and elbow corners). For checking crumbs against."""
-    g = _geometry(depth, n0, e0, hdg_deg)
+    g = _geometry(depth, n0, e0, hdg_deg, height)
     p, tees = g["corners"], g["tees"]
     floor_d = depth - LEG_R
     pipe = np.vstack([_line(a, b) for a, b in zip(p, p[1:])])
@@ -142,20 +144,23 @@ def _base_pipes(tees, floor_d):
     return out
 
 
-def pipeline_world(depth, n0, e0, hdg_deg):
+def pipeline_world(depth, n0, e0, hdg_deg, height=None, legs=True, world=None):
     """The same pipeline as solid shapes for sonar_physics, on a mud seafloor
-    under a flat water surface."""
-    g = _geometry(depth, n0, e0, hdg_deg)
-    w = World()
-    w.plane((0, 0, depth), (0, 0, 1), "mud")
-    w.plane((0, 0, 0), (0, 0, 1), "surface")
+    under a flat water surface - or added to `world` (the pool)."""
+    g = _geometry(depth, n0, e0, hdg_deg, height)
+    w = world
+    if w is None:
+        w = World()
+        w.plane((0, 0, depth), (0, 0, 1), "mud")
+        w.plane((0, 0, 0), (0, 0, 1), "surface")
     p, tees, floor_d = g["corners"], g["tees"], depth - LEG_R
     for a, b in zip(p, p[1:]):
         w.capsule(a, b, PIPE_R, "pvc")
-    for t in tees:
-        w.capsule(t, (t[0], t[1], floor_d), LEG_R, "pvc")
-    for a, b in _base_pipes(tees, floor_d):
-        w.capsule(a, b, LEG_R, "pvc")
+    if legs:
+        for t in tees:
+            w.capsule(t, (t[0], t[1], floor_d), LEG_R, "pvc")
+        for a, b in _base_pipes(tees, floor_d):
+            w.capsule(a, b, LEG_R, "pvc")
     for c, u in g["boxes"]:
         across = np.cross(u, (0, 0, 1.0))
         w.box(c, np.vstack([u, across, (0, 0, 1.0)]), (BOX_L / 2, BOX_W / 2, BOX_H / 2), "plastic")
@@ -186,13 +191,23 @@ class SimSonar:
         self.down_gradian = down_gradian
         self.depth = float(os.environ.get("WATER_DEPTH", "12"))
         self.home = (float(os.environ["HOME_LAT"]), float(os.environ["HOME_LON"]))
-        self.world, self.centre_line = build_world(
-            self.depth, float(os.environ.get("PIPE_N", "3")), float(os.environ.get("PIPE_E", "2")),
-            float(os.environ.get("PIPE_HDG", "30")))
         place = (self.depth, float(os.environ.get("PIPE_N", "3")),
                  float(os.environ.get("PIPE_E", "2")), float(os.environ.get("PIPE_HDG", "30")))
-        self.solid = pipeline_world(*place)
-        self.truth_boxes = [c for c, _ in _geometry(*place)["boxes"]]
+        self.truth_walls = None
+        height = None
+        if os.environ.get("SIM_WORLD", "harbor") == "pool":
+            # Ruth's pool: ~0.9 m deep, irregular, ~6-7 x 10-12 m from her Oct 4 wall map;
+            # the pipeline hung on ropes without its legs
+            L, W = float(os.environ.get("POOL_L", "11")), float(os.environ.get("POOL_W", "7"))
+            pn, pe = float(os.environ.get("POOL_N0", "-3")), float(os.environ.get("POOL_E0", "-2"))
+            height = self.depth - float(os.environ.get("PIPE_DEPTH") or self.depth / 2)
+            self.solid = pipeline_world(*place, height=height, legs=False,
+                                        world=pool_world(L, W, self.depth, pn, pe, 0.0))
+            self.truth_walls = [(pn, pe), (pn + L, pe), (pn + L, pe + W), (pn, pe + W), (pn, pe)]
+        else:
+            self.solid = pipeline_world(*place)
+        self.world, self.centre_line = build_world(*place, height)
+        self.truth_boxes = [c for c, _ in _geometry(*place, height)["boxes"]]
         self.metres_per_bin = None
         self.settings = {"simulated": True}
         self._state = None

@@ -58,6 +58,7 @@ _map_on = False                     # the tool has a breadcrumb map: show the ta
 _map_json = b'{}'                   # latest map snapshot, already encoded
 _map_cmds = []                      # Start/Pause/Resume/Reset presses, oldest first
 _rec_cmds = []                      # ("start", note) / ("stop", "") / ("mark", note)
+_mission_point = None               # (x, y) a mission is heading for, map frame
 _sector = None                      # (start, end) degrees, swept counterclockwise
 _sector_editable = True
 _threshold = None                   # crumb threshold, 0-255
@@ -179,6 +180,11 @@ def set_map(snapshot):
     data = json.dumps(snapshot, separators=(',', ':')).encode()
     with _lock:
         _map_json = data
+
+
+def mission_point():
+    with _lock:
+        return _mission_point
 
 
 def record_commands():
@@ -419,10 +425,17 @@ D.oneLook.forEach(function(q){ctx.beginPath();ctx.arc(X(q[0]),Y(q[1]),Math.max(1
 D.crumbs.forEach(function(q){if((q[3]>0?1:0)!==faded)return;
 ctx.fillStyle=hue(q[2],th);ctx.beginPath();ctx.arc(X(q[0]),Y(q[1]),R,0,7);ctx.fill();});});
 ctx.globalAlpha=1;
+if(D.missionPoint){var mp=D.missionPoint,mx=X(mp[0]),my=Y(mp[1]);ctx.strokeStyle='#ff4fd8';
+ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(mx-9,my);ctx.lineTo(mx+9,my);ctx.moveTo(mx,my-9);ctx.lineTo(mx,my+9);
+ctx.stroke();ctx.beginPath();ctx.arc(mx,my,6,0,7);ctx.stroke();ctx.fillStyle='#ff4fd8';ctx.font='12px sans-serif';
+ctx.fillText('mission target',mx+10,my+14);}
 if(D.truth){ctx.save();ctx.setLineDash([7,5]);ctx.strokeStyle='rgba(255,255,255,0.6)';ctx.lineWidth=2;
 ctx.beginPath();D.truth.pipe.forEach(function(p,i){if(i)ctx.lineTo(X(p[0]),Y(p[1]));else ctx.moveTo(X(p[0]),Y(p[1]));});
 ctx.stroke();ctx.restore();ctx.strokeStyle='#ffa83c';ctx.lineWidth=2;
-D.truth.boxes.forEach(function(b){ctx.strokeRect(X(b[0])-5,Y(b[1])-5,10,10);});}
+D.truth.boxes.forEach(function(b){ctx.strokeRect(X(b[0])-5,Y(b[1])-5,10,10);});
+if(D.truth.walls&&D.truth.walls.length){ctx.save();ctx.setLineDash([3,6]);ctx.strokeStyle='rgba(170,170,170,0.6)';
+ctx.lineWidth=1.5;ctx.beginPath();D.truth.walls.forEach(function(p,i){if(i)ctx.lineTo(X(p[0]),Y(p[1]));
+else ctx.moveTo(X(p[0]),Y(p[1]));});ctx.stroke();ctx.restore();}}
 if($('ol').checked&&D.outlines){ctx.font='12px sans-serif';
 D.outlines.forEach(function(g,i){var best=i===0&&g.score>=0.5;
 ctx.strokeStyle=best?'rgba(255,220,80,0.9)':'rgba(255,255,255,0.45)';ctx.lineWidth=1;ctx.beginPath();
@@ -499,7 +512,8 @@ class _Handler(BaseHTTPRequestHandler):
         network can reach it, and all of these are short.
         """
         global _target, _range, _sector, _threshold
-        if self.path in ('/sector', '/threshold', '/floorcut', '/mapcmd', '/record', '/mark'):
+        if self.path in ('/sector', '/threshold', '/floorcut', '/mapcmd', '/record', '/mark',
+                         '/missionpoint'):
             self._map_post()
             return
         if self.path == '/view':
@@ -556,13 +570,23 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(b'ok', 'text/plain')
 
     def _map_post(self):
-        global _sector, _threshold, _floor_cut
+        global _sector, _threshold, _floor_cut, _mission_point
         with _lock:
             on = _map_on
         if not on:
             self.send_error(404)
             return
         text = self._body().decode('utf-8', 'replace').strip()[:300]
+        if self.path == '/missionpoint':
+            try:
+                pt = None if text == 'none' else tuple(float(v) for v in text.split()[:2])
+            except ValueError:
+                self._send(b'say "x y" or none', 'text/plain')
+                return
+            with _lock:
+                _mission_point = pt
+            self._send(b'ok', 'text/plain')
+            return
         if self.path in ('/record', '/mark'):
             if self.path == '/mark':
                 cmd = ("mark", text)

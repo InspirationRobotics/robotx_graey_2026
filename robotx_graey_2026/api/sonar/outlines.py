@@ -27,6 +27,11 @@ PIPE SCORE, 0 to 1, three parts multiplied:
           sliding to 0 at 0.35 m (a patch of seafloor). Guesses from made-up
           crumbs - to be tuned on real ones
   crumbs  a handful could be anything: n / 15, up to 1
+  flat    the pipe hangs at one height; a wall runs floor to surface, so its
+          crumbs come at every height. From the one-look crumbs along the
+          outline: 1 if their heights spread (10th-90th percentile) under
+          0.2 m, 0 at 0.5 m. In the sim pool a straight stretch of wall
+          otherwise scored 100 % and the approach went for it (Oct 10)
 
 All of this is top-down (x, y). TOP is the height of the group's highest part,
 relative to the DVL when it was pinged ("up" in crumbs.py); hold depth while
@@ -41,6 +46,7 @@ LENGTH_OK_M = (1.5, 6.0)
 LENGTH_ZERO_M = (0.5, 10.0)
 WIDTH_OK_M, WIDTH_ZERO_M = 0.2, 0.35
 FULL_CRUMBS = 15
+FLAT_OK_M, FLAT_ZERO_M = 0.2, 0.5
 
 
 def _tree(p):
@@ -126,21 +132,25 @@ def _ramp(v, zero_lo, ok_lo, ok_hi, zero_hi):
     return 1.0
 
 
-def pipe_score(length, width, n):
-    """The three parts, each 0-1, and their product."""
+def pipe_score(length, width, n, spread=None):
+    """The parts, each 0-1, and their product. spread: height spread, or None
+    when there aren't enough one-look crumbs to tell (no flat part then)."""
     parts = {"length": _ramp(length, LENGTH_ZERO_M[0], *LENGTH_OK_M, LENGTH_ZERO_M[1]),
              "width": float(np.clip((WIDTH_ZERO_M - width) / (WIDTH_ZERO_M - WIDTH_OK_M), 0, 1)),
              "crumbs": min(1.0, n / FULL_CRUMBS)}
-    return parts["length"] * parts["width"] * parts["crumbs"], parts
+    if spread is not None:
+        parts["flat"] = float(np.clip((FLAT_ZERO_M - spread) / (FLAT_ZERO_M - FLAT_OK_M), 0, 1))
+    return float(np.prod(list(parts.values()))), parts
 
 
-def find(x, y, up=None, link_m=LINK_M, min_crumbs=MIN_CRUMBS):
+def find(x, y, up=None, link_m=LINK_M, min_crumbs=MIN_CRUMBS, raw=None):
     """Group the crumbs and score each group, best first. Each group is a dict:
       n, length, width, score, parts   see the module notes
       top                              highest "up" in the group (None without up)
       lines   [[x1, y1, x2, y2], ...]  the outline
       spine   [[x, y], ...]            end to end, simplified
       members indices into x/y
+    raw: (x, y, up) of the one-look crumbs, for the flat part of the score.
     """
     p = np.column_stack([np.asarray(x, float), np.asarray(y, float)])
     if len(p) < min_crumbs:
@@ -178,8 +188,16 @@ def find(x, y, up=None, link_m=LINK_M, min_crumbs=MIN_CRUMBS):
         spine = _simplify(p[path], SIMPLIFY_M)
         span = float(np.sum(np.hypot(*np.diff(spine, axis=0).T))) if len(spine) > 1 else 0.0
         width = local_width(p[members], link_m)
-        score, parts = pipe_score(span, width, len(members))
+        spread = None
+        if raw is not None and len(spine) > 1 and len(raw[0]):
+            rp = np.column_stack([raw[0], raw[1]])
+            near = dist_to_polyline(rp, spine) < 0.3
+            if near.sum() >= 5:
+                h = np.asarray(raw[2])[near]
+                spread = float(np.percentile(h, 90) - np.percentile(h, 10))
+        score, parts = pipe_score(span, width, len(members), spread)
         groups.append({"n": int(len(members)), "length": round(span, 2), "width": round(width, 3),
+                       "spread": None if spread is None else round(spread, 2),
                        "score": round(score, 3), "parts": {k: round(v, 2) for k, v in parts.items()},
                        "top": None if up is None else round(float(np.max(np.asarray(up)[members])), 2),
                        "lines": lines, "spine": spine.round(2).tolist(),
@@ -204,6 +222,7 @@ class Outliner:
         key = (len(c["x"]), float(np.sum(c["x"])), float(np.sum(c["seen"])))
         if key != self._key and (force or now - self._t >= self.every_s):
             self._key, self._t = key, now
+            raw = c.get("raw")
             self.groups = [{k: v for k, v in g.items() if k != "members"}
-                           for g in find(c["x"], c["y"], c["up"])]
+                           for g in find(c["x"], c["y"], c["up"], raw=raw)]
         return self.groups
