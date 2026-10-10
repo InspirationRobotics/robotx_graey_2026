@@ -1,0 +1,16 @@
+[Unit]
+Description=Graey sonar launcher - lets the GUI's Sonar tab start and stop the sonar tools
+After=network-online.target docker.service
+
+[Service]
+Type=simple
+User=graey
+WorkingDirectory=/home/graey/robotx_ws/src/robotx_graey_2026
+ExecStart=/usr/bin/python3 tools/gui_sonar_launcher.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/graey/robotx_ws/logs/graey-sonar-launcher.log
+StandardError=append:/home/graey/robotx_ws/logs/graey-sonar-launcher.log
+
+[Install]
+WantedBy=multi-user.target
