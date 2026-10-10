@@ -33,3 +33,9 @@ Duplicate publishers and competing serial readers were confirmed. Their contribu
 ## Remaining
 
 Depth reference, selected-source feedback, live source-set configuration and frame validation must be commissioned before enabling supervision. Obtain full Cube logs and parameter backup for fusion/GPS analysis. Preserve local sonar work during future synchronization. The original service's broad stop command remains a separate maintenance concern; this deployment avoided it with a temporary scoped override.
+
+## Final concurrent-work reconciliation
+
+During publication, remote branch received the sonar team's merge. Preserved it with a normal merge (`7160cab`), then fast-forwarded Jetson. All incoming sonar files already present on Jetson were byte-identical to the remote versions; backed up/stashed overlaps before fast-forward. Final tracked Jetson diff was empty, navigation installed files matched source and installed GUI matched the merged GUI. Untracked backups/data remain preserved. This supersedes the earlier statement that the sonar additions remain only local.
+
+Sonar commit `2c007c8` records a team tilt test: nose-down produced positive VN pitch and negative Cube pitch, with roll agreeing. Its downstream sonar code compensates pitch via `VN_PITCH_BACKWARDS`. This is reported team evidence, not a test repeated in this session. A future upstream VN mounting-transform correction must coordinate removal of downstream compensation to avoid double correction. The yaw-offset consistency fix does not resolve this separate pitch issue.
