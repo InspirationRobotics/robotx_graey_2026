@@ -39,10 +39,10 @@ class VN100Node(Node):
         self.declare_parameter('baud', 115200)
         # Cached frame settings must not accept runtime writes that would only
         # change parameter readback, leaving the published transform unchanged.
-        frame_setting = ParameterDescriptor(read_only=True,
-            description='Startup-only frame setting; restart with a parameter override.')
-        self.declare_parameter('flip_180', True, frame_setting)
-        self.declare_parameter('yaw_offset_deg', 0.0, frame_setting)
+        for name, default in (('flip_180', True), ('yaw_offset_deg', 0.0)):
+            # rclpy fills in descriptor name/type; each parameter needs its own.
+            self.declare_parameter(name, default, ParameterDescriptor(read_only=True,
+                description='Startup-only frame setting; restart with a parameter override.'))
         self.port = self.get_parameter('port').value
         self.baud = self.get_parameter('baud').value
         self.flip = self.get_parameter('flip_180').value

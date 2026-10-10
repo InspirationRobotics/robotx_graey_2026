@@ -18,6 +18,9 @@ class FrameParameters(unittest.TestCase):
                 nodes.append(vn100_node.VN100Node())
                 nodes.append(nav_ekf_bridge.NavEKFBridge())
                 for node in nodes:
+                    descriptor = node.describe_parameter('yaw_offset_deg')
+                    self.assertEqual(descriptor.name, 'yaw_offset_deg')
+                    self.assertEqual(descriptor.type, Parameter.Type.DOUBLE.value)
                     self.assertEqual(node.yaw_off, offset)
                     result = node.set_parameters([Parameter('yaw_offset_deg', value=offset+5.0)])
                     self.assertFalse(result[0].successful)
@@ -26,6 +29,9 @@ class FrameParameters(unittest.TestCase):
                 result = nodes[0].set_parameters([Parameter('flip_180', value=False)])
                 self.assertFalse(result[0].successful)
                 self.assertTrue(nodes[0].flip)
+                descriptor = nodes[0].describe_parameter('flip_180')
+                self.assertEqual(descriptor.name, 'flip_180')
+                self.assertEqual(descriptor.type, Parameter.Type.BOOL.value)
                 serial.assert_not_called()
         finally:
             for node in nodes:
