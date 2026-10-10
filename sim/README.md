@@ -13,10 +13,13 @@ Runs Graey's flight controller and Jetson code on a laptop, with no hardware:
 
 So the EKF dead-reckons from "VN-100 + DVL" through Graey's own bridge, exactly as on the sub.
 
-**The simulated world** (`sim_sonar.py`): a flat seafloor at `WATER_DEPTH`, and the Task 2 pipeline
-built from the handbook's parts list (3.5.5) - five straight sections joined by 45 deg elbows, not
-all in one plane, ~4.9 m of 3" pipe 1.0-1.7 m above the floor, three tee legs to the floor, and
-three ~0.15 m light boxes on it. Move it with `PIPE_N`, `PIPE_E` (m from home) and `PIPE_HDG`.
+**The simulated world** (`sim_sonar.py`): a flat mud seafloor at `WATER_DEPTH`, and the Task 2
+pipeline from handbook figure 3.5.5 and its parts list, to scale - three ~1.0 m tee sections joined
+by two 1.0 m connectors on 45 deg elbows (jog left, then back right, all level), 3" pipe 1.86 m
+above the floor on 2" legs into base frames, and four 0.15 m light boxes at random places
+(`PIPE_SEED`). Move it with `PIPE_N`, `PIPE_E` (m from home, the active buoy) and `PIPE_HDG`.
+For the mission test it sits 2.5 m beside the buoy (`PIPE_N=-1 PIPE_E=2.5 PIPE_HDG=0`): with the
+placeholder echoes, a pipe seen end-on from the buoy gave no crumbs at all.
 Graey has no GPS; `sim/set_origin.py` gives the EKF a latitude/longitude for its (0,0), which is
 what lets QGroundControl draw the sub on the satellite map, submerged or not.
 
