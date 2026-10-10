@@ -4,36 +4,56 @@
 Ruth's plan (Oct 2026). It starts where the buoy code leaves the sub: at the
 active buoy, on the surface. Built in steps, each checked in the simulator:
 
-  step 1  DIVE  to scan_depth (3 m)
-          SCAN  turn slowly on the spot with the sonar map running, until the
-                sub has turned scan_turn_deg. Slower than the map's 10 deg/s
-                limit, so no ping is thrown away
-          PICK  the most pipe-like outline on the map (api/sonar/outlines.py);
-                none scoring min_score -> surface
-  (next)  go above the near end, follow it, mark the boxes
+  DIVE        to far_depth (3 m; the harbor is ~12 m deep)
+  FAR SCAN    turn once on the spot with the sonar map running. From up here
+              the pipe gives only scattered crumbs - each sweep crosses it in
+              about one ping, and the 25 deg fan is ~3.5 m wide 8 m down - so
+              this only finds WHERE: the biggest bunch of crumbs, joined at
+              far_link_m instead of the map's 0.5 m
+  TO SPOT     above that bunch, down to close_height above the pipe's highest
+              possible top: the floor (depth + DVL altitude) less pipe_max_height
+              (Ruth's clearance rule). Not from the crumbs' heights: from up here
+              the strongest echoes are the base frames on the floor, and the
+              pipe barely shows (sim, Oct 9). On the way down, the DVL altitude
+              is watched and the descent stops at that height above the floor
+  CLOSE SCAN  the same turn, map Reset, shorter range: crumbs dense enough to
+              join into outlines (api/sonar/outlines.py)
+  PICK        the most pipe-like outline; none scoring min_score -> surface.
+              Its near end is the one nearest the buoy (the handbook's report
+              order starts at the end nearest the active buoy)
+  (next)      go above the near end, follow it, mark the boxes
+
+Every scan turns slower than the map's 10 deg/s limit, so no ping is thrown away.
 
 THE MAP. tools/sonar_map.py runs beside this (on Graey, on the host; in the sim,
 sim/sim_sonar_map.py) and is driven through its web page's own controls, the
 same as pressing the buttons: range, sector, threshold, Reset/Start. Its frame
-is (0,0) = where the sub was at Start, +y = the heading then. This captures the
-EKF's position and heading at that moment to turn map points into NED.
+is (0,0) = where the sub was at Start, +y = the heading then; the EKF's
+position and heading at that moment turn map points into NED. Crumb heights
+("up") are relative to the DVL at the ping, so with the depth held, the pipe's
+top is the scan depth minus the highest crumb's up.
 
 SAFETY: as every MissionBase mission - dry_run defaults True and then nothing
-is sent; changing flight mode hands the sub to the pilot and this exits.
+is sent; changing flight mode hands the sub to the pilot and this exits. No
+target deeper than max_depth is ever sent.
 """
 import json
 import math
 import urllib.request
 
+import numpy as np
 import rclpy
+from std_msgs.msg import Float32
 
 from robotx_graey_2026.api.navigation import mission_base
 from robotx_graey_2026.api.navigation.mission_base import MissionBase, S
+from robotx_graey_2026.api.sonar import outlines
 
 # The simulator never left the surface with unchanged targets re-sent every 3 s
 # (sim/README.md). Here a target changes when the plan does, and is otherwise
 # only re-sent as insurance.
 mission_base.RESEND_S = 20.0
+SETTLE_S = 6.0          # after a scan: the last sweep lands and the outlines refresh
 
 
 def wrap_pi(a):
@@ -44,17 +64,37 @@ class PipelineMission(MissionBase):
     def __init__(self):
         super().__init__('pipeline_mission', component=197)
         self.phase = None
+        self.scan = None                    # 'far' or 'close'
         self.map_origin = None              # (n, e, yaw) of map (0,0) and its +y
+        self.hold = None                    # (n, e, down, yaw) while scanning
         self.turned = 0.0
         self.last_yaw = None
-        self.pipe = None                    # the outline picked
+        self.spot = None                    # (n, e, pipe top depth) from the far scan
+        self.pipe = None                    # the outline picked, in NED
         self.map_down_since = None
+        self.altitude = None                # (metres above the bottom, time); -1 = no lock
+        self.create_subscription(Float32, '/graey/dvl/altitude', self.on_altitude, 10)
+
+    def on_altitude(self, msg):
+        self.altitude = (msg.data, self.now())
+
+    def floor_clearance(self):
+        """Metres from the DVL to the bottom, or None if the DVL has no lock now."""
+        if self.altitude is None or self.altitude[0] <= 0 or self.now() - self.altitude[1] > 2.0:
+            return None
+        return self.altitude[0]
 
     def declare_extra_parameters(self):
         p = self.declare_parameter
         p('map_url', 'http://127.0.0.1:8095')
-        p('scan_depth', 3.0)                # Ruth: 3 m at the buoy, harbor ~12 m deep
-        p('scan_range', 15.0)               # m, the map's range while scanning
+        p('far_depth', 3.0)                 # Ruth: 3 m at the buoy
+        p('far_range', 15.0)                # m, the map's range on the far scan
+        p('far_link_m', 1.5)                # far crumbs this close count as one bunch
+        p('close_height', 2.5)              # m, sonar above the pipe's top (Ruth: within 3 m)
+        p('pipe_max_height', 2.05)          # m, floor to the top of a light box: handbook
+                                            # "1-2 m", 3.5.5 parts list ~1.9 m, box 0.15 m
+        p('close_range', 6.0)
+        p('max_depth', 10.0)                # never sent a target deeper than this
         p('scan_sector', '180 0')           # bottom half: left, down, right
         p('scan_threshold', 120)
         p('scan_turn_deg', 360.0)
@@ -65,9 +105,12 @@ class PipelineMission(MissionBase):
     def read_extra_parameters(self):
         g = lambda n: self.get_parameter(n).value
         self.map_url = g('map_url')
-        self.depth = g('scan_depth')        # MissionBase dives to self.depth
+        self.depth = g('far_depth')         # MissionBase dives to self.depth
         self.gate_f = 0.0                   # no gate: hold where we dived
-        self.scan_range = g('scan_range')
+        self.far_range, self.far_link = g('far_range'), g('far_link_m')
+        self.close_height, self.close_range = g('close_height'), g('close_range')
+        self.pipe_max = g('pipe_max_height')
+        self.max_depth = g('max_depth')
         self.scan_sector = g('scan_sector')
         self.scan_threshold = g('scan_threshold')
         self.scan_turn = math.radians(g('scan_turn_deg'))
@@ -94,6 +137,16 @@ class PipelineMission(MissionBase):
         self.phase = name
         self.state_t0 = self.now()
 
+    def hold_here(self, down, label):
+        self.target = None                  # a new hold is always sent
+        self.hold = (self.cur[0], self.cur[1], down, self.cur_yaw) if self.cur else (
+            self.start_x, self.start_y, down, self.start_yaw)
+        self.goto_ned(*self.hold, label)
+
+    def start_scan(self, which):
+        self.scan = which
+        self.to_phase(f'{which} scan: map setup')
+
     def do_to_marker(self):
         """The map can drop a request now and then; ten seconds of nothing ends it."""
         try:
@@ -109,61 +162,108 @@ class PipelineMission(MissionBase):
 
     def search(self):
         if self.phase is None:
-            self.to_phase('map setup')
+            self.hold_here(self.depth, 'hold')
+            self.start_scan('far')
+        ph = self.phase.split(': ')[-1]
 
-        if self.phase == 'map setup':
+        if ph == 'map setup':
             # range first: changing it restarts the sweep
-            self.map_post('/range', self.scan_range)
+            self.map_post('/range', self.far_range if self.scan == 'far' else self.close_range)
             self.map_post('/sector', self.scan_sector)
             self.map_post('/threshold', self.scan_threshold)
             for cmd in ('reset', 'start', 'resume'):    # whatever state it was in
                 self.map_post('/mapcmd', cmd)
-            self.to_phase('map start')
+            self.to_phase(f'{self.scan} scan: map start')
 
-        elif self.phase == 'map start':
-            self.goto(0.0, 0.0, self.depth, 'hold')
+        elif ph == 'map start':
+            self.goto_ned(*self.hold, 'hold')
             m = self.map_get()
             if m['state'] == 'running' and m['pose'] and math.hypot(*m['pose'][:2]) < 0.05:
                 if self.dry or self.cur is None:
-                    self.map_origin = (0.0, 0.0, self.start_yaw)
+                    self.map_origin = (self.hold[0], self.hold[1], self.hold[3])
                 else:
                     self.map_origin = (self.cur[0], self.cur[1], self.cur_yaw)
-                self.hold_ne = self.map_origin[:2]
                 self.turned, self.last_yaw = 0.0, self.cur_yaw
-                self.to_phase('scan')
+                self.to_phase(f'{self.scan} scan: turn')
 
-        elif self.phase == 'scan':
-            n, e = self.hold_ne
-            self.stream_posvel(n, e, self.depth, 0.0, 0.0, self.scan_rate, 'scan turn')
+        elif ph == 'turn':
+            n, e, down, _ = self.hold
+            self.stream_posvel(n, e, down, 0.0, 0.0, self.scan_rate, f'{self.scan} scan turn')
             if self.cur_yaw is not None and self.last_yaw is not None:
                 self.turned += wrap_pi(self.cur_yaw - self.last_yaw)
             self.last_yaw = self.cur_yaw
             if abs(self.turned) >= self.scan_turn or (self.dry and self.now() - self.state_t0 > 5):
-                self.target = None              # next goto is "changed", so it is sent
-                self.hold_yaw = self.cur_yaw or 0.0
-                self.to_phase('pick')
+                self.hold_here(self.hold[2], 'hold')
+                self.to_phase(f'{self.scan} scan: settle')
 
-        elif self.phase == 'pick':
-            n, e = self.hold_ne
-            self.goto_ned(n, e, self.depth, self.hold_yaw, 'hold')
-            if self.now() - self.state_t0 < 6.0:    # the last sweep lands, outlines refresh
-                return
-            m = self.map_get()
-            outlines = m.get('outlines') or []
-            for i, g in enumerate(outlines[:5]):
-                (n1, e1), (n2, e2) = (self.map_to_ned(*g['spine'][k]) for k in (0, -1))
-                self.get_logger().info(
-                    f'    outline {i}: pipe {g["score"]:.0%} ({g["parts"]}) {g["n"]} crumbs, '
-                    f'{g["length"]:.1f} m long, {g["width"]:.2f} m wide, top {g["top"]} m, '
-                    f'NED ends ({n1:.1f},{e1:.1f}) ({n2:.1f},{e2:.1f})')
-            best = outlines[0] if outlines else None
-            if best is None or best['score'] < self.min_score:
-                self.get_logger().warn(f'no outline scores {self.min_score:.0%} - surfacing')
-                self.enter(S.SURFACE)
-                return
-            self.pipe = best
-            self.get_logger().info(f'picked the {best["score"]:.0%} outline')
-            self.enter(S.SURFACE)                    # step 1 ends here
+        elif ph == 'settle':
+            self.goto_ned(*self.hold, 'hold')
+            if self.now() - self.state_t0 >= SETTLE_S:
+                (self.locate if self.scan == 'far' else self.pick)(self.map_get())
+
+        elif ph == 'to spot':
+            n, e, down = self.spot
+            self.goto_ned(n, e, down, self.hold[3], 'above the pipe')
+            alt = self.floor_clearance()
+            if not self.dry and alt is not None and alt < self.pipe_max + self.close_height - 0.2:
+                self.get_logger().warn(f'floor {alt:.1f} m below - stopping the descent here')
+                self.hold_here(self.cur[2], 'hold')
+                self.start_scan('close')
+            elif self.reached() or (self.cur and math.dist(self.cur, (n, e, down)) < 0.3
+                                    and self.speed() < 0.05):
+                self.hold_here(down, 'hold')
+                self.start_scan('close')
+
+    def locate(self, m):
+        """Far scan: the biggest bunch of crumbs is where the pipe is."""
+        c = np.array(m['crumbs']).reshape(-1, 5)
+        groups = outlines.find(c[:, 0], c[:, 1], c[:, 4], link_m=self.far_link, min_crumbs=4)
+        if not groups:
+            self.get_logger().warn(f'far scan: {len(c)} crumbs, no bunch of 4 - surfacing')
+            self.enter(S.SURFACE)
+            return
+        g = max(groups, key=lambda gr: gr['n'])
+        pts = c[g['members']]
+        n, e = self.map_to_ned(float(np.mean(pts[:, 0])), float(np.mean(pts[:, 1])))
+        alt = 0.0 if self.dry else self.floor_clearance()
+        if alt is None:
+            self.get_logger().warn('far scan: no DVL altitude, so no safe depth to go down to - surfacing')
+            self.enter(S.SURFACE)
+            return
+        floor = self.hold[2] + alt if not self.dry else self.hold[2] + 9.0
+        down = min(floor - self.pipe_max - self.close_height, self.max_depth)
+        self.spot = (n, e, max(down, self.hold[2]))     # never shallower than we are
+        self.get_logger().info(
+            f'far scan: {len(c)} crumbs, biggest bunch {g["n"]} at NED ({n:.1f}, {e:.1f}); floor '
+            f'{floor:.1f} m deep, pipe top at most {floor - self.pipe_max:.1f} m -> going to '
+            f'{self.spot[2]:.1f} m')
+        self.to_phase('to spot')
+
+    def pick(self, m):
+        """Close scan: the most pipe-like outline, ends in NED, near end first."""
+        found = m.get('outlines') or []
+        for i, g in enumerate(found[:5]):
+            self.get_logger().info(
+                f'    outline {i}: pipe {g["score"]:.0%} {g["parts"]} {g["n"]} crumbs, '
+                f'{g["length"]:.1f} m long, {g["width"]:.2f} m wide, top {g["top"]} m')
+        best = found[0] if found else None
+        if best is None or best['score'] < self.min_score:
+            self.get_logger().warn(f'close scan: no outline scores {self.min_score:.0%} - surfacing')
+            self.enter(S.SURFACE)
+            return
+        spine = [self.map_to_ned(x, y) for x, y in best['spine']]
+        if math.dist(spine[-1], (self.start_x, self.start_y)) < math.dist(spine[0], (self.start_x, self.start_y)):
+            spine.reverse()                         # near end (nearest the buoy) first
+        self.pipe = {'spine': spine, 'top': self.hold[2] - best['top'], 'score': best['score']}
+        alt = self.floor_clearance()
+        if alt is not None:
+            self.pipe['floor'] = self.hold[2] + alt
+        (n1, e1), (n2, e2) = spine[0], spine[1]
+        self.get_logger().info(
+            f'picked: pipe {best["score"]:.0%}, near end NED ({n1:.2f}, {e1:.2f}), first section '
+            f'heading {math.degrees(math.atan2(e2 - e1, n2 - n1)) % 360:.0f} deg, top '
+            f'{self.pipe["top"]:.2f} m deep, spine ' + ' '.join(f'({n:.1f},{e:.1f})' for n, e in spine))
+        self.enter(S.SURFACE)                       # step 2 ends here
 
     def do_maneuver(self):
         self.enter(S.SURFACE)

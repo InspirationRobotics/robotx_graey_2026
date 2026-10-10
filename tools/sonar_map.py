@@ -215,7 +215,7 @@ def main():
             track.append((now.x, now.y))
         c = cmap.crumbs()
         crumbs = np.column_stack([np.round(c["x"], 2), np.round(c["y"], 2),
-                                  np.round(c["brightness"]), c["seen"]]).tolist()
+                                  np.round(c["brightness"]), c["seen"], np.round(c["up"], 2)]).tolist()
         webview.set_map({
             "state": run["state"],
             "dvl": "no data" if now is None else ("ok" if now.valid else "lost"),

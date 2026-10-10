@@ -35,6 +35,8 @@ HOME_LAT=<pool lat> HOME_LON=<pool lon> sim/run.sh  # WATER_DEPTH=12 for the har
 - **Fly-over test** (dives 1 m above the pipe, Starts the map, flies the pipe, grades the crumbs):
   `docker exec -e WATER_DEPTH=12 graey-sitl bash -c 'cd /root/robotx_ws/src/robotx_graey_2026 && PYTHONPATH=. python3 sim/flyover_test.py'`
   First run: 82 % of crumbs within 0.3 m of the pipe, all within 0.5 m (median 0.17 m).
+- **Pipeline mission** (dive at the buoy, far scan, close scan, pick the pipe; watch the Map tab and QGC):
+  `docker exec graey-sitl bash -c 'source /opt/ros/humble/setup.bash && cd /root/robotx_ws/src/robotx_graey_2026 && PYTHONPATH=.:$PYTHONPATH python3 -c "from robotx_graey_2026.api.navigation.pipeline_mission import main; main()" --ros-args -p dry_run:=false'`
 - **Navigation check** (simulator truth vs Graey's EKF, side by side):
   `docker exec graey-sitl bash -c 'cd /root/robotx_ws/src/robotx_graey_2026 && PYTHONPATH=. python3 sim/truth_vs_ekf.py 60'`
 - Logs: `docker exec graey-sitl ls /tmp/sim` · Stop: `docker rm -f graey-sitl`

@@ -17,8 +17,13 @@ point. Up to MAX_PER_PING per ping, brightest first.
 
 FADING. When a newer sweep looks at the spot a crumb is in again, the crumb
 fades: one newer sweep = half faded, two = gone. "Looks at" means the spot is
-inside one of that sweep's pings - within half a step of its bearing, within
-12.5 deg fore-aft, and between the blind zone and the range. It does not matter
+in the MIDDLE of one of that sweep's pings - within half a step of its bearing,
+within FADE_FAN_DEG fore-aft, and between the blind zone and the range. Only
+the middle, because that is where the ping would put a new crumb: if the thing
+is still there, the old crumb is replaced by an almost identical one. The
+first version used the whole 25 deg fan, and a crumb at the fan's edge was
+faded while the echo that replaced it went in the middle, up to ~0.6 m away 3 m
+down; a sub turning on the spot wiped out 9 crumbs in 10 that way (sim, Oct 9). It does not matter
 whether that sweep found something there: nothing there now is news too. A
 crumb's own sweep never fades it, and a sweep fades a crumb at most once.
 
@@ -54,6 +59,7 @@ THRESHOLD = 100         # smoothed echo strength, 0-255, that makes a crumb. A g
 SMOOTH_BINS = 5
 MAX_PER_PING = 5
 FADE_SWEEPS = 2         # newer sweeps that must look at a crumb to wipe it out
+FADE_FAN_DEG = 3.0      # ... within this many deg fore-aft of the beam's middle
 MAX_TURN_DPS = 10.0     # turning faster than this, deg/s: ping ignored
 
 _FIELDS = ("x", "y", "up", "brightness", "range_m", "sweep", "seen", "faded_by")
@@ -150,7 +156,7 @@ class CrumbMap:
         bearing = np.degrees(np.arctan2(up, right))
         half = max(step_deg, S.BEAM_IN_PLANE_DEG) / 2.0
         in_slice = np.abs((bearing - a_deg + 180.0) % 360.0 - 180.0) <= half
-        in_fan = np.abs(np.degrees(np.arctan2(fwd, across))) <= S.BEAM_FORE_AFT_DEG / 2.0
+        in_fan = np.abs(np.degrees(np.arctan2(fwd, across))) <= FADE_FAN_DEG
         dist = np.hypot(across, fwd)
         in_range = (dist >= S.MIN_RANGE_M) & (dist <= max_range_m)
 
