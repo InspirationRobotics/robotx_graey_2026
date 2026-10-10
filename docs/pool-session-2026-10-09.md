@@ -63,3 +63,9 @@ Local source-switching work and isolated SITL results are documented separately 
 ## Changes and evidence
 
 Workspace `output/dry-land-20261009/` contains the baseline, selected parameters, diagnostic scripts, captures and its detailed README. `GRAEY_CONTEXT.md` retains dated findings. Existing local source edits were preserved. This report does not claim a commit, push, main change, permanent duplicate-prevention deployment, or numeric live EKF tuning.
+
+## October 10 — GUI duplicate-launch guard
+
+Repository HTTP start/stop protection and Linux ownership locks already existed; the October 9 vehicle ran older code. Added a second guard at the GUI subprocess helper to reject DVL, VN, navigation bridge and supervisor executable launches before Popen. Camera launch remains permitted. This is defense in depth, not a vehicle deployment.
+
+Nine Linux ownership tests passed, including simultaneous starts, crash lock release, HTTP rejection and helper bypass attempts. Initial module-style test invocation failed because `test` is not an importable package; discovery succeeded. No live processes, Cube parameters or services were changed. Deployment and live repeated-click/restart verification remain outstanding.

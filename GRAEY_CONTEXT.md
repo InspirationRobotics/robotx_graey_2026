@@ -509,3 +509,5 @@ October 9 manual pool tests (documented October 10): captures manual-20261010T04
 ## Standing workflow authorization — October 10, 2026
 User instructs future file edits to include proactive repository updates (commit/push related work to tether_toggle_beichen). When user says Graey is ready and online, proactively reconcile and sync the relevant repository changes with Jetson. Preserve unrelated work and vehicle-specific configuration; verify state before service disruption and do not restart navigation while armed. This does not authorize main changes, arming, automatic fault clearance, or arbitrary live EKF parameter changes. Keep the repository copy of this context current.
 
+
+October 10 repository GUI fix: existing HTTP navigation start/stop rejection supplemented by subprocess-helper rejection of VN/DVL/bridge/supervisor launches. Nine Linux ownership tests passed. Vehicle deployment and live restart/click verification remain outstanding; do not claim last night's duplicates are permanently prevented on Jetson yet.

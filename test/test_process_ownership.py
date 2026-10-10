@@ -65,6 +65,25 @@ with ProcessOwnership('bridge'):
 
 
 class ProcessDisplayTests(unittest.TestCase):
+    def test_gui_spawn_cannot_bypass_core_ownership(self):
+        tree = ast.parse((ROOT / 'robotx_graey_2026/api/gui/gui_node.py').read_text())
+        names = {'GROUPS', 'CAMERA', 'CORE_MANAGED_GROUPS', 'CORE_MANAGED_EXECUTABLES'}
+        nodes = [n for n in tree.body if
+                 (isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and
+                  t.id in names for t in n.targets)) or
+                 (isinstance(n, ast.FunctionDef) and n.name == 'spawn')]
+        process = Mock(DEVNULL=-3, STDOUT=-2)
+        ns = dict(os=os, subprocess=process)
+        exec(compile(ast.Module(body=nodes, type_ignores=[]), 'gui_node.py', 'exec'), ns)
+        for name in ('dvl_node', 'vn100_node', 'nav_ekf_bridge', 'navigation_supervisor'):
+            for argv in (['ros2', 'run', 'robotx_graey_2026', name],
+                         ['/usr/bin/python3', '/install/lib/robotx_graey_2026/'+name]):
+                with self.subTest(argv=argv), self.assertRaises(ValueError):
+                    ns['spawn'](argv)
+        process.Popen.assert_not_called()
+        ns['spawn'](['ros2', 'run', 'robotx_graey_2026', 'pole_tracker'])
+        process.Popen.assert_called_once()
+
     def test_wrappers_and_shell_strings_not_counted_as_nodes(self):
         with tempfile.TemporaryDirectory() as root:
             rows = {

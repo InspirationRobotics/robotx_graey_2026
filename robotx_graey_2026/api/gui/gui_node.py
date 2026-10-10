@@ -41,6 +41,9 @@ GROUPS = {
     'planner': ('Planner feed', ['pos_server']),
 }
 CORE_MANAGED_GROUPS = {'nav'}
+CORE_MANAGED_EXECUTABLES = frozenset(
+    name for key in CORE_MANAGED_GROUPS for name in GROUPS[key][1]
+) | {'navigation_supervisor'}
 READ_ONLY = {
     'mavproxy': ('MAVProxy', ['mavproxy.py']),
 }
@@ -390,6 +393,10 @@ def any_mission_running():
 
 
 def spawn(argv, out=subprocess.DEVNULL):
+    # Enforce ownership here too, so another GUI route cannot bypass the
+    # navigation endpoint's rejection and create competing sensor/odom owners.
+    if any(os.path.basename(str(arg)) in CORE_MANAGED_EXECUTABLES for arg in argv):
+        raise ValueError('Navigation processes are owned by core launch; GUI launch refused.')
     subprocess.Popen(
         argv, stdout=out, stderr=subprocess.STDOUT,
         start_new_session=True,
