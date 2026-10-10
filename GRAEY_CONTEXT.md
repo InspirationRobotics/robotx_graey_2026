@@ -582,3 +582,19 @@ IMU/DVL cannot identify a constant absolute GPS/map bias. Live waypoint executio
 defaults disabled; GRAEY_WAYPOINT_ENABLED is only a commissioning opt-in, not a
 replacement for source/depth/heading/control checks. No collision avoidance or
 validated pool geofence has been added.
+
+### Verified waypoint deployment (2026-10-10)
+
+On explicit deployment request, fresh disarmed/ESC-off/no-mission state was
+verified before restarting core. Jetson-only sonar commits through 3364bd6 were
+preserved by merge b86add1 with navigation update 6ef0647; combined branch pushed
+and Windows checkout synchronized. Colcon build and all 130 isolated mocked
+regressions passed on Jetson. /waypoint HTTP 200 and live Cube position/heading
+API verified, with one instance each of bridge/supervisor/VN/DVL/GUI. MAVProxy and
+sonar launcher stayed active. No vehicle mission, arming or Cube parameter writes.
+Live waypoint execution remains disabled; screenshot registration approximate.
+Supervisor observed Depth reference unavailable, Observation, source Unknown,
+configuration unverified. Restart reset control selection to RF/STARTUP inhibit;
+vehicle remained disarmed with ESC off and SA kill active. Bridge frame continuity
+must be revalidated after restart. See docs/deployment-2026-10-10.md for evidence;
+these are dated observations, not permanent live status.

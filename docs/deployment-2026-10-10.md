@@ -39,3 +39,35 @@ Depth reference, selected-source feedback, live source-set configuration and fra
 During publication, remote branch received the sonar team's merge. Preserved it with a normal merge (`7160cab`), then fast-forwarded Jetson. All incoming sonar files already present on Jetson were byte-identical to the remote versions; backed up/stashed overlaps before fast-forward. Final tracked Jetson diff was empty, navigation installed files matched source and installed GUI matched the merged GUI. Untracked backups/data remain preserved. This supersedes the earlier statement that the sonar additions remain only local.
 
 Sonar commit `2c007c8` records a team tilt test: nose-down produced positive VN pitch and negative Cube pitch, with roll agreeing. Its downstream sonar code compensates pitch via `VN_PITCH_BACKWARDS`. This is reported team evidence, not a test repeated in this session. A future upstream VN mounting-transform correction must coordinate removal of downstream compensation to avoid double correction. The yaw-offset consistency fix does not resolve this separate pitch issue.
+
+## Waypoint deployment — 2026-10-10
+
+User requested deployment and confirmed ready after the first live check found
+Graey armed with ESC power on. The second fresh controller check confirmed
+MANUAL, disarmed, ESC off, SA kill active, and no mission claim.
+
+- Jetson had five additional sonar commits through `3364bd6`. Preserved these,
+  backed up all Git history to
+  `/home/graey/deployment-backups/20261010-waypoint/before.bundle`, and merged
+  the remote navigation work (`6ef0647`) without conflicts as `b86add1`.
+- Built `robotx_graey_2026` with colcon/symlink-install in the existing container.
+  Build passed; only disabled byte-compilation warnings. All **130 tests passed**
+  on Jetson with ROS_LOCALHOST_ONLY=1 and isolated ROS_DOMAIN_ID=74.
+- Stopped the verified core launch with SIGINT using a temporary runtime systemd
+  ExecStop override, then removed the override and restarted core. Avoided the
+  installed broad pkill stop command. MAVProxy and sonar launcher stayed active.
+- HTTP `/waypoint` returned 200; `/api/waypoint` returned fresh Cube global
+  position/attitude, VN heading and DVL data. Exactly one GUI, bridge, supervisor,
+  VN and DVL process was present. No waypoint or SITL mission was running.
+- Live execution remains **disabled**, pool registration **approximate**.
+  Supervisor remains **Observation**, **Depth reference unavailable**, source
+  Unknown, configuration unverified, navigation not ready. This is deployment
+  verification, not physical autonomous-mission or positioning-accuracy approval.
+- Restart returned controller selection to **RF**, inhibit **STARTUP**, SA kill
+  active. Fresh telemetry confirmed MANUAL, disarmed, ESC off. No fault reset,
+  source-selection command, arming, Cube parameter change or mission was issued.
+- Core restart resets bridge integration; previous local-frame continuity must
+  not be assumed. Calibrate depth and validate frames/source settings before
+  later commissioning. No mapping accuracy was inferred from sensor agreement.
+- Pushed combined branch and fast-forwarded the Windows checkout. Existing
+  untracked Jetson backups, helper files and sonar data were preserved.
