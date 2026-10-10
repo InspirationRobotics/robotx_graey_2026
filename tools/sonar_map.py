@@ -262,6 +262,7 @@ def main():
             "outlines": outliner.update(c, time.monotonic()),
             "range": cur["range"], "sector": list(cur["sector"]),
             "threshold": cmap.threshold, "floorCut": cmap.floor_cut_m, "looks": cmap.combine,
+            "fade": cmap.fade,
             "turning": cmap.turning and run["state"] == "running",
             "skippedTurning": cmap.skipped_turning,
             "slice": reach(*sector_arc(*cur["sector"]), cur["range"]),
@@ -289,6 +290,7 @@ def main():
         cmap.threshold = webview.threshold()
         cmap.floor_cut_m = webview.floor_cut()
         cmap.combine = webview.looks()
+        cmap.fade = webview.fade()
         take(partial)
         show(partial)
 
@@ -308,6 +310,7 @@ def main():
             pose_alt=np.array([q.alt_m if q else -1.0 for q in cur["poses"]], float),
             vn_pitch_unflipped=S.VN_PITCH_BACKWARDS,    # pose_roll_pitch already turned round
             combine_looks=cmap.combine,
+            fade=cmap.fade,
             floor_cut_m=cmap.floor_cut_m,
             range_m=cur["range"], sector=np.array(cur["sector"]),
             threshold=cmap.threshold, state=run["state"], map_epoch=cur["epoch"],
@@ -331,6 +334,7 @@ def main():
         cmap.threshold = webview.threshold()
         cmap.floor_cut_m = webview.floor_cut()
         cmap.combine = webview.looks()
+        cmap.fade = webview.fade()
         cmap.new_sweep()
         run["sweeps"] += 1
         start, end = sector_arc(*cur["sector"])

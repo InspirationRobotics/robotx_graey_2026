@@ -98,7 +98,8 @@ def body_to_map(pose):
 class CrumbMap:
     def __init__(self, threshold=THRESHOLD, max_per_ping=MAX_PER_PING,
                  sonar_fwd_m=S.SONAR_FWD_M, sonar_right_m=S.SONAR_RIGHT_M,
-                 max_turn_dps=MAX_TURN_DPS, floor_cut_m=FLOOR_CUT_M, looks=True, combine=False):
+                 max_turn_dps=MAX_TURN_DPS, floor_cut_m=FLOOR_CUT_M, looks=True, combine=False,
+                 fade=True):
         self.threshold = threshold
         self.floor_cut_m = floor_cut_m
         self.max_per_ping = max_per_ping
@@ -107,6 +108,7 @@ class CrumbMap:
         self.sonar_right_m = sonar_right_m
         self.looks = LookMap() if looks else None      # looks.py: where pings agree
         self.combine = combine      # False = classic (Oct 4); True = agreed crumbs + middle fading
+        self.fade = fade            # False: crumbs stay until Reset (a faint pipe builds up)
         self.clear()
 
     def clear(self):
@@ -132,7 +134,8 @@ class CrumbMap:
         if self.turning:
             self.skipped_turning += 1
             return 0
-        self._fade(angle_deg, pose, step_deg, max_range_m)
+        if self.fade:
+            self._fade(angle_deg, pose, step_deg, max_range_m)
         return self._add(angle_deg, row, metres_per_bin, pose)
 
     def add_sweep(self, sweep, pose_at, max_range_m, turn_rate=None):

@@ -37,6 +37,8 @@ All of this is top-down (x, y). TOP is the height of the group's highest part,
 relative to the DVL when it was pinged ("up" in crumbs.py); hold depth while
 scanning and it says how far below the sub the pipe's top is.
 """
+import time
+
 import numpy as np
 
 LINK_M = 0.5            # crumbs closer than this are joined
@@ -208,21 +210,28 @@ def find(x, y, up=None, link_m=LINK_M, min_crumbs=MIN_CRUMBS, raw=None):
 
 class Outliner:
     """For the Map tab: find() again when the crumbs have changed, at most
-    every_s seconds apart (3000 crumbs take ~0.25 s), as JSON-ready dicts."""
+    every_s seconds apart (3000 crumbs take ~0.25 s), as JSON-ready dicts.
+    It runs between pings, so with many crumbs (fade off: ~4800 took 0.6 s)
+    it waits COST_X times as long as the last find() took, and the pinging
+    never spends more than about 1/COST_X of its time on outlines."""
+    COST_X = 5
 
     def __init__(self, every_s=2.0):
         self.every_s = every_s
         self.clear()
 
     def clear(self):
-        self.groups, self._key, self._t = [], None, -1e9
+        self.groups, self._key, self._t, self._cost = [], None, -1e9, 0.0
 
     def update(self, c, now, force=False):
         """c: CrumbMap.crumbs(). Returns the groups, best first, without members."""
         key = (len(c["x"]), float(np.sum(c["x"])), float(np.sum(c["seen"])))
-        if key != self._key and (force or now - self._t >= self.every_s):
+        wait = max(self.every_s, self.COST_X * self._cost)
+        if key != self._key and (force or now - self._t >= wait):
             self._key, self._t = key, now
             raw = c.get("raw")
+            t0 = time.monotonic()
             self.groups = [{k: v for k, v in g.items() if k != "members"}
                            for g in find(c["x"], c["y"], c["up"], raw=raw)]
+            self._cost = time.monotonic() - t0
         return self.groups

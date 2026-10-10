@@ -64,6 +64,7 @@ _sector_editable = True
 _threshold = None                   # crumb threshold, 0-255
 _floor_cut = 0.0                     # m above the floor with no crumbs; 0 = off
 _looks = False                       # combine looks (looks.py); False = classic map
+_fade = True                         # newer sweeps wipe crumbs they don't see again
 _rows = []                          # one summary per detection, for the buttons
 _per_page = 10
 _view = {"page": 0, "selected": []}
@@ -238,6 +239,17 @@ def looks():
         return _looks
 
 
+def set_fade(flag):
+    global _fade
+    with _lock:
+        _fade = bool(flag)
+
+
+def fade():
+    with _lock:
+        return _fade
+
+
 def set_floor_cut(value):
     global _floor_cut
     with _lock:
@@ -390,6 +402,7 @@ border-radius:4px;color:#fff;display:none}
 <label style="white-space:nowrap"><input id="fo" type="checkbox" checked style="width:auto"> follow sub</label>
 <label style="white-space:nowrap"><input id="ol" type="checkbox" checked style="width:auto"> outlines</label>
 <label style="white-space:nowrap" title="off (classic, as on Oct 4): every echo is a crumb. On: crumbs only where 3+ looks agree - best while moving past things; hovering makes blobs"><input id="cl" type="checkbox" style="width:auto"> combine looks</label>
+<label style="white-space:nowrap" title="on: a crumb is wiped when 2 newer sweeps look at that spot and don't hear it again. Off: crumbs stay until Reset, so a faint pipe builds up (so does noise)"><input id="fd" type="checkbox" checked style="width:auto"> fade old crumbs</label>
 <label style="white-space:nowrap" title="with combine looks: grey = every echo, put in the middle of the 25 deg beam"><input id="ok1" type="checkbox" checked style="width:auto"> one-look dots</label>
 <span id="msg" style="color:#8ea"></span></div>
 <div class="bar" style="padding-top:0"><span id="st" style="color:#bbb"></span></div>
@@ -429,6 +442,8 @@ $('mk').onclick=function(){post('/mark',$('rn').value).then(function(x){$('msg')
 $('ar').addEventListener('input',draw);$('fo').addEventListener('change',draw);$('ol').addEventListener('change',draw);$('ok1').addEventListener('change',draw);
 $('cl').addEventListener('change',function(){post('/looks',$('cl').checked?'on':'off')
 .then(function(x){$('msg').textContent='combine looks: '+x;});});
+$('fd').addEventListener('change',function(){post('/fade',$('fd').checked?'on':'off')
+.then(function(x){$('msg').textContent='fade: '+x;});});
 window.addEventListener('resize',draw);
 function fill(i,v){var e=$(i);
 if(!dirty[i]&&document.activeElement!==e&&v!==null&&v!==undefined)e.value=v;}
@@ -494,6 +509,7 @@ D=d;fill('rg',d.range);
 if(d.sector){fill('s0',Math.round(d.sector[0]));fill('s1',Math.round(d.sector[1]));}
 fill('th',d.threshold);if(d.floorCut!=null)fill('fc',d.floorCut);
 if(document.activeElement!==$('cl'))$('cl').checked=!!d.looks;
+if(document.activeElement!==$('fd')&&d.fade!=null)$('fd').checked=!!d.fade;
 $('go').textContent={waiting:'Start',running:'Pause',paused:'Resume'}[d.state]||'Start';
 var p=d.pose;
 var rc=d.recording;$('rec').textContent=rc?'Stop rec':'Record';
@@ -548,7 +564,7 @@ class _Handler(BaseHTTPRequestHandler):
         """
         global _target, _range, _sector, _threshold
         if self.path in ('/sector', '/threshold', '/floorcut', '/mapcmd', '/record', '/mark',
-                         '/missionpoint', '/looks'):
+                         '/missionpoint', '/looks', '/fade'):
             self._map_post()
             return
         if self.path == '/view':
@@ -605,19 +621,22 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(b'ok', 'text/plain')
 
     def _map_post(self):
-        global _sector, _threshold, _floor_cut, _mission_point, _looks
+        global _sector, _threshold, _floor_cut, _mission_point, _looks, _fade
         with _lock:
             on = _map_on
         if not on:
             self.send_error(404)
             return
         text = self._body().decode('utf-8', 'replace').strip()[:300]
-        if self.path == '/looks':
+        if self.path in ('/looks', '/fade'):
             if text not in ('on', 'off'):
                 self._send(b'say on or off', 'text/plain')
                 return
             with _lock:
-                _looks = text == 'on'
+                if self.path == '/looks':
+                    _looks = text == 'on'
+                else:
+                    _fade = text == 'on'
             self._send(b'ok', 'text/plain')
             return
         if self.path == '/missionpoint':
