@@ -116,3 +116,44 @@ Execution: default shell helper currently fails setup refresh; escalated shell
 works. On October 8 automatic approval review became unavailable due to usage
 limits; work paused. No approval bypass was attempted. Required context and
 OpenAI Docs skill were read.
+
+## October 10: pre-dive heading consistency gate
+
+Implemented a pre-dive check on `tether_toggle_beichen`. Before a DIVE intent can
+select the underwater source while still surfaced, the supervisor requires fresh
+VN-100 and Cube headings that agree. When the M9N provides fresh advancing
+course/speed with acceptable velocity uncertainty, valid DVL motion must also
+show straight forward travel, and five distinct GPS reports must sustain the
+comparison for the dwell period. A sustained disagreement withholds dive
+preparation until sustained agreement returns. Stationary, turning, reverse,
+strafe, vertical motion, stale/low-quality course, or GPS/DVL speed disagreement
+skips course comparison and relies on attitude only after explicit frame
+commissioning. No yaw is overwritten and no EKF or kill/arm/ESC control is
+changed.
+
+The true-north/forward-axis validation flag defaults false; offsets and check
+thresholds are startup-only read-only parameters. Commission these references
+before setting the flag true. The DVL check assumes configured body-forward is
+positive x. The current VN driver exposes gyro rate in degrees/second, despite
+the ROS IMU convention; the gate now uses the driver's actual units directly,
+without changing the IMU message shared with the existing external-nav bridge.
+GUI status includes state and reason. Focused unit tests exercise sustained
+agreement, mismatch latching/recovery, wraparound, invalid/stale data, and
+stationary/strafe/reverse gating.
+
+Validation on the native WSL snapshot (`sitl/logs/graey-switch-ayh135lb`, QGC
+forwarding disabled): 113 Python tests passed (2 skipped). Drop-ACK and
+drop-source SITL injections both faulted with navigation readiness withheld.
+One full mission reached its underwater waypoint but aborted before GPS recovery
+because supervisor status age reached 3.60 seconds; a repeated full mission
+passed including GPS recovery. This reproduces the existing intermittent
+supervisor-timing limitation rather than demonstrating a fix. In the nominal
+SITL, the course check reported `Skipped` because simulated GPS course was
+unreliable at the initial speed; it proceeded on the explicitly validated
+synthetic attitude frame. The matching/mismatch course behavior is covered by
+the focused unit tests, not by that stationary-start end-to-end run.
+
+No Jetson/vehicle access, live parameter writes, deployment, or water validation
+was performed. The feature adds a commissioning interlock; it does not solve
+absolute heading accuracy until north references and body-forward axes are
+independently measured.

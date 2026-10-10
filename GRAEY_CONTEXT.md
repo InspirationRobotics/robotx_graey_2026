@@ -515,3 +515,30 @@ October 10 repository GUI fix: existing HTTP navigation start/stop rejection sup
 October 10 authorized Wi-Fi deployment: Jetson fast-forwarded to navigation executable revision87e8788, colcon built and core restarted while freshly disarmed/ESCoff/no mission. GUI/core duplicates removed; deployed HTTP navigation start/stop now409, exactly one VN/DVL/bridge/supervisor verified. Local sonar GUI changes reapplied and unrelated untracked sonar files preserved, so whole checkout is not clean/identical. Runtime VN offset0/fliptrue and bridge offset0 verified after cleanup. Fixed cached-frame parameter writes by making settings startup-only; separate descriptors corrected a metadata alias found live. Final97 Jetson tests passed. Supervisor now Observation/Waiting for healthy navigation due Depth reference unavailable, sourceUnknown/config unverified; restart is not validated frame recovery. No Cube parameters or arming changes. Details: docs/deployment-2026-10-10.md in repo.
 
 October 10 final sync reconciliation: concurrent sonar merge preserved via7160cab; Jetson fast-forwarded with empty tracked diff, matching installed navigation code and GUI; unrelated untracked backups/data remain. Sonar commit2c007c8 reports physically measured inverted VN pitch and downstream VN_PITCH_BACKWARDS compensation. That test was not repeated here; coordinate any upstream pitch fix with downstream compensation removal. This is distinct from yaw offset.
+
+## Pre-dive heading consistency gate — October 10, 2026
+
+The user approved a GPS-course/VN-100/Cube heading consistency gate before
+switching from a surfaced state to the underwater source profile. This is a
+supervisor check, not a GPS yaw correction: GPS course-over-ground is compared
+with the two heading estimates only during valid, sustained, straight forward
+DVL motion. Stationary, reverse, strafe, vertical, turning, stale or poorly
+qualified motion skips the course comparison and may rely on attitude only if
+the heading north references and forward axes have been commissioned. Sustained
+disagreement blocks dive preparation until sustained agreement returns. The
+default heading-reference validation remains false; offsets and thresholds are
+read-only startup parameters. No Cube yaw, EKF, arm, kill, or ESC command is
+changed by this feature.
+
+The VN-100 driver currently publishes gyro values without converting the VN
+degrees/second values into the ROS Imu convention. The new supervisor consumes
+this existing driver-specific value directly for its 5-degree/second turn
+threshold; it does not change the sensor message because the external-nav bridge
+also consumes it. This records code behavior, not independent hardware
+validation. The DVL check assumes its configured body-forward axis is +x, as
+used by the existing bridge and simulator; verify that during commissioning.
+
+This feature is local source work only. No vehicle access, parameter write,
+deployment, or in-water check was performed. The pre-dive gate and source
+transition require software tests and isolated simulation; physical heading
+north calibration and surface-to-underwater behavior remain unverified.

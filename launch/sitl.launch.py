@@ -27,6 +27,7 @@ def generate_launch_description():
              additional_env={'GRAEY_RUNTIME_SCOPE': 'sitl'},
              name='navigation_supervisor', parameters=[{
                  'active': True, 'vehicle_validation_complete': True,
+                 'heading_reference_validated': True,  # synthetic sensors share true-NED axes
                  'mavlink': LaunchConfiguration('supervisor_mavlink'),
                  'depth_topic': '/graey/sitl/depth_m',
                  'reference_file': '/tmp/graey-sitl-navigation-reference.json'}], output='screen'),

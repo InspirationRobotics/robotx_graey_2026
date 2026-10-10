@@ -9,7 +9,7 @@ class Rig:
         self.s = Supervisor(active=active)
         self.o = Observation(healthy=True, depth=.1, depth_valid=True, intent='SURFACE',
             intent_fresh=True, run_id='dive1', gps_good=True, source=1,
-            configuration_verified=True)
+            configuration_verified=True, heading_allowed=True)
         self.t = 0.
         self.commands = []
         self.auto = True

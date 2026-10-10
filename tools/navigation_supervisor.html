@@ -15,6 +15,7 @@
 <article><h2>Depth-qualified vehicle state</h2><div id="surfaceState" class="value">Unknown</div></article></div>
 <p id="reason">Waiting for status</p>
 <p id="gpsQuality">GPS qualification unavailable</p>
+<p id="headingCheck">Pre-dive heading check unavailable</p>
 <article><h2>Dive start / mission zero</h2><div id="reference">No dive reference captured</div></article>
 <footer>Observation mode displays recommendations. Source selection alone does not prove GPS fusion. Dive zero uses a Jetson mission reference; the Cube coordinate frame stays continuous.</footer></main>
 <script>
@@ -27,6 +28,7 @@ $('requested').textContent=depthKnown?(s?.requested_source??'Unknown'):'Unknown'
 $('ready').textContent=s?(s.navigation_ready?'Ready':'Waiting / blocked'):'Unavailable';
 $('reason').textContent=s?.reason??'No current supervisor decision. Previous permissions have expired.';
 $('gpsQuality').textContent='GPS: '+(s?.gps_quality_reason??'Qualification unavailable');
+$('headingCheck').textContent='Pre-dive heading: '+(s?.dive_heading_check?.state??'Unavailable')+' — '+(s?.dive_heading_check?.reason??'No current assessment');
 $('depth').textContent=Number.isFinite(s?.depth_m)?s.depth_m.toFixed(2)+' m':'Calibration or telemetry unavailable';
 $('surfaceState').textContent=depthKnown?(s?.surface_state??(s?.surfaced===true?'Surfaced':s?.surfaced===false?'Submerged':'Unknown')):'Unknown';
 const r=s?.reference;

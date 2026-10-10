@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from rclpy.node import Node
+from rcl_interfaces.msg import ParameterDescriptor
 from std_msgs.msg import Bool, String
 from std_msgs.msg import Float32
 from geometry_msgs.msg import TwistWithCovarianceStamped
@@ -17,6 +18,7 @@ from robotx_graey_2026.api.navigation.mission_reference import MissionReference
 from robotx_graey_2026.api.navigation.gps_quality import GPSQuality
 from robotx_graey_2026.api.navigation.supervisor_logic import Observation, Supervisor
 from robotx_graey_2026.api.navigation.bridge_identity import BridgeIdentity
+from robotx_graey_2026.api.navigation.dive_heading import DiveHeadingCheck
 
 PROFILE = {'EK3_SRC1_POSXY': 6, 'EK3_SRC1_VELXY': 6, 'EK3_SRC1_POSZ': 1,
            'EK3_SRC1_VELZ': 0, 'EK3_SRC1_YAW': 6, 'EK3_SRC2_POSXY': 3,
@@ -34,9 +36,20 @@ class NavigationSupervisor(Node):
                         reference_file='~/robotx_ws/logs/navigation_reference.json',
                         surface_enter_m=.15, surface_exit_m=.4, depth_dwell_s=2.,
                         gps_dwell_s=3., dropout_grace_s=3.,
-                        gps_max_accuracy_m=3., gps_motion_margin_m=2., gps_motion_window_s=10.)
+                        gps_max_accuracy_m=3., gps_motion_margin_m=2., gps_motion_window_s=10.,
+                        heading_reference_validated=False, vn_heading_to_true_deg=0.,
+                        cube_heading_to_true_deg=0., heading_min_speed_mps=.5,
+                        heading_tolerance_deg=15., heading_dwell_s=3.)
+        heading_settings = {
+            'heading_reference_validated', 'vn_heading_to_true_deg',
+            'cube_heading_to_true_deg', 'heading_min_speed_mps',
+            'heading_tolerance_deg', 'heading_dwell_s'}
         for k, v in defaults.items():
-            self.declare_parameter(k, v)
+            if k in heading_settings:
+                self.declare_parameter(k, v, ParameterDescriptor(read_only=True,
+                    description='Startup-only heading check setting; restart to change.'))
+            else:
+                self.declare_parameter(k, v)
         self.settings = {k: self.get_parameter(k).value for k in defaults}
         self.logic = Supervisor(active=self.settings['active'],
             surface_enter=self.settings['surface_enter_m'], surface_exit=self.settings['surface_exit_m'],
@@ -60,6 +73,12 @@ class NavigationSupervisor(Node):
         self.last_gps_time = None
         self.gps_quality = GPSQuality(self.settings['gps_max_accuracy_m'],
             self.settings['gps_motion_margin_m'], self.settings['gps_motion_window_s'])
+        self.heading_check = DiveHeadingCheck(
+            reference_validated=self.settings['heading_reference_validated'],
+            vn_to_true=self.settings['vn_heading_to_true_deg'],
+            cube_to_true=self.settings['cube_heading_to_true_deg'],
+            min_speed=self.settings['heading_min_speed_mps'],
+            tolerance=self.settings['heading_tolerance_deg'], dwell=self.settings['heading_dwell_s'])
         self.baseline = None
         self.switch_trace = None
         self.switch_serial = 0
@@ -103,6 +122,15 @@ class NavigationSupervisor(Node):
         norm = sum(x*x for x in (q.w, q.x, q.y, q.z))
         if self.advancing('vn', stamp):
             self.put('vn', math.isfinite(norm) and .9 < norm < 1.1)
+            if math.isfinite(norm) and .9 < norm < 1.1:
+                self.put('heading_vn', dict(received=time.monotonic(),
+                    yaw=math.degrees(math.atan2(2*(q.w*q.z+q.x*q.y), 1-2*(q.y*q.y+q.z*q.z))) % 360,
+                    # vn100_node currently publishes the VN YBA gyro values
+                    # unchanged (degrees/second) in Imu.angular_velocity.
+                    # Do not convert them a second time here.
+                    rate=getattr(getattr(msg, 'angular_velocity', None), 'z', math.nan)))
+            else:
+                self.samples.pop('heading_vn', None)
 
     def dvl_sample(self, msg):
         try:
@@ -116,10 +144,13 @@ class NavigationSupervisor(Node):
             velocity = tuple(float(v) for v in d['velocity'])
             continuous = self.gps_quality.motion(time.monotonic(), velocity,
                                                 bool(d['valid']) and len(velocity) == 3)
+            self.put('heading_dvl', dict(received=time.monotonic(), velocity=velocity,
+                valid=bool(d['valid']) and len(velocity) == 3 and all(math.isfinite(v) for v in velocity)))
             if not continuous:
                 self.put('gps_good', False)
                 self.put('gps_reason', 'DVL motion history interrupted; GPS must requalify')
         except (ValueError, TypeError, KeyError):
+            self.samples.pop('heading_dvl', None)
             self.gps_quality.motion(time.monotonic(), (), False)
             self.put('gps_good', False)
             self.put('gps_reason', 'Invalid DVL motion sample')
@@ -161,7 +192,7 @@ class NavigationSupervisor(Node):
     def request_telemetry(self):
         # NAV_SRC (message 251) is emitted by the Lua reporter at 5 Hz; it is
         # not a stream the Cube can enable with SET_MESSAGE_INTERVAL.
-        for mid in (24, 32, 49, 193, 137):
+        for mid in (24, 30, 32, 49, 193, 137):
             self.link.command(511, mid, 200000)
         for name in PROFILE:
             self.link.send('param_request_read_send', 1, 1, name.encode(), -1)
@@ -172,6 +203,10 @@ class NavigationSupervisor(Node):
         now = time.monotonic()
         if kind == 'HEARTBEAT':
             self.put('heartbeat', True)
+        elif kind == 'ATTITUDE':
+            if self.advancing('attitude', m.time_boot_ms):
+                self.put('heading_cube', dict(received=now, yaw=math.degrees(m.yaw) % 360,
+                    rate=math.degrees(m.yawspeed)))
         elif kind == 'GPS_GLOBAL_ORIGIN':
             origin = (m.latitude, m.longitude, m.altitude)
             if self.cube_origin is not None and origin != self.cube_origin:
@@ -210,6 +245,11 @@ class NavigationSupervisor(Node):
             d = dict(lat=m.lat/1e7, lon=m.lon/1e7, alt=m.alt/1000,
                      accuracy=getattr(m, 'h_acc', 0)/1000, fix=m.fix_type,
                      receiver_time_us=m.time_usec, received=now)
+            # GPS_RAW_INT course is direction of travel, not antenna/body yaw.
+            vel, cog, acc = getattr(m, 'vel', 65535), getattr(m, 'cog', 65535), getattr(m, 'vel_acc', 0)
+            d.update(speed_mps=vel/100 if 0 <= vel < 65535 else None,
+                     course_deg=cog/100 if 0 <= cog < 36000 else None,
+                     speed_accuracy_mps=acc/1000 if 0 < acc < 4294967295 else None)
             good, reason = self.gps_quality.check(now, d)
             if good:
                 self.last_gps, self.last_gps_time = d, now
@@ -270,7 +310,14 @@ class NavigationSupervisor(Node):
         failed = [name for name, ok in checks if not ok]
         ref_ready = bool(self.reference and self.reference.vehicle_epoch == self.epoch
                          and self.reference.run_id == intent.get('run_id'))
+        heading = self.heading_check.evaluate(now,
+            surface=self.logic.surface is True and depth is not None and math.isfinite(depth)
+                and depth < self.settings['surface_exit_m'],
+            gps_good=self.fresh('gps_good') is True, gps=self.fresh('gps', .5),
+            vn=self.fresh('heading_vn', .5), cube=self.fresh('heading_cube', .5),
+            dvl=self.fresh('heading_dvl', .5))
         o = Observation(healthy=not failed, reason='Unavailable: '+', '.join(failed),
+            heading_allowed=heading['allowed'], heading_reason=heading['reason'],
             depth=depth if depth is not None else float('nan'),
             depth_valid=depth is not None and math.isfinite(depth),
             intent=intent.get('phase', ''), intent_fresh=bool(intent), run_id=intent.get('run_id', ''),
@@ -324,6 +371,7 @@ class NavigationSupervisor(Node):
         status['configuration_verified'] = o.configuration_verified
         status['target_gps'] = intent.get('target_gps')
         status['source_transaction'] = self.switch_trace
+        status['dive_heading_check'] = heading
         status['published_monotonic'] = time.monotonic()
         self.pub.publish(String(data=json.dumps(status, allow_nan=False)))
 
