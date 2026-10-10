@@ -261,7 +261,7 @@ def main():
             "crumbs": crumbs, "oneLook": faint, "sweep": run["sweeps"], "count": len(crumbs),
             "outlines": outliner.update(c, time.monotonic()),
             "range": cur["range"], "sector": list(cur["sector"]),
-            "threshold": cmap.threshold, "floorCut": cmap.floor_cut_m,
+            "threshold": cmap.threshold, "floorCut": cmap.floor_cut_m, "looks": cmap.combine,
             "turning": cmap.turning and run["state"] == "running",
             "skippedTurning": cmap.skipped_turning,
             "slice": reach(*sector_arc(*cur["sector"]), cur["range"]),
@@ -288,6 +288,7 @@ def main():
             raise _Restart
         cmap.threshold = webview.threshold()
         cmap.floor_cut_m = webview.floor_cut()
+        cmap.combine = webview.looks()
         take(partial)
         show(partial)
 
@@ -306,6 +307,7 @@ def main():
                                       for q in cur["poses"]], float),
             pose_alt=np.array([q.alt_m if q else -1.0 for q in cur["poses"]], float),
             vn_pitch_unflipped=S.VN_PITCH_BACKWARDS,    # pose_roll_pitch already turned round
+            combine_looks=cmap.combine,
             floor_cut_m=cmap.floor_cut_m,
             range_m=cur["range"], sector=np.array(cur["sector"]),
             threshold=cmap.threshold, state=run["state"], map_epoch=cur["epoch"],
@@ -328,6 +330,7 @@ def main():
                    range=webview.range_m(), sector=webview.sector())
         cmap.threshold = webview.threshold()
         cmap.floor_cut_m = webview.floor_cut()
+        cmap.combine = webview.looks()
         cmap.new_sweep()
         run["sweeps"] += 1
         start, end = sector_arc(*cur["sector"])
