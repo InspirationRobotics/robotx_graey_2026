@@ -30,7 +30,8 @@ docker build -t graey-sitl sim/                     # once, ~10 min
 HOME_LAT=<pool lat> HOME_LON=<pool lon> sim/run.sh  # WATER_DEPTH=12 for the harbor
 ```
 
-- **QGroundControl** connects by itself (UDP 14550).
+- **QGroundControl:** start with `QGC=1 ... sim/run.sh` and it connects by itself (UDP 14550).
+  Off by default: the simulated sub is MAVLink system 1 like the real Graey, so never both at once.
 - **GUI:** http://localhost:8090 (status; Mission planner tab tracks via pos_server on 8081).
 - **Waypoint test** (surface -> dive 0.5 m -> one GPS waypoint -> surface):
   `docker exec graey-sitl bash -c 'cd /root/robotx_ws/src/robotx_graey_2026 && PYTHONPATH=. python3 sim/waypoint_test.py --lat <lat> --lon <lon>'`

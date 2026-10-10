@@ -94,6 +94,7 @@ def main():
     webview.set_threshold(args.threshold if args.threshold is not None else int(first["threshold"]))
     webview.set_floor_cut(args.floor_cut if args.floor_cut is not None
                           else float(first.get("floor_cut_m", 0.0)))
+    webview.set_looks(bool(first.get("combine_looks", False)))
     print(f"[INFO] replay: http://localhost:{args.port}/map")
 
     play = {"state": "running", "done": False}
@@ -109,7 +110,8 @@ def main():
                 play["state"] = "running"
             elif cmd == "reset":
                 return True
-        return webview.threshold() != cmap.threshold or webview.floor_cut() != cmap.floor_cut_m
+        return (webview.threshold() != cmap.threshold or webview.floor_cut() != cmap.floor_cut_m
+                or webview.looks() != cmap.combine)
 
     outliner = Outliner()
 
@@ -127,7 +129,7 @@ def main():
             "count": len(crumbs), "range": float(s["range_m"]),
             "outlines": outliner.update(c, time.monotonic(), force=play["done"]),
             "sector": [float(v) for v in s["sector"]], "threshold": cmap.threshold,
-            "floorCut": cmap.floor_cut_m,
+            "floorCut": cmap.floor_cut_m, "looks": cmap.combine,
             "turning": cmap.turning, "skippedTurning": cmap.skipped_turning,
             "slice": reach(*sector_arc(*s["sector"]), float(s["range_m"]))})
 
@@ -135,7 +137,8 @@ def main():
         play["done"] = False
         play["state"] = "running"
         cmap = CrumbMap(threshold=webview.threshold(), max_turn_dps=args.max_turn,
-                        floor_cut_m=webview.floor_cut(), sonar_fwd_m=float(first["sonar_fwd_m"]),
+                        floor_cut_m=webview.floor_cut(), combine=webview.looks(),
+                        sonar_fwd_m=float(first["sonar_fwd_m"]),
                         sonar_right_m=float(first["sonar_right_m"]))
         track, recent, here = [], [], None
         outliner.clear()
