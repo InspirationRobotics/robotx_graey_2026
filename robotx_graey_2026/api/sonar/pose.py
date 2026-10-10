@@ -35,9 +35,12 @@ RELAY_PORT = 14660      # where tools/pose_relay.py sends to
 HISTORY_S = 120.0       # how far back pose_at() can look
 STALE_S = 1.0           # no DVL velocity for this long = not valid
 MAX_GAP_S = 0.5         # pose_at() won't guess further than this past the data
+ALT_STALE_S = 2.0       # an altitude older than this is not used
 RECORD_S = 0.05         # attitude comes fast; keep at most one pose per this
 
-Pose = namedtuple("Pose", "t x y heading_deg valid roll_deg pitch_deg", defaults=(0.0, 0.0))
+# alt_m: the DVL's height above the bottom, -1 when it has none (no lock, or not heard lately)
+Pose = namedtuple("Pose", "t x y heading_deg valid roll_deg pitch_deg alt_m",
+                  defaults=(0.0, 0.0, -1.0))
 
 
 def _quat_mul(a, b):
@@ -87,6 +90,7 @@ class DeadReckoner:
         self._ne = [0.0, 0.0]       # north, east since reset, metres
         self._yaw0 = None           # heading at reset
         self._hist = []             # Pose, oldest first
+        self._alt = (-1.0, None)    # DVL altitude and when it came
         self._times = []            # their .t, for bisect
         self.reset_needed = True    # reset() as soon as there is an attitude
 
@@ -103,6 +107,11 @@ class DeadReckoner:
     def on_dvl_valid(self, ok, t=None):
         with self._lock:
             self._dvl_ok = bool(ok)
+
+    def on_altitude(self, alt, t=None):
+        t = time.monotonic() if t is None else t
+        with self._lock:
+            self._alt = (float(alt), t)
 
     def on_velocity(self, v_body, t=None):
         t = time.monotonic() if t is None else t
@@ -150,7 +159,8 @@ class DeadReckoner:
                         (a.heading_deg + f * wrap180(b.heading_deg - a.heading_deg)) % 360.0,
                         a.valid and b.valid,
                         a.roll_deg + f * (b.roll_deg - a.roll_deg),
-                        a.pitch_deg + f * (b.pitch_deg - a.pitch_deg))
+                        a.pitch_deg + f * (b.pitch_deg - a.pitch_deg),
+                        a.alt_m + f * (b.alt_m - a.alt_m) if min(a.alt_m, b.alt_m) > 0 else -1.0)
 
     def turn_rate(self, t, window=0.3):
         """How fast the sub was turning just before t, degrees per second
@@ -180,8 +190,10 @@ class DeadReckoner:
         y = n * math.cos(a) + e * math.sin(a)
         x = -n * math.sin(a) + e * math.cos(a)
         fresh = self._last_vel_t is not None and t - self._last_vel_t < STALE_S
+        alt, alt_t = self._alt
+        alt = alt if alt > 0 and alt_t is not None and t - alt_t < ALT_STALE_S else -1.0
         return Pose(t, x, y, (heading_of(self._q) - self._yaw0) % 360.0,
-                    self._dvl_ok and fresh, *roll_pitch_of(self._q))
+                    self._dvl_ok and fresh, *roll_pitch_of(self._q), alt)
 
     def _record(self, t):
         if self._times and t <= self._times[-1]:
@@ -202,6 +214,7 @@ class UdpPose(DeadReckoner):
 
     def __init__(self, port=RELAY_PORT):
         super().__init__()
+        self.log = None             # log(t, packet): every reading as it arrives, for recordings
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.bind(("127.0.0.1", port))
         threading.Thread(target=self._listen, daemon=True).start()
@@ -212,9 +225,14 @@ class UdpPose(DeadReckoner):
                 d = json.loads(self._sock.recv(512))
             except ValueError:
                 continue                    # not one of ours; ignore it
+            log = self.log
+            if log is not None:
+                log(time.monotonic(), d)
             if "att" in d:
                 self.on_attitude(tuple(d["att"]))
             elif "vel" in d:
                 self.on_velocity(tuple(d["vel"]))
             elif "ok" in d:
                 self.on_dvl_valid(d["ok"])
+            elif "alt" in d:
+                self.on_altitude(d["alt"])

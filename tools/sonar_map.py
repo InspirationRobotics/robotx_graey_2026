@@ -21,9 +21,11 @@ once. A new threshold applies from the next ping. Pings taken while the sub
 turns faster than --max-turn are ignored (crumbs.py says why).
 
 Every sweep, finished or cut short, is saved with the pose at each ping, so a
-run can be replayed on the Mac.
+run can be replayed on the Mac. Record (Map tab) also keeps every VN-100/DVL
+reading, the settings and your notes in a folder of its own (recorder.py).
 """
 import argparse
+import json
 import math
 import atexit
 import os
@@ -36,7 +38,8 @@ import numpy as np
 from robotx_graey_2026.api.sonar import settings as S
 from robotx_graey_2026.api.sonar import webview
 from robotx_graey_2026.api.sonar.outlines import Outliner
-from robotx_graey_2026.api.sonar.crumbs import MAX_TURN_DPS, THRESHOLD, CrumbMap
+from robotx_graey_2026.api.sonar.recorder import Recorder
+from robotx_graey_2026.api.sonar.crumbs import FLOOR_CUT_M, MAX_TURN_DPS, THRESHOLD, CrumbMap
 from robotx_graey_2026.api.sonar.detect import perceive
 from robotx_graey_2026.api.sonar.pose import RELAY_PORT, UdpPose
 from robotx_graey_2026.api.sonar.sweep import Sonar
@@ -114,6 +117,8 @@ def main():
                         "(default 180 -> 0 = the bottom half)")
     p.add_argument("--step", type=float, default=2.0, help="degrees between pings")
     p.add_argument("--threshold", type=int, default=THRESHOLD, help="crumb threshold, 1-255")
+    p.add_argument("--floor-cut", type=float, default=FLOOR_CUT_M,
+                   help="m: no crumbs from echoes this close above the floor (DVL altitude); 0 = off")
     p.add_argument("--max-turn", type=float, default=MAX_TURN_DPS,
                    help="deg/s; pings while turning faster than this are ignored")
     p.add_argument("--down-gradian", type=int, default=S.DOWN_GRADIAN)
@@ -153,9 +158,40 @@ def main():
     webview.set_range_editable(True)
     webview.set_sector(args.start, args.end)
     webview.set_threshold(args.threshold)
+    webview.set_floor_cut(args.floor_cut)
     print(f"[INFO] map: http://<this-computer>:{args.port}/map")
 
-    cmap = CrumbMap(threshold=args.threshold, max_turn_dps=args.max_turn)
+    cmap = CrumbMap(threshold=args.threshold, max_turn_dps=args.max_turn,
+                    floor_cut_m=args.floor_cut)
+    rec = Recorder(os.path.dirname(save_dir) if save_dir else "sonar_data")
+    atexit.register(lambda: rec.stop(stopped_by="map tool closed") if rec.active else None)
+    seen = {"settings": None}
+
+    def settings_now():
+        return {"range_m": webview.range_m(), "sector": list(webview.sector()),
+                "step_deg": args.step, "threshold": webview.threshold(),
+                "floor_cut_m": webview.floor_cut(), "max_turn_dps": args.max_turn}
+
+    def recording():
+        """Record / Stop / Mark presses, and settings changes into the marks."""
+        for cmd, note in webview.record_commands():
+            if cmd == "start":
+                meta = {"settings": settings_now(), "ping360": dict(sonar.settings),
+                        "mount": {"down_gradian": args.down_gradian, "sonar_fwd_m": S.SONAR_FWD_M,
+                                  "sonar_right_m": S.SONAR_RIGHT_M, "min_range_m": S.MIN_RANGE_M,
+                                  "beam_deg": [S.BEAM_IN_PLANE_DEG, S.BEAM_FORE_AFT_DEG]},
+                        "map_state": run["state"], "device": args.device or args.udp}
+                print(f"[INFO] recording to {rec.start(note, meta)}")
+                pose.log = rec.nav
+                seen["settings"] = None
+            elif cmd == "stop":
+                pose.log = None
+                print(f"[INFO] recording saved: {rec.stop(ping360_at_end=dict(sonar.settings))}")
+            elif cmd == "mark":
+                rec.mark(note or "(mark)")
+        if rec.active and settings_now() != seen["settings"]:
+            seen["settings"] = settings_now()
+            rec.mark("settings: " + json.dumps(seen["settings"]), auto=True)
     radar = Radar()
     outliner = Outliner()
     track = []
@@ -188,6 +224,7 @@ def main():
                 new_origin()
                 restart = True
             print(f"[INFO] {cmd} -> {run['state']}")
+            rec.mark(f"map {cmd} -> {run['state']}", auto=True)
         return restart
 
     def take(sweep):
@@ -226,10 +263,11 @@ def main():
             "crumbs": crumbs, "sweep": run["sweeps"], "count": len(crumbs),
             "outlines": outliner.update(c, time.monotonic()),
             "range": cur["range"], "sector": list(cur["sector"]),
-            "threshold": cmap.threshold,
+            "threshold": cmap.threshold, "floorCut": cmap.floor_cut_m,
             "turning": cmap.turning and run["state"] == "running",
             "skippedTurning": cmap.skipped_turning,
-            "slice": reach(*sector_arc(*cur["sector"]), cur["range"])})
+            "slice": reach(*sector_arc(*cur["sector"]), cur["range"]),
+            "recording": rec.status()})
 
     def show(sweep, force=False):
         t = time.monotonic()
@@ -245,34 +283,44 @@ def main():
             last["radar"] = t
 
     def live(partial):
+        recording()
         restart = buttons()
         if (restart or webview.range_m() != cur["range"]
                 or webview.sector() != cur["sector"]):
             raise _Restart
         cmap.threshold = webview.threshold()
+        cmap.floor_cut_m = webview.floor_cut()
         take(partial)
         show(partial)
 
     def save(aborted):
         sweep = cur.get("sweep")
-        if save_dir is None or sweep is None:
+        also = rec.sweep_path(run["sweeps"]) if sweep is not None else None
+        if (save_dir is None and also is None) or sweep is None:
             return
         poses = np.array([[q.x, q.y, q.heading_deg, q.valid] if q else [np.nan] * 4
                           for q in cur["poses"]], float)
-        np.savez_compressed(
-            os.path.join(save_dir, f"sweep_{run['sweeps']:05d}.npz"),
+        data = dict(
             image=sweep.image, angles_deg=np.array(sweep.angles_deg),
             ping_times=np.array(sweep.ping_times or [], float),
             metres_per_bin=sweep.metres_per_bin, pose_x_y_heading_valid=poses,
             pose_roll_pitch=np.array([[q.roll_deg, q.pitch_deg] if q else [np.nan] * 2
                                       for q in cur["poses"]], float),
+            pose_alt=np.array([q.alt_m if q else -1.0 for q in cur["poses"]], float),
+            floor_cut_m=cmap.floor_cut_m,
             range_m=cur["range"], sector=np.array(cur["sector"]),
             threshold=cmap.threshold, state=run["state"], map_epoch=cur["epoch"],
             used=np.array(cur["used"], bool),
             sonar_fwd_m=cmap.sonar_fwd_m, sonar_right_m=cmap.sonar_right_m,
+            ping360=json.dumps(sonar.settings), step_deg=args.step,
             aborted=aborted, wall_time=time.time())
+        for path in (os.path.join(save_dir, f"sweep_{run['sweeps']:05d}.npz") if save_dir else None,
+                     also):
+            if path:
+                np.savez_compressed(path, **data)
 
     while True:
+        recording()
         buttons()                        # presses between sweeps: a new one starts anyway
         cur.clear()
         # epoch as the sweep began: Start/Reset end a sweep, so all its pings
@@ -280,6 +328,7 @@ def main():
         cur.update(done=0, poses=[], used=[], epoch=run["epoch"],
                    range=webview.range_m(), sector=webview.sector())
         cmap.threshold = webview.threshold()
+        cmap.floor_cut_m = webview.floor_cut()
         cmap.new_sweep()
         run["sweeps"] += 1
         start, end = sector_arc(*cur["sector"])

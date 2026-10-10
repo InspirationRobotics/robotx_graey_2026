@@ -10,12 +10,12 @@ active buoy, on the surface. Built in steps, each checked in the simulator:
               about one ping, and the 25 deg fan is ~3.5 m wide 8 m down - so
               this only finds WHERE: the biggest bunch of crumbs, joined at
               far_link_m instead of the map's 0.5 m
-  TO SPOT     above that bunch, down to close_height above the pipe's highest
-              possible top: the floor (depth + DVL altitude) less pipe_max_height
-              (Ruth's clearance rule). Not from the crumbs' heights: from up here
-              the strongest echoes are the base frames on the floor, and the
-              pipe barely shows (sim, Oct 9). On the way down, the DVL altitude
-              is watched and the descent stops at that height above the floor
+  TO SPOT     over that bunch, still at far_depth
+  DESCEND     down until the sonar says the highest thing below (pipe or light
+              box) is close_height away (Ruth: depth near the pipe is measured
+              from the pipe). Down in 0.5 m steps while nothing is seen yet.
+              Never below the floor limit: DVL altitude pipe_max_height +
+              close_height (the pipe's highest possible top, Ruth's rule)
   CLOSE SCAN  the same turn, map Reset, shorter range: crumbs dense enough to
               join into outlines (api/sonar/outlines.py)
   PICK        the most pipe-like outline; none scoring min_score -> surface.
@@ -32,6 +32,11 @@ is (0,0) = where the sub was at Start, +y = the heading then; the EKF's
 position and heading at that moment turn map points into NED. Crumb heights
 ("up") are relative to the DVL at the ping, so with the depth held, the pipe's
 top is the scan depth minus the highest crumb's up.
+
+DEPTHS. Before and after the pipe (the dive, the far scan, surfacing) depth is
+from the surface, taken as the depth reading when the mission starts, so a
+depth sensor that is off by a constant does no harm (the sim's drifted 2 m).
+Near the pipe it is from the pipe, as above.
 
 SAFETY: as every MissionBase mission - dry_run defaults True and then nothing
 is sent; changing flight mode hands the sub to the pilot and this exits. No
@@ -54,6 +59,8 @@ from robotx_graey_2026.api.sonar import outlines
 # only re-sent as insurance.
 mission_base.RESEND_S = 20.0
 SETTLE_S = 6.0          # after a scan: the last sweep lands and the outlines refresh
+DESCEND_SECTOR = '240 300'   # +-30 deg either side of straight down, so sweeps come fast
+BELOW_RADIUS_M = 1.0    # echoes this close to straight below count as "below"
 
 
 def wrap_pi(a):
@@ -72,6 +79,8 @@ class PipelineMission(MissionBase):
         self.spot = None                    # (n, e, pipe top depth) from the far scan
         self.pipe = None                    # the outline picked, in NED
         self.map_down_since = None
+        self.z_surf = 0.0
+        self.step_z = None                  # DESCEND's current target
         self.altitude = None                # (metres above the bottom, time); -1 = no lock
         self.create_subscription(Float32, '/graey/dvl/altitude', self.on_altitude, 10)
 
@@ -94,8 +103,11 @@ class PipelineMission(MissionBase):
         p('pipe_max_height', 2.05)          # m, floor to the top of a light box: handbook
                                             # "1-2 m", 3.5.5 parts list ~1.9 m, box 0.15 m
         p('close_range', 6.0)
-        p('max_depth', 10.0)                # never sent a target deeper than this
+        p('max_depth', 10.0)                # m below the surface; no target ever goes deeper
         p('scan_sector', '180 0')           # bottom half: left, down, right
+        p('far_threshold', 90)              # the pipe 7 m down is faint (sim: ~100)
+        p('floor_cut', 1.0)                 # m: the handbook puts the pipe 1-2 m up, so no
+                                            # crumbs from the metre above the floor
         p('scan_threshold', 120)
         p('scan_turn_deg', 360.0)
         p('scan_rate_dps', 4.0)
@@ -113,10 +125,32 @@ class PipelineMission(MissionBase):
         self.max_depth = g('max_depth')
         self.scan_sector = g('scan_sector')
         self.scan_threshold = g('scan_threshold')
+        self.far_threshold = g('far_threshold')
+        self.floor_cut = g('floor_cut')
         self.scan_turn = math.radians(g('scan_turn_deg'))
         self.scan_rate = math.radians(g('scan_rate_dps'))
         self.min_score = g('min_score')
         self.timeout = g('phase_timeout')   # per phase: each one restarts the clock
+
+    # ---------- depth from the surface ----------
+    def enter(self, s):
+        if s is S.ARM:
+            self.z_surf = self.cur[2] if self.cur else 0.0
+            self.get_logger().info(f'surface reads {self.z_surf:.2f} m; depths are from there')
+        super().enter(s)
+
+    def goto(self, forward, right, down, label):
+        """MissionBase's dive, gate and surface targets, from the surface."""
+        super().goto(forward, right, self.z_surf + down, label)
+
+    def below_surface(self, z):
+        return z - self.z_surf
+
+    def goto_ned(self, n, e, down, yaw, label):
+        super().goto_ned(n, e, min(down, self.z_surf + self.max_depth), yaw, label)
+
+    def stream_posvel(self, n, e, down, vn, ve, yaw_rate, label):
+        super().stream_posvel(n, e, min(down, self.z_surf + self.max_depth), vn, ve, yaw_rate, label)
 
     # ---------- the sonar map, through its web page ----------
     def map_post(self, path, body):
@@ -162,7 +196,7 @@ class PipelineMission(MissionBase):
 
     def search(self):
         if self.phase is None:
-            self.hold_here(self.depth, 'hold')
+            self.hold_here(self.z_surf + self.depth, 'hold')
             self.start_scan('far')
         ph = self.phase.split(': ')[-1]
 
@@ -170,7 +204,8 @@ class PipelineMission(MissionBase):
             # range first: changing it restarts the sweep
             self.map_post('/range', self.far_range if self.scan == 'far' else self.close_range)
             self.map_post('/sector', self.scan_sector)
-            self.map_post('/threshold', self.scan_threshold)
+            self.map_post('/threshold', self.far_threshold if self.scan == 'far' else self.scan_threshold)
+            self.map_post('/floorcut', self.floor_cut)
             for cmd in ('reset', 'start', 'resume'):    # whatever state it was in
                 self.map_post('/mapcmd', cmd)
             self.to_phase(f'{self.scan} scan: map start')
@@ -202,17 +237,52 @@ class PipelineMission(MissionBase):
                 (self.locate if self.scan == 'far' else self.pick)(self.map_get())
 
         elif ph == 'to spot':
-            n, e, down = self.spot
-            self.goto_ned(n, e, down, self.hold[3], 'above the pipe')
+            n, e, _ = self.spot
+            self.goto_ned(n, e, self.hold[2], self.hold[3], 'over the bunch')
+            if self.cur and math.hypot(self.cur[0] - n, self.cur[1] - e) < 0.3 and self.speed() < 0.05:
+                self.hold_here(self.hold[2], 'hold')
+                self.step_z = self.hold[2]
+                self.map_post('/sector', DESCEND_SECTOR)        # a narrow look straight down
+                self.map_post('/mapcmd', 'reset')
+                self.to_phase('descend')
+
+        elif ph == 'descend':
+            n, e, floor_z = self.spot
+            limit = floor_z - self.pipe_max - self.close_height
             alt = self.floor_clearance()
-            if not self.dry and alt is not None and alt < self.pipe_max + self.close_height - 0.2:
-                self.get_logger().warn(f'floor {alt:.1f} m below - stopping the descent here')
-                self.hold_here(self.cur[2], 'hold')
-                self.start_scan('close')
-            elif self.reached() or (self.cur and math.dist(self.cur, (n, e, down)) < 0.3
-                                    and self.speed() < 0.05):
-                self.hold_here(down, 'hold')
-                self.start_scan('close')
+            if alt is not None and self.cur:
+                limit = min(limit, self.cur[2] + alt - self.pipe_max - self.close_height)
+            below = self.pipe_below(self.map_get())
+            if below is not None:
+                want = min(self.cur[2] + below - self.close_height, limit)
+                if abs(below - self.close_height) < 0.15:
+                    self.get_logger().info(f'pipe top {below:.2f} m below at '
+                                           f'{self.below_surface(self.cur[2]):.2f} m down - holding here')
+                    self.hold_here(self.cur[2], 'hold')
+                    self.start_scan('close')
+                    return
+                self.step_z = want
+            elif self.cur and abs(self.cur[2] - self.step_z) < 0.1:
+                if self.step_z >= limit - 0.05:
+                    self.get_logger().warn(f'floor limit {self.below_surface(limit):.1f} m down, '
+                                           f'no pipe seen below - scanning from here')
+                    self.hold_here(self.cur[2], 'hold')
+                    self.start_scan('close')
+                    return
+                self.step_z = min(self.step_z + 0.5, limit)       # nothing seen yet: a bit lower
+            self.goto_ned(n, e, self.step_z, self.hold[3], 'descend')
+
+    def pipe_below(self, m):
+        """How far below the sonar the highest raised echo near straight down is
+        (pipe or light box top; the map has already cut the floor), or None."""
+        if not m.get('crumbs') or not m.get('sonar'):
+            return None
+        c = np.array(m['crumbs']).reshape(-1, 5)
+        sx, sy = m['sonar']
+        near = np.hypot(c[:, 0] - sx, c[:, 1] - sy) < BELOW_RADIUS_M
+        if near.sum() < 2:
+            return None
+        return float(-np.max(c[near, 4]))
 
     def locate(self, m):
         """Far scan: the biggest bunch of crumbs is where the pipe is."""
@@ -225,18 +295,17 @@ class PipelineMission(MissionBase):
         g = max(groups, key=lambda gr: gr['n'])
         pts = c[g['members']]
         n, e = self.map_to_ned(float(np.mean(pts[:, 0])), float(np.mean(pts[:, 1])))
-        alt = 0.0 if self.dry else self.floor_clearance()
+        alt = 9.0 if self.dry else self.floor_clearance()
         if alt is None:
             self.get_logger().warn('far scan: no DVL altitude, so no safe depth to go down to - surfacing')
             self.enter(S.SURFACE)
             return
-        floor = self.hold[2] + alt if not self.dry else self.hold[2] + 9.0
-        down = min(floor - self.pipe_max - self.close_height, self.max_depth)
-        self.spot = (n, e, max(down, self.hold[2]))     # never shallower than we are
+        floor = self.hold[2] + alt
+        self.spot = (n, e, floor)
         self.get_logger().info(
             f'far scan: {len(c)} crumbs, biggest bunch {g["n"]} at NED ({n:.1f}, {e:.1f}); floor '
-            f'{floor:.1f} m deep, pipe top at most {floor - self.pipe_max:.1f} m -> going to '
-            f'{self.spot[2]:.1f} m')
+            f'{self.below_surface(floor):.1f} m down, so the pipe top is at most '
+            f'{self.below_surface(floor) - self.pipe_max:.1f} m down')
         self.to_phase('to spot')
 
     def pick(self, m):

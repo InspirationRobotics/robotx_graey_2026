@@ -57,9 +57,11 @@ _range_editable = False
 _map_on = False                     # the tool has a breadcrumb map: show the tabs
 _map_json = b'{}'                   # latest map snapshot, already encoded
 _map_cmds = []                      # Start/Pause/Resume/Reset presses, oldest first
+_rec_cmds = []                      # ("start", note) / ("stop", "") / ("mark", note)
 _sector = None                      # (start, end) degrees, swept counterclockwise
 _sector_editable = True
 _threshold = None                   # crumb threshold, 0-255
+_floor_cut = 0.0                     # m above the floor with no crumbs; 0 = off
 _rows = []                          # one summary per detection, for the buttons
 _per_page = 10
 _view = {"page": 0, "selected": []}
@@ -179,6 +181,14 @@ def set_map(snapshot):
         _map_json = data
 
 
+def record_commands():
+    """Record / Stop / Mark presses since last asked, oldest first."""
+    global _rec_cmds
+    with _lock:
+        cmds, _rec_cmds = _rec_cmds, []
+    return cmds
+
+
 def map_commands():
     """Button presses since last asked, oldest first, then forgotten."""
     global _map_cmds
@@ -208,6 +218,17 @@ def set_threshold(value):
 def threshold():
     with _lock:
         return _threshold
+
+
+def set_floor_cut(value):
+    global _floor_cut
+    with _lock:
+        _floor_cut = float(value)
+
+
+def floor_cut():
+    with _lock:
+        return _floor_cut
 
 
 # Fills the window, keeping the aspect ratio. The frame is rendered large to
@@ -320,10 +341,13 @@ border-radius:4px;color:#fff;display:none}
 <div class="bar">
 <span style="white-space:nowrap"><a href="/">Radar</a> <b style="color:#fff">Map</b></span>
 <button id="go">Start</button><button id="rs">Reset</button>
+<span title="what this recording is: where the pipe is, which way, what you're doing"><input id="rn" placeholder="note for the recording" style="width:15em"></span>
+<button id="rec">Record</button><button id="mk" title="stamp this moment, with the note">Mark</button>
 <span>range <input id="rg" type="number" step="0.5" min="2" max="20"> m</span>
 <span>sector <input id="s0" type="number" step="1" min="0" max="359"> to
 <input id="s1" type="number" step="1" min="0" max="359"></span>
 <span>threshold <input id="th" type="number" step="5" min="1" max="255"></span>
+<span title="no crumbs from echoes this close above the seafloor (DVL altitude); 0 = off">floor cut <input id="fc" type="number" step="0.1" min="0" max="3"> m</span>
 <button id="set">set</button>
 <span>map area <input id="ar" type="number" step="1" min="1" max="200" value="10"> m</span>
 <label style="white-space:nowrap"><input id="fo" type="checkbox" checked style="width:auto"> follow sub</label>
@@ -344,7 +368,7 @@ var $=function(i){return document.getElementById(i);};
 var cv=$('cv'),ctx=cv.getContext('2d'),D=null,dirty={};
 function post(path,body){return fetch(path,{method:'POST',body:body})
 .then(function(r){return r.text();});}
-['rg','s0','s1','th'].forEach(function(i){
+['rg','s0','s1','th','fc'].forEach(function(i){
 $(i).addEventListener('input',function(){dirty[i]=1;});
 $(i).addEventListener('keydown',function(e){if(e.key==='Enter')apply();});});
 function apply(){var jobs=[];
@@ -352,6 +376,7 @@ if(dirty.rg)jobs.push(post('/range',$('rg').value).then(function(x){return 'rang
 if(dirty.s0||dirty.s1)jobs.push(post('/sector',$('s0').value+' '+$('s1').value)
 .then(function(x){return 'sector: '+x;}));
 if(dirty.th)jobs.push(post('/threshold',$('th').value).then(function(x){return 'threshold: '+x;}));
+if(dirty.fc)jobs.push(post('/floorcut',$('fc').value).then(function(x){return 'floor cut: '+x;}));
 dirty={};
 if(!jobs.length){$('msg').textContent='nothing changed';return;}
 Promise.all(jobs).then(function(m){$('msg').textContent=m.join('   ');});}
@@ -359,6 +384,9 @@ $('set').onclick=apply;
 $('go').onclick=function(){var c={waiting:'start',running:'pause',paused:'resume'}[D&&D.state];
 if(c)post('/mapcmd',c);};
 $('rs').onclick=function(){post('/mapcmd','reset');};
+$('rec').onclick=function(){post('/record',D&&D.recording?'stop':'start '+$('rn').value)
+.then(function(x){$('msg').textContent='record: '+x;});};
+$('mk').onclick=function(){post('/mark',$('rn').value).then(function(x){$('msg').textContent='mark: '+x;});};
 $('ar').addEventListener('input',draw);$('fo').addEventListener('change',draw);$('ol').addEventListener('change',draw);
 window.addEventListener('resize',draw);
 function fill(i,v){var e=$(i);
@@ -388,6 +416,10 @@ var th=D.threshold||100,R=Math.max(2.5,Math.min(5,px*0.05));
 D.crumbs.forEach(function(q){if((q[3]>0?1:0)!==faded)return;
 ctx.fillStyle=hue(q[2],th);ctx.beginPath();ctx.arc(X(q[0]),Y(q[1]),R,0,7);ctx.fill();});});
 ctx.globalAlpha=1;
+if(D.truth){ctx.save();ctx.setLineDash([7,5]);ctx.strokeStyle='rgba(255,255,255,0.6)';ctx.lineWidth=2;
+ctx.beginPath();D.truth.pipe.forEach(function(p,i){if(i)ctx.lineTo(X(p[0]),Y(p[1]));else ctx.moveTo(X(p[0]),Y(p[1]));});
+ctx.stroke();ctx.restore();ctx.strokeStyle='#ffa83c';ctx.lineWidth=2;
+D.truth.boxes.forEach(function(b){ctx.strokeRect(X(b[0])-5,Y(b[1])-5,10,10);});}
 if($('ol').checked&&D.outlines){ctx.font='12px sans-serif';
 D.outlines.forEach(function(g,i){var best=i===0&&g.score>=0.5;
 ctx.strokeStyle=best?'rgba(255,220,80,0.9)':'rgba(255,255,255,0.45)';ctx.lineWidth=1;ctx.beginPath();
@@ -410,10 +442,14 @@ ctx.closePath();ctx.fill();}}
 (function poll(){fetch('/mapdata').then(function(r){return r.json();}).then(function(d){
 D=d;fill('rg',d.range);
 if(d.sector){fill('s0',Math.round(d.sector[0]));fill('s1',Math.round(d.sector[1]));}
-fill('th',d.threshold);
+fill('th',d.threshold);if(d.floorCut!=null)fill('fc',d.floorCut);
 $('go').textContent={waiting:'Start',running:'Pause',paused:'Resume'}[d.state]||'Start';
 var p=d.pose;
-$('st').textContent=d.state+'   sweep '+d.sweep+'   '+d.count+' crumbs   DVL '+d.dvl+
+var rc=d.recording;$('rec').textContent=rc?'Stop rec':'Record';
+$('rec').style.background=rc?'#8a1a1a':'';
+$('st').textContent=(d.truth?'SIM: dashed = real pipeline, orange = light boxes   ':'')+
+(rc?'\\u25cf REC '+rc.name+' '+rc.seconds+' s, '+rc.sweeps+' sweeps   ':'')+
+d.state+'   sweep '+d.sweep+'   '+d.count+' crumbs   DVL '+d.dvl+
 (p?'   x '+p[0].toFixed(2)+'  y '+p[1].toFixed(2)+'  heading '+p[2].toFixed(0)+'\\u00b0':'');
 var msg='',bg='';
 if(d.dvl==='no data'){msg='no VectorNav / DVL data yet - is pose_relay.py running?';bg='#7a2a1a';}
@@ -460,7 +496,7 @@ class _Handler(BaseHTTPRequestHandler):
         network can reach it, and all of these are short.
         """
         global _target, _range, _sector, _threshold
-        if self.path in ('/sector', '/threshold', '/mapcmd'):
+        if self.path in ('/sector', '/threshold', '/floorcut', '/mapcmd', '/record', '/mark'):
             self._map_post()
             return
         if self.path == '/view':
@@ -517,13 +553,27 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(b'ok', 'text/plain')
 
     def _map_post(self):
-        global _sector, _threshold
+        global _sector, _threshold, _floor_cut
         with _lock:
             on = _map_on
         if not on:
             self.send_error(404)
             return
-        text = self._body().decode('utf-8', 'replace').strip()
+        text = self._body().decode('utf-8', 'replace').strip()[:300]
+        if self.path in ('/record', '/mark'):
+            if self.path == '/mark':
+                cmd = ("mark", text)
+            elif text == 'stop':
+                cmd = ("stop", "")
+            elif text.startswith('start'):
+                cmd = ("start", text[5:].strip())
+            else:
+                self._send(b'say start <note> or stop', 'text/plain')
+                return
+            with _lock:
+                _rec_cmds.append(cmd)
+            self._send(b'ok', 'text/plain')
+            return
         if self.path == '/mapcmd':
             if text not in ('start', 'pause', 'resume', 'reset'):
                 self._send(b'unknown button', 'text/plain')
@@ -547,6 +597,18 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             with _lock:
                 _sector = (a, b)
+            self._send(b'ok', 'text/plain')
+            return
+        if self.path == '/floorcut':
+            try:
+                cut = float(text)
+            except ValueError:
+                cut = -1.0
+            if not 0.0 <= cut <= 3.0:
+                self._send(b'need 0-3 m', 'text/plain')
+                return
+            with _lock:
+                _floor_cut = cut
             self._send(b'ok', 'text/plain')
             return
         try:

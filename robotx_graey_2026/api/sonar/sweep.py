@@ -98,6 +98,11 @@ def angle_deg_to_gradian(angle_deg, down_gradian=None):
     return int(round(g)) % S.GRADIANS
 
 
+# the Ping360's own settings, as each reply reports them
+PING_FIELDS = ("mode", "gain_setting", "transmit_duration", "sample_period",
+               "transmit_frequency", "number_of_samples")
+
+
 class Sonar:
     def __init__(self, device=None, udp=None, baudrate=115200,
                  down_gradian=None):
@@ -124,6 +129,7 @@ class Sonar:
 
         self.down_gradian = S.DOWN_GRADIAN if down_gradian is None else down_gradian
         self._configured_range = None
+        self.settings = {}
 
     def _configure_range(self, max_range_m):
         """Set sample count and timing for the range we want.
@@ -174,6 +180,8 @@ class Sonar:
         for ang in angles:
             resp = self._ping.transmitAngle(angle_deg_to_gradian(ang, self.down_gradian))
             times.append(time.monotonic())
+            if resp is not None:            # what the head actually used, for recordings
+                self.settings = {k: getattr(resp, k) for k in PING_FIELDS if hasattr(resp, k)}
             data = getattr(resp, "data", None)
             if data is None:
                 rows.append(np.zeros(self.n_samples, dtype=np.uint8))

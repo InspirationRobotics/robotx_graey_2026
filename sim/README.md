@@ -8,7 +8,7 @@ Runs Graey's flight controller and Jetson code on a laptop, with no hardware:
 | MAVProxy | Graey's port layout (14551-14556), plus 14557-14559 for sim helpers and QGC on UDP 14550 |
 | VN-100 + DVL | `sim/sim_sensors.py` publishes the same ROS topics from the simulator's true motion |
 | `nav_ekf_bridge`, `gui_node`, `pos_server` | **Graey's real code, unchanged** |
-| Ping360 | `sim/sim_sonar.py`: real beam shape (2 deg x 25 deg), pinged from the sonar's true position and tilt |
+| Ping360 | `sim/sim_sonar.py` + `sim/sonar_physics.py`: ~700 rays per ping over the real 2 x 25 deg beam, from the sonar's true position and tilt; shadows; floor, walls, pipe and boxes echo by material and angle. **Echo strengths are placeholders until calibrated from pool recordings** (`sim/POOL_CALIBRATION.md`) |
 | Sonar map | **`tools/sonar_map.py` and `tools/pose_relay.py`, unchanged** (`sim/sim_sonar_map.py` swaps in the simulated Ping360) |
 
 So the EKF dead-reckons from "VN-100 + DVL" through Graey's own bridge, exactly as on the sub.
@@ -37,6 +37,8 @@ HOME_LAT=<pool lat> HOME_LON=<pool lon> sim/run.sh  # WATER_DEPTH=12 for the har
   First run: 82 % of crumbs within 0.3 m of the pipe, all within 0.5 m (median 0.17 m).
 - **Pipeline mission** (dive at the buoy, far scan, close scan, pick the pipe; watch the Map tab and QGC):
   `docker exec graey-sitl bash -c 'source /opt/ros/humble/setup.bash && cd /root/robotx_ws/src/robotx_graey_2026 && PYTHONPATH=.:$PYTHONPATH python3 -c "from robotx_graey_2026.api.navigation.pipeline_mission import main; main()" --ros-args -p dry_run:=false'`
+- **Map tab in the sim** also draws the real pipeline (dashed) and light boxes (orange), to check the crumbs against.
+- **Virtual drive** (no SITL, quick): `docker exec graey-sitl bash -c 'cd /root/robotx_ws/src/robotx_graey_2026 && PYTHONPATH=.:sim python3 sim/virtual_drive.py pool --out /tmp/pool.png'` (also `pipe-along`, `pipe-turn`; `--help`)
 - **Navigation check** (simulator truth vs Graey's EKF, side by side):
   `docker exec graey-sitl bash -c 'cd /root/robotx_ws/src/robotx_graey_2026 && PYTHONPATH=. python3 sim/truth_vs_ekf.py 60'`
 - Logs: `docker exec graey-sitl ls /tmp/sim` · Stop: `docker rm -f graey-sitl`

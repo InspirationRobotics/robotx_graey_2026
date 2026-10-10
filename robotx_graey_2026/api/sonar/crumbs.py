@@ -30,6 +30,15 @@ crumb's own sweep never fades it, and a sweep fades a crumb at most once.
 A ping with no pose, or one the DVL can't vouch for (valid=False), adds nothing
 and fades nothing, because we would not know where it was looking.
 
+THE FLOOR. Looking down, every ping hears the seafloor, so every sweep would
+lay a line of floor crumbs across the map and bury what sits on it (sim, Oct 9).
+The DVL measures how high it is above the bottom, so along each ping the map
+knows how high above the floor each range is (along the beam's steeper edge,
+which reaches the floor first); echoes less than floor_cut_m above it make no
+crumbs. The handbook puts the pipeline 1-2 m up, so 0.5 m keeps it.
+This takes the floor as flat out to the echo. With no altitude (no bottom lock,
+or the DVL not heard lately) nothing is cut. floor_cut_m = 0 turns it off.
+
 Nor does a ping taken while the sub turns faster than MAX_TURN_DPS (Ruth's
 call). Turning swings the 25 deg curtain along whatever is beside the sub, and
 the echo comes from the nearest bit anywhere in it while the crumb goes in the
@@ -61,6 +70,7 @@ MAX_PER_PING = 5
 FADE_SWEEPS = 2         # newer sweeps that must look at a crumb to wipe it out
 FADE_FAN_DEG = 3.0      # ... within this many deg fore-aft of the beam's middle
 MAX_TURN_DPS = 10.0     # turning faster than this, deg/s: ping ignored
+FLOOR_CUT_M = 0.5       # echoes less than this above the floor make no crumbs
 
 _FIELDS = ("x", "y", "up", "brightness", "range_m", "sweep", "seen", "faded_by")
 
@@ -78,8 +88,9 @@ def body_to_map(pose):
 class CrumbMap:
     def __init__(self, threshold=THRESHOLD, max_per_ping=MAX_PER_PING,
                  sonar_fwd_m=S.SONAR_FWD_M, sonar_right_m=S.SONAR_RIGHT_M,
-                 max_turn_dps=MAX_TURN_DPS):
+                 max_turn_dps=MAX_TURN_DPS, floor_cut_m=FLOOR_CUT_M):
         self.threshold = threshold
+        self.floor_cut_m = floor_cut_m
         self.max_per_ping = max_per_ping
         self.max_turn_dps = max_turn_dps
         self.sonar_fwd_m = sonar_fwd_m
@@ -173,6 +184,16 @@ class CrumbMap:
     def _add(self, a_deg, row, metres_per_bin, pose):
         sm = np.convolve(np.asarray(row, float), np.ones(SMOOTH_BINS) / SMOOTH_BINS, "same")
         sm[:int(math.ceil(S.MIN_RANGE_M / metres_per_bin))] = 0
+        a = math.radians(a_deg)
+        sx, sy, sup, m = self.sonar_at(pose)
+        # metres down per metre of range, along the steeper edge of the 2 deg beam:
+        # that edge meets the floor first, ~0.35 m sooner 12 m out at 45 deg
+        edge = math.radians(S.BEAM_IN_PLANE_DEG / 2.0)
+        down = max((m @ (0.0, math.cos(a + k), -math.sin(a + k)))[2] for k in (-edge, edge))
+        if self.floor_cut_m > 0 and pose.alt_m > 0 and down > 1e-3:
+            # height above the floor at range r: alt + sup - r * down
+            near_floor = (pose.alt_m + sup - self.floor_cut_m) / down
+            sm[max(0, int(near_floor / metres_per_bin)):] = 0
         above = sm >= self.threshold
         if not above.any():
             return 0
@@ -184,8 +205,6 @@ class CrumbMap:
         peaks = sorted(peaks, key=lambda b: -sm[b])[:self.max_per_ping]
 
         r = np.array(peaks) * metres_per_bin
-        a = math.radians(a_deg)
-        sx, sy, sup, m = self.sonar_at(pose)
         # the echo in the sub's frame: in the scan plane, so forward = 0
         n, e, d = m @ np.vstack([np.zeros_like(r), r * math.cos(a), -r * math.sin(a)])
         new = {"x": sx + e,

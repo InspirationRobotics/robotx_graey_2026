@@ -21,7 +21,7 @@ import rclpy
 from geometry_msgs.msg import TwistWithCovarianceStamped
 from rclpy.node import Node
 from sensor_msgs.msg import Imu
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float32
 
 PORT = 14660            # must match RELAY_PORT in api/sonar/pose.py
 
@@ -49,6 +49,7 @@ def main():
     node.create_subscription(Imu, "/graey/vn100/imu", att, 20)
     node.create_subscription(TwistWithCovarianceStamped, "/graey/dvl/velocity", vel, 10)
     node.create_subscription(Bool, "/graey/dvl/valid", lambda m: send({"ok": m.data}), 10)
+    node.create_subscription(Float32, "/graey/dvl/altitude", lambda m: send({"alt": m.data}), 10)
     print(f"relaying VN-100 + DVL to udp 127.0.0.1:{port}  (Ctrl-C to stop)")
     try:
         rclpy.spin(node)

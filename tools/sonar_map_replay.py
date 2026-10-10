@@ -66,6 +66,8 @@ def main():
                    help="times real time; 0 = as fast as possible")
     p.add_argument("--threshold", type=int, default=None, help="default: what the run used")
     p.add_argument("--max-turn", type=float, default=MAX_TURN_DPS)
+    p.add_argument("--floor-cut", type=float, default=None,
+                   help="m above the floor (DVL altitude) with no crumbs; default: what the run used")
     p.add_argument("--epoch", type=int, default=None,
                    help="which Start/Reset of the run to replay (default: the last)")
     args = p.parse_args()
@@ -89,6 +91,8 @@ def main():
     webview.set_range_editable(False)
     webview.set_sector(*first["sector"], editable=False)
     webview.set_threshold(args.threshold if args.threshold is not None else int(first["threshold"]))
+    webview.set_floor_cut(args.floor_cut if args.floor_cut is not None
+                          else float(first.get("floor_cut_m", 0.0)))
     print(f"[INFO] replay: http://localhost:{args.port}/map")
 
     play = {"state": "running", "done": False}
@@ -104,7 +108,7 @@ def main():
                 play["state"] = "running"
             elif cmd == "reset":
                 return True
-        return webview.threshold() != cmap.threshold
+        return webview.threshold() != cmap.threshold or webview.floor_cut() != cmap.floor_cut_m
 
     outliner = Outliner()
 
@@ -123,6 +127,7 @@ def main():
             "count": len(c["x"]), "range": float(s["range_m"]),
             "outlines": outliner.update(c, time.monotonic(), force=play["done"]),
             "sector": [float(v) for v in s["sector"]], "threshold": cmap.threshold,
+            "floorCut": cmap.floor_cut_m,
             "turning": cmap.turning, "skippedTurning": cmap.skipped_turning,
             "slice": reach(*sector_arc(*s["sector"]), float(s["range_m"]))})
 
@@ -130,7 +135,7 @@ def main():
         play["done"] = False
         play["state"] = "running"
         cmap = CrumbMap(threshold=webview.threshold(), max_turn_dps=args.max_turn,
-                        sonar_fwd_m=float(first["sonar_fwd_m"]),
+                        floor_cut_m=webview.floor_cut(), sonar_fwd_m=float(first["sonar_fwd_m"]),
                         sonar_right_m=float(first["sonar_right_m"]))
         track, recent, here = [], [], None
         outliner.clear()
@@ -159,7 +164,8 @@ def main():
                 if math.isnan(x):
                     continue
                 roll, pitch = (0.0, 0.0) if tilt is None else (float(v) for v in tilt[i])
-                here = Pose(t, x, y, h, bool(ok), roll, pitch)
+                alt = float(s["pose_alt"][i]) if "pose_alt" in s else -1.0     # not before Oct 9
+                here = Pose(t, x, y, h, bool(ok), roll, pitch, alt)
                 # turn rate from the saved headings, over the same window as live
                 recent = [r for r in recent if r[0] > t - 1.0] + [(t, h)]
                 before = [r for r in recent[:-1] if r[0] <= t - TURN_WINDOW_S] or recent[:1]

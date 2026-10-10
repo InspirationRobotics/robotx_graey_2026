@@ -27,8 +27,10 @@ Placement: PIPE_N, PIPE_E (the open end of the first tee section), PIPE_HDG
 (degrees, along the tee sections) in the environment; default 3 m north, 2 m
 east, heading 30.
 
-Echo strengths are invented but ordered like the real ones: box > pipe > leg >
-floor > background. They are for testing the code, not for tuning thresholds.
+Echoes: sonar_physics.py traces rays through the real beam shape, with shadows,
+and surfaces that echo by material and angle (Oct 9). Its scale is set so a 3"
+pipe 2.25 m away reads ~125, as Ruth's real one did; the rest is to be checked
+against her real pool run.
 """
 import math
 import os
@@ -41,9 +43,10 @@ from robotx_graey_2026.api.pixhawk.mavlink import Link
 from robotx_graey_2026.api.sonar import settings as S
 from robotx_graey_2026.api.sonar.sweep import Sweep
 
+from sonar_physics import World
+from sonar_physics import ping as physics_ping
+
 N_BINS = 540
-FAN_DEG = S.BEAM_FORE_AFT_DEG / 2.0
-SLICE_DEG = S.BEAM_IN_PLANE_DEG / 2.0
 PIPE_R = 0.0889 / 2                         # 3" Sch 40, 3.500" OD
 LEG_R = 0.0603 / 2                          # 2" Sch 40, 2.375" OD
 TEE_M, ELBOW_M = 0.049, 0.022               # centre to socket bottom (typical)
@@ -52,6 +55,7 @@ REDUCER_M = 0.04                            # 3"-2" coupler, laying length (typi
 BASE_SIDE_M = 0.78
 N_BOXES = 4
 BASE_TEE_M = 0.038                          # 2" base cross, centre to socket bottom (typical)
+BOX_L, BOX_W, BOX_H = 0.20, 0.15, 0.15      # light box (Ruth: ~0.15 m tall)
 
 
 def _line(a, b, step=0.02):
@@ -60,9 +64,9 @@ def _line(a, b, step=0.02):
     return a + (b - a) * np.linspace(0, 1, n)[:, None]
 
 
-def build_world(depth, n0, e0, hdg_deg):
-    """Points (N, E, D) for each kind of object, plus the pipe's centre line
-    (its open ends and elbow corners)."""
+def _geometry(depth, n0, e0, hdg_deg):
+    """The pipeline's shape, in NED: elbow corners, tees, and the light boxes'
+    centres and along-pipe directions."""
     # in the pipeline's own frame: x along the tee sections, y right, z UP from the floor
     # pipe centre height: base cross on the floor, its socket, the leg, reducer, stub, tee
     h = LEG_R + BASE_TEE_M + LEG_1500 + REDUCER_M + STUB_200 + TEE_M
@@ -80,23 +84,6 @@ def build_world(depth, n0, e0, hdg_deg):
     tees = [p[0] + (PIPE_450 + TEE_M) * np.array([1.0, 0, 0]),
             (p[2] + p[3]) / 2,
             p[5] - (PIPE_450 + TEE_M) * np.array([1.0, 0, 0])]
-    hd = math.radians(hdg_deg)
-
-    def to_ned(xyz):
-        xyz = np.atleast_2d(xyz)
-        n = n0 + xyz[:, 0] * math.cos(hd) - xyz[:, 1] * math.sin(hd)
-        e = e0 + xyz[:, 0] * math.sin(hd) + xyz[:, 1] * math.cos(hd)
-        return np.column_stack([n, e, depth - xyz[:, 2]])
-
-    pipe = np.vstack([_line(a, b) for a, b in zip(p, p[1:])])
-    legs = np.vstack([_line(t, (t[0], t[1], LEG_R)) for t in tees])
-    half = BASE_SIDE_M / 2
-    bases = []
-    for t in tees:
-        c = np.array([t[0], t[1], LEG_R])
-        corners = [c + (sx * half, sy * half, 0) for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1), (-1, -1))]
-        bases += [_line(a, b) for a, b in zip(corners, corners[1:])]
-        bases += [_line(c - (half, 0, 0), c + (half, 0, 0)), _line(c - (0, half, 0), c + (0, half, 0))]
     # light boxes: four, at random distances along the pipe, at least 0.4 m apart
     rng = np.random.default_rng(int(os.environ.get("PIPE_SEED", "7")))
     along = np.cumsum([0.0] + [float(np.linalg.norm(b - a)) for a, b in zip(p, p[1:])])
@@ -105,20 +92,95 @@ def build_world(depth, n0, e0, hdg_deg):
         if np.all(np.diff(at) > 0.4):
             break
     boxes = []
-    g = np.mgrid[-0.1:0.11:0.05, -0.075:0.08:0.05, 0:0.151:0.05].reshape(3, -1).T
     for d in at:
-        k = min(int(np.searchsorted(along, d)) - 1, len(p) - 2)
-        k = max(k, 0)
-        c = p[k] + (p[k + 1] - p[k]) * (d - along[k]) / (along[k + 1] - along[k])
-        boxes.append(c + np.array([0, 0, PIPE_R]) + g)
-    return ({"pipe": to_ned(pipe), "leg": to_ned(legs), "base": to_ned(np.vstack(bases)),
-             "box": to_ned(np.vstack(boxes))}, to_ned(np.array(p)))
+        k = max(min(int(np.searchsorted(along, d)) - 1, len(p) - 2), 0)
+        u = (p[k + 1] - p[k]) / np.linalg.norm(p[k + 1] - p[k])
+        boxes.append((p[k] + u * (d - along[k]) + np.array([0, 0, PIPE_R + BOX_H / 2]), u))
+    hd = math.radians(hdg_deg)
+
+    def to_ned(xyz):
+        xyz = np.atleast_2d(xyz)
+        n = n0 + xyz[:, 0] * math.cos(hd) - xyz[:, 1] * math.sin(hd)
+        e = e0 + xyz[:, 0] * math.sin(hd) + xyz[:, 1] * math.cos(hd)
+        return np.column_stack([n, e, depth - xyz[:, 2]])
+
+    def dir_ned(v):
+        return np.array([v[0] * math.cos(hd) - v[1] * math.sin(hd),
+                         v[0] * math.sin(hd) + v[1] * math.cos(hd), -v[2]])
+
+    return {"corners": to_ned(np.array(p)), "tees": to_ned(np.array(tees)), "h": h,
+            "boxes": [(to_ned(c)[0], dir_ned(u)) for c, u in boxes], "to_ned": to_ned}
+
+
+def build_world(depth, n0, e0, hdg_deg):
+    """Points (N, E, D) for each kind of object, plus the pipe's centre line
+    (its open ends and elbow corners). For checking crumbs against."""
+    g = _geometry(depth, n0, e0, hdg_deg)
+    p, tees = g["corners"], g["tees"]
+    floor_d = depth - LEG_R
+    pipe = np.vstack([_line(a, b) for a, b in zip(p, p[1:])])
+    legs = np.vstack([_line(t, (t[0], t[1], floor_d)) for t in tees])
+    bases = []
+    for a, b in _base_pipes(tees, floor_d):
+        bases.append(_line(a, b))
+    box_pts = []
+    gr = np.mgrid[-0.1:0.11:0.05, -0.075:0.08:0.05, -0.075:0.08:0.05].reshape(3, -1).T
+    for c, u in g["boxes"]:
+        across = np.cross(u, (0, 0, 1.0))
+        box_pts.append(c + gr @ np.vstack([u, across, (0, 0, 1.0)]))
+    return ({"pipe": pipe, "leg": legs, "base": np.vstack(bases), "box": np.vstack(box_pts)}, p)
+
+
+def _base_pipes(tees, floor_d):
+    """Each base frame: a square of 2" pipe with a cross through the middle."""
+    half, out = BASE_SIDE_M / 2, []
+    for t in tees:
+        c = np.array([t[0], t[1], floor_d])
+        corners = [c + (sx * half, sy * half, 0) for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1), (-1, -1))]
+        out += list(zip(corners, corners[1:]))
+        out += [(c - (half, 0, 0), c + (half, 0, 0)), (c - (0, half, 0), c + (0, half, 0))]
+    return out
+
+
+def pipeline_world(depth, n0, e0, hdg_deg):
+    """The same pipeline as solid shapes for sonar_physics, on a mud seafloor
+    under a flat water surface."""
+    g = _geometry(depth, n0, e0, hdg_deg)
+    w = World()
+    w.plane((0, 0, depth), (0, 0, 1), "mud")
+    w.plane((0, 0, 0), (0, 0, 1), "surface")
+    p, tees, floor_d = g["corners"], g["tees"], depth - LEG_R
+    for a, b in zip(p, p[1:]):
+        w.capsule(a, b, PIPE_R, "pvc")
+    for t in tees:
+        w.capsule(t, (t[0], t[1], floor_d), LEG_R, "pvc")
+    for a, b in _base_pipes(tees, floor_d):
+        w.capsule(a, b, LEG_R, "pvc")
+    for c, u in g["boxes"]:
+        across = np.cross(u, (0, 0, 1.0))
+        w.box(c, np.vstack([u, across, (0, 0, 1.0)]), (BOX_L / 2, BOX_W / 2, BOX_H / 2), "plastic")
+    return w
+
+
+def pool_world(length, width, depth, n0, e0, hdg_deg):
+    """A rectangular concrete pool: one corner at (n0, e0), the long side along
+    hdg_deg, the other side to its right."""
+    h = math.radians(hdg_deg)
+    u = np.array([math.cos(h), math.sin(h), 0.0])         # along the long side
+    v = np.array([-math.sin(h), math.cos(h), 0.0])        # across, to the right
+    c0 = np.array([n0, e0, 0.0])
+    w = World()
+    w.plane((0, 0, depth), (0, 0, 1), "concrete")
+    w.plane((0, 0, 0), (0, 0, 1), "surface")
+    w.plane(c0, u, "concrete")
+    w.plane(c0 + length * u, u, "concrete")
+    w.plane(c0, v, "concrete")
+    w.plane(c0 + width * v, v, "concrete")
+    return w
 
 
 class SimSonar:
     """Same interface as api.sonar.sweep.Sonar."""
-    STRENGTH = {"box": 230, "pipe": 175, "leg": 150, "base": 150}
-    RADIUS = {"box": 0.05, "pipe": PIPE_R, "leg": LEG_R, "base": LEG_R}
 
     def __init__(self, device=None, udp=None, down_gradian=S.DOWN_GRADIAN, **_):
         self.down_gradian = down_gradian
@@ -127,7 +189,12 @@ class SimSonar:
         self.world, self.centre_line = build_world(
             self.depth, float(os.environ.get("PIPE_N", "3")), float(os.environ.get("PIPE_E", "2")),
             float(os.environ.get("PIPE_HDG", "30")))
+        place = (self.depth, float(os.environ.get("PIPE_N", "3")),
+                 float(os.environ.get("PIPE_E", "2")), float(os.environ.get("PIPE_HDG", "30")))
+        self.solid = pipeline_world(*place)
+        self.truth_boxes = [c for c, _ in _geometry(*place)["boxes"]]
         self.metres_per_bin = None
+        self.settings = {"simulated": True}
         self._state = None
         self._rng = np.random.default_rng(1)
         self._link = Link(os.environ.get("SIM_SONAR_MAVLINK", "udpout:127.0.0.1:14559"), 185)
@@ -153,38 +220,19 @@ class SimSonar:
         sonar = np.array([n, e, -m.alt]) + r @ np.array([S.SONAR_FWD_M, S.SONAR_RIGHT_M, 0.0])
         return sonar, r
 
+    def truth_ned(self):
+        """Where the sub really is: north, east from home, yaw (rad); None before data."""
+        m = self._state
+        if m is None:
+            return None
+        lat0, lon0 = self.home
+        n = math.radians(m.lat_int / 1e7 - lat0) * 6378137.0
+        e = math.radians(m.lon_int / 1e7 - lon0) * 6378137.0 * math.cos(math.radians(lat0))
+        return n, e, m.yaw
+
     def _ping(self, a_deg, max_range):
         sonar, r = self._pose()
-        mpb = max_range / N_BINS
-        row = self._rng.integers(0, 25, N_BINS).astype(float)
-        for kind, pts in self.world.items():
-            v = (pts - sonar) @ r                       # into the body frame (forward, right, down)
-            across = np.hypot(v[:, 1], v[:, 2])
-            rng = np.linalg.norm(v, axis=1)
-            bearing = np.degrees(np.arctan2(-v[:, 2], v[:, 1]))
-            spread = SLICE_DEG + np.degrees(self.RADIUS[kind] / np.maximum(rng, 0.1))
-            hit = ((np.abs((bearing - a_deg + 180) % 360 - 180) <= spread)
-                   & (np.abs(np.degrees(np.arctan2(v[:, 0], across))) <= FAN_DEG)
-                   & (rng < max_range))
-            if hit.any():
-                k = np.argmin(np.where(hit, rng, np.inf))
-                c = int(rng[k] / mpb)
-                fade = 1.0 - 0.3 * abs(math.degrees(math.atan2(v[k, 0], across[k]))) / FAN_DEG
-                row[c:c + max(3, int(0.06 / mpb))] = np.maximum(
-                    row[c:c + max(3, int(0.06 / mpb))], self.STRENGTH[kind] * fade)
-        # the seafloor: where the fan meets the plane, nearest to farthest
-        a = math.radians(a_deg)
-        dists = []
-        for fa in np.radians(np.linspace(-FAN_DEG, FAN_DEG, 7)):
-            d_body = np.array([math.sin(fa), math.cos(fa) * math.cos(a), -math.cos(fa) * math.sin(a)])
-            down = (r @ d_body)[2]
-            if down > 1e-3:
-                dists.append((self.depth - sonar[2]) / down)
-        if dists and min(dists) < max_range:
-            c0, c1 = int(min(dists) / mpb), int(min(max(dists), max_range) / mpb)
-            row[c0:c1 + 1] = np.maximum(row[c0:c1 + 1], 115)
-        row[: int(S.MIN_RANGE_M / mpb)] *= 0.3          # near-field ringing, as the real one
-        return np.clip(row, 0, 255).astype(np.uint8)
+        return physics_ping(self.solid, sonar, r, a_deg, max_range, N_BINS, self._rng)
 
     def sweep(self, start_deg, end_deg, step_deg, max_range_m, heading_deg=None, on_ping=None):
         self.metres_per_bin = max_range_m / N_BINS
