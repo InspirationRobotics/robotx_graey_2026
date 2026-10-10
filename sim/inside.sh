@@ -24,11 +24,15 @@ sleep 3
 
 # Graey's MAVProxy layout (scripts/start_mavproxy.sh), plus 14557/14558 for the
 # simulator's own helpers and QGroundControl on this computer.
+# QGC only when asked (QGC=1): the simulated sub is system 1, like the real Graey,
+# and QGC can't tell two system 1s apart when both are connected.
+QGC_OUT=""
+[ "${QGC:-0}" = "1" ] && QGC_OUT="--out=udp:host.docker.internal:14550"
 mavproxy.py --master=tcp:127.0.0.1:5760 --daemon --non-interactive --state-basedir=$LOGS \
     --out=udpin:0.0.0.0:14551 --out=udpin:0.0.0.0:14552 --out=udpin:0.0.0.0:14553 \
     --out=udpin:0.0.0.0:14554 --out=udpin:0.0.0.0:14555 --out=udpin:0.0.0.0:14556 \
     --out=udpin:0.0.0.0:14557 --out=udpin:0.0.0.0:14558 --out=udpin:0.0.0.0:14559 \
-    --out=udp:host.docker.internal:14550 \
+    $QGC_OUT \
     > $LOGS/mavproxy.log 2>&1 &
 sleep 3
 
