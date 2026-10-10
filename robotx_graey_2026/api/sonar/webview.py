@@ -352,13 +352,14 @@ border-radius:4px;color:#fff;display:none}
 <span>map area <input id="ar" type="number" step="1" min="1" max="200" value="10"> m</span>
 <label style="white-space:nowrap"><input id="fo" type="checkbox" checked style="width:auto"> follow sub</label>
 <label style="white-space:nowrap"><input id="ol" type="checkbox" checked style="width:auto"> outlines</label>
+<label style="white-space:nowrap" title="grey: every echo, put in the middle of the 25 deg beam. Coloured: where 3+ looks agree"><input id="ok1" type="checkbox" checked style="width:auto"> one-look dots</label>
 <span id="msg" style="color:#8ea"></span></div>
 <div class="bar" style="padding-top:0"><span id="st" style="color:#bbb"></span></div>
 <div id="wrap"><canvas id="cv"></canvas><div id="banner"></div></div>
 <div class="bar" style="color:#bbb">
-<span>crumb: weak <span style="display:inline-block;width:90px;height:10px;vertical-align:middle;
-background:linear-gradient(90deg,hsl(210,95%,58%),hsl(105,95%,58%),hsl(0,95%,58%))"></span> strong</span>
-<span><span style="opacity:.3">&#9679;</span> half faded</span>
+<span>agreed crumb: 3 looks <span style="display:inline-block;width:90px;height:10px;vertical-align:middle;
+background:linear-gradient(90deg,hsl(210,95%,58%),hsl(105,95%,58%),hsl(0,95%,58%))"></span> 10+ looks</span>
+<span><span style="color:#999">&#9679;</span> one look (middle of the 25&deg; beam)</span>
 <span style="color:#3cb4e6">&#9473; sub's track</span><span>&#9650; sub</span>
 <span style="color:#78dca0">&#9473; sonar slice</span><span>&#9675; start (0,0)</span>
 <span>grid <span id="gl"></span></span>
@@ -387,7 +388,7 @@ $('rs').onclick=function(){post('/mapcmd','reset');};
 $('rec').onclick=function(){post('/record',D&&D.recording?'stop':'start '+$('rn').value)
 .then(function(x){$('msg').textContent='record: '+x;});};
 $('mk').onclick=function(){post('/mark',$('rn').value).then(function(x){$('msg').textContent='mark: '+x;});};
-$('ar').addEventListener('input',draw);$('fo').addEventListener('change',draw);$('ol').addEventListener('change',draw);
+$('ar').addEventListener('input',draw);$('fo').addEventListener('change',draw);$('ol').addEventListener('change',draw);$('ok1').addEventListener('change',draw);
 window.addEventListener('resize',draw);
 function fill(i,v){var e=$(i);
 if(!dirty[i]&&document.activeElement!==e&&v!==null&&v!==undefined)e.value=v;}
@@ -412,6 +413,8 @@ ctx.beginPath();ctx.moveTo(0,Y(v));ctx.lineTo(W,Y(v));ctx.stroke();}
 $('gl').textContent=g+' m';
 ctx.strokeStyle='#ddd';ctx.beginPath();ctx.arc(X(0),Y(0),6,0,7);ctx.stroke();
 var th=D.threshold||100,R=Math.max(2.5,Math.min(5,px*0.05));
+if(D.oneLook&&$('ok1').checked){ctx.fillStyle='rgba(150,150,150,0.45)';
+D.oneLook.forEach(function(q){ctx.beginPath();ctx.arc(X(q[0]),Y(q[1]),Math.max(1.5,R*0.55),0,7);ctx.fill();});}
 [1,0].forEach(function(faded){ctx.globalAlpha=faded?0.3:1;
 D.crumbs.forEach(function(q){if((q[3]>0?1:0)!==faded)return;
 ctx.fillStyle=hue(q[2],th);ctx.beginPath();ctx.arc(X(q[0]),Y(q[1]),R,0,7);ctx.fill();});});

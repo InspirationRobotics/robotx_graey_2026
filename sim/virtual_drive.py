@@ -99,7 +99,17 @@ def draw(cm, track, truth_lines, out, title, view):
     for (e, n), (e2, n2) in zip(track[::5], track[5::5]):
         cv2.line(img, px(e, n), px(e2, n2), (230, 180, 60), 1)
     c = cm.crumbs()
-    for x, y, b, seen in zip(c["x"], c["y"], c["brightness"], c["seen"]):
+    for x, y in zip(c["x"], c["y"]):                                   # one look each: faint
+        cv2.circle(img, px(x, y), 2, (90, 90, 90), -1)
+    g = cm.agreed()
+    if g is not None and len(g["x"]):
+        top = max(g["looks"].max(), 2)
+        for x, y, lk in zip(g["x"], g["y"], g["looks"]):
+            f = min(1.0, (lk - 1) / (top - 1))
+            col = tuple(int(v) for v in cv2.cvtColor(np.uint8([[[int(120 - 120 * f), 220, 255]]]),
+                                                     cv2.COLOR_HSV2BGR)[0, 0])
+            cv2.circle(img, px(x, y), 3, col, -1)
+    for x, y, b, seen in []:
         f = min(1.0, max(0.0, (b - cm.threshold) / max(1, 255 - cm.threshold)))
         col = tuple(int(v) for v in cv2.cvtColor(np.uint8([[[int(120 - 120 * f), 220, 255]]]),
                                                  cv2.COLOR_HSV2BGR)[0, 0])
@@ -116,13 +126,17 @@ def draw(cm, track, truth_lines, out, title, view):
         if bunch:
             m = pts[bunch["members"]].mean(axis=0)
             where = f", biggest 1.5 m bunch {bunch['n']} crumbs, its middle {dist_to_polyline(m[None], line)[0]:.2f} m from the pipe"
-        print(f"{len(off)} crumbs, {np.mean(off < 0.5):.0%} within 0.5 m of the real shape{where}")
+        print(f"{len(off)} crumbs, {np.mean(off < 0.3):.0%} within 0.3 m, {np.mean(off < 0.5):.0%} within 0.5 m of the real shape{where}")
+        if g is not None and len(g["x"]):
+            ga = dist_to_polyline(np.column_stack([g["y"], g["x"]]), line)
+            print(f"  agreed (2+ looks): {len(ga)} crumbs, {np.mean(ga < 0.3):.0%} within 0.3 m, "
+                  f"{np.mean(ga < 0.5):.0%} within 0.5 m, median {np.median(ga):.2f} m")
     else:
         print("0 crumbs")
     cv2.putText(img, f"{title}, floor cut {cm.floor_cut_m:g} m: {len(c['x'])} crumbs, best "
                 + (f"pipe {gs[0]['score']:.0%} ({gs[0]['length']:.1f} m)" if gs else "none"),
                 (10, H - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (230, 230, 230), 1, cv2.LINE_AA)
-    cv2.putText(img, "white = real shape, dots = crumbs (blue weak -> red strong), orange = sub's track, grid 1 m",
+    cv2.putText(img, "white = real shape, grey = one-look crumbs, coloured = agreed (blue 2 looks -> red many), grid 1 m",
                 (10, H - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1, cv2.LINE_AA)
     cv2.imwrite(out, img)
 

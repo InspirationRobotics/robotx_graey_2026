@@ -62,6 +62,7 @@ import math
 import numpy as np
 
 from . import settings as S
+from .looks import LookMap
 
 THRESHOLD = 100         # smoothed echo strength, 0-255, that makes a crumb. A guess:
                         # the pool pipe peaked ~125 out to 2.25 m.
@@ -88,13 +89,14 @@ def body_to_map(pose):
 class CrumbMap:
     def __init__(self, threshold=THRESHOLD, max_per_ping=MAX_PER_PING,
                  sonar_fwd_m=S.SONAR_FWD_M, sonar_right_m=S.SONAR_RIGHT_M,
-                 max_turn_dps=MAX_TURN_DPS, floor_cut_m=FLOOR_CUT_M):
+                 max_turn_dps=MAX_TURN_DPS, floor_cut_m=FLOOR_CUT_M, looks=True):
         self.threshold = threshold
         self.floor_cut_m = floor_cut_m
         self.max_per_ping = max_per_ping
         self.max_turn_dps = max_turn_dps
         self.sonar_fwd_m = sonar_fwd_m
         self.sonar_right_m = sonar_right_m
+        self.looks = LookMap() if looks else None      # looks.py: where pings agree
         self.clear()
 
     def clear(self):
@@ -102,6 +104,8 @@ class CrumbMap:
         self.sweep_id = 0
         self.turning = False        # was the last ping ignored for turning?
         self.skipped_turning = 0
+        if getattr(self, "looks", None) is not None:
+            self.looks.clear()
 
     def new_sweep(self):
         """Call at the start of every sweep, including one cut short."""
@@ -135,6 +139,28 @@ class CrumbMap:
     def crumbs(self):
         """Copies of every live crumb's fields. seen = 0 fresh, 1 half faded."""
         return {f: v.copy() for f, v in self._c.items()}
+
+    def agreed(self):
+        """Crumbs where enough looks agree (looks.py), or None if off."""
+        return None if self.looks is None else self.looks.agreed()
+
+    def for_page(self):
+        """What the Map tab gets: crumbs [x, y, brightness, seen, up] - the agreed
+        ones when looks are on - the one-look crumbs [x, y, seen] to draw faintly,
+        and the crumbs as arrays (x, y, up, seen) for outlines.py."""
+        one = self.crumbs()
+        faint = np.column_stack([np.round(one["x"], 2), np.round(one["y"], 2), one["seen"]]).tolist()
+        g = self.agreed()
+        if g is None:
+            arrays = one
+            bright = one["brightness"]
+        else:
+            arrays = {"x": g["x"], "y": g["y"], "up": g["up"], "seen": np.zeros(len(g["x"]))}
+            # more looks agreeing = stronger colour, on the same scale as echoes
+            bright = self.threshold + (255 - self.threshold) * np.clip((g["looks"] - 2) / 8.0, 0, 1)
+        crumbs = np.column_stack([np.round(arrays["x"], 2), np.round(arrays["y"], 2), np.round(bright),
+                                  arrays["seen"], np.round(arrays["up"], 2)]).tolist()
+        return crumbs, (faint if g is not None else []), arrays
 
     def __len__(self):
         return len(self._c["x"])
@@ -205,6 +231,8 @@ class CrumbMap:
         peaks = sorted(peaks, key=lambda b: -sm[b])[:self.max_per_ping]
 
         r = np.array(peaks) * metres_per_bin
+        if self.looks is not None:
+            self.looks.add((sx, sy, sup), m, a_deg, r, self.sweep_id, pose.alt_m, self.floor_cut_m)
         # the echo in the sub's frame: in the scan plane, so forward = 0
         n, e, d = m @ np.vstack([np.zeros_like(r), r * math.cos(a), -r * math.sin(a)])
         new = {"x": sx + e,

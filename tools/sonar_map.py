@@ -250,9 +250,7 @@ def main():
         if now is not None and (not track or math.hypot(now.x - track[-1][0],
                                                         now.y - track[-1][1]) >= TRACK_STEP_M):
             track.append((now.x, now.y))
-        c = cmap.crumbs()
-        crumbs = np.column_stack([np.round(c["x"], 2), np.round(c["y"], 2),
-                                  np.round(c["brightness"]), c["seen"], np.round(c["up"], 2)]).tolist()
+        crumbs, faint, c = cmap.for_page()
         webview.set_map({
             "state": run["state"],
             "dvl": "no data" if now is None else ("ok" if now.valid else "lost"),
@@ -260,7 +258,7 @@ def main():
                                               round(now.heading_deg, 1)],
             "sonar": None if now is None else [round(v, 3) for v in cmap.sonar_xy(now)],
             "track": [[round(x, 2), round(y, 2)] for x, y in track[-5000:]],
-            "crumbs": crumbs, "sweep": run["sweeps"], "count": len(crumbs),
+            "crumbs": crumbs, "oneLook": faint, "sweep": run["sweeps"], "count": len(crumbs),
             "outlines": outliner.update(c, time.monotonic()),
             "range": cur["range"], "sector": list(cur["sector"]),
             "threshold": cmap.threshold, "floorCut": cmap.floor_cut_m,

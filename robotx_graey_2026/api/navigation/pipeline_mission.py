@@ -108,7 +108,7 @@ class PipelineMission(MissionBase):
         p('far_threshold', 90)              # the pipe 7 m down is faint (sim: ~100)
         p('floor_cut', 1.0)                 # m: the handbook puts the pipe 1-2 m up, so no
                                             # crumbs from the metre above the floor
-        p('scan_threshold', 120)
+        p('scan_threshold', 100)              # the map's own default
         p('scan_turn_deg', 360.0)
         p('scan_rate_dps', 4.0)
         p('min_score', 0.5)

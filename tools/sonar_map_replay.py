@@ -113,7 +113,7 @@ def main():
     outliner = Outliner()
 
     def snapshot(cmap, track, here, n, s):
-        c = cmap.crumbs()
+        crumbs, faint, c = cmap.for_page()
         webview.set_map({
             "state": "paused" if play["done"] else play["state"],
             "dvl": "no data" if here is None else ("ok" if here.valid else "lost"),
@@ -121,10 +121,9 @@ def main():
                                                round(here.heading_deg, 1)],
             "sonar": None if here is None else [round(v, 3) for v in cmap.sonar_xy(here)],
             "track": [[round(x, 2), round(y, 2)] for x, y in track[-5000:]],
-            "crumbs": np.column_stack([np.round(c["x"], 2), np.round(c["y"], 2),
-                                       np.round(c["brightness"]), c["seen"], np.round(c["up"], 2)]).tolist(),
+            "crumbs": crumbs, "oneLook": faint,
             "sweep": f"{n}/{len(sweeps)}" + (" (end)" if play["done"] else ""),
-            "count": len(c["x"]), "range": float(s["range_m"]),
+            "count": len(crumbs), "range": float(s["range_m"]),
             "outlines": outliner.update(c, time.monotonic(), force=play["done"]),
             "sector": [float(v) for v in s["sector"]], "threshold": cmap.threshold,
             "floorCut": cmap.floor_cut_m,

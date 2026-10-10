@@ -127,9 +127,11 @@ def _hit_boxes(o, d, world, t, nrm, mat):
             t[ok], mat[ok] = tmin[ok], m
 
 
-def ping(world, origin, body_to_world, angle_deg, max_range, n_bins, rng):
+def ping(world, origin, body_to_world, angle_deg, max_range, n_bins, rng, hits=None):
     """One ping: 0-255 levels in n_bins out to max_range. angle_deg is the sub's
-    own scan angle (0 right, 90 up, 270 down); body frame is forward, right, down."""
+    own scan angle (0 right, 90 up, 270 down); body frame is forward, right, down.
+    hits: a list to append (point, bin, loudness) of every ray that hit, for
+    checking where an echo really came from."""
     a = math.radians(angle_deg) + _DD
     d_body = np.column_stack([np.sin(_FF), np.cos(_FF) * np.cos(a), -np.cos(_FF) * np.sin(a)])
     d = d_body @ np.asarray(body_to_world).T
@@ -149,6 +151,9 @@ def ping(world, origin, body_to_world, angle_deg, max_range, n_bins, rng):
         diffuse, flash, sharp = (np.array([MATERIALS[m][k] for m in mat[hit]]) for k in range(3))
         back = diffuse * cos_i ** 2 + flash * cos_i ** sharp
         np.add.at(energy, (t[hit] / mpb).astype(int), _W[hit] * back)
+        if hits is not None:
+            pts = origin + d[hit] * t[hit, None]
+            hits.extend(zip(pts, (t[hit] / mpb).astype(int), _W[hit] * back))
     # pulse length blur, then speckle
     sigma = max(1.5, 0.02 / mpb)
     k = np.exp(-0.5 * (np.arange(-4 * sigma, 4 * sigma + 1) / sigma) ** 2)
