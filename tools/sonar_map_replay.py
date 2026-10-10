@@ -28,6 +28,7 @@ import time
 
 import numpy as np
 
+from robotx_graey_2026.api.sonar import settings as S
 from robotx_graey_2026.api.sonar import webview
 from robotx_graey_2026.api.sonar.outlines import Outliner
 from robotx_graey_2026.api.sonar.crumbs import MAX_TURN_DPS, CrumbMap
@@ -163,6 +164,8 @@ def main():
                 if math.isnan(x):
                     continue
                 roll, pitch = (0.0, 0.0) if tilt is None else (float(v) for v in tilt[i])
+                if S.VN_PITCH_BACKWARDS and "vn_pitch_unflipped" not in s:
+                    pitch = -pitch          # saved before Oct 10, with the VN-100's pitch backwards
                 alt = float(s["pose_alt"][i]) if "pose_alt" in s else -1.0     # not before Oct 9
                 here = Pose(t, x, y, h, bool(ok), roll, pitch, alt)
                 # turn rate from the saved headings, over the same window as live

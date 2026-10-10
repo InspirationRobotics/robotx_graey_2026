@@ -31,6 +31,8 @@ import threading
 import time
 from collections import namedtuple
 
+from . import settings as S
+
 RELAY_PORT = 14660      # where tools/pose_relay.py sends to
 HISTORY_S = 120.0       # how far back pose_at() can look
 STALE_S = 1.0           # no DVL velocity for this long = not valid
@@ -66,6 +68,21 @@ def heading_of(q):
     return math.degrees(math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))) % 360.0
 
 
+def unflip_pitch(q):
+    """The same attitude with its pitch turned the right way round (see
+    settings.VN_PITCH_BACKWARDS): split into yaw, pitch, roll, negate the pitch,
+    rebuild. Heading and roll come out unchanged."""
+    w, x, y, z = q
+    yaw = math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+    pitch = -math.asin(max(-1.0, min(1.0, 2 * (w * y - z * x))))
+    roll = math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y))
+    cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
+    cp, sp = math.cos(pitch / 2), math.sin(pitch / 2)
+    cr, sr = math.cos(roll / 2), math.sin(roll / 2)
+    return (cr * cp * cy + sr * sp * sy, sr * cp * cy - cr * sp * sy,
+            cr * sp * cy + sr * cp * sy, cr * cp * sy - sr * sp * cy)
+
+
 def roll_pitch_of(q):
     """(roll, pitch) in degrees from a (w, x, y, z) quaternion, the same
     yaw-pitch-roll order vn100_node builds it in."""
@@ -97,6 +114,8 @@ class DeadReckoner:
     # ---- inputs -----------------------------------------------------------
     def on_attitude(self, q, t=None):
         t = time.monotonic() if t is None else t
+        if S.VN_PITCH_BACKWARDS:
+            q = unflip_pitch(q)
         with self._lock:
             self._q = q
             if self.reset_needed:

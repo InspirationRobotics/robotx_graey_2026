@@ -305,6 +305,7 @@ def main():
             pose_roll_pitch=np.array([[q.roll_deg, q.pitch_deg] if q else [np.nan] * 2
                                       for q in cur["poses"]], float),
             pose_alt=np.array([q.alt_m if q else -1.0 for q in cur["poses"]], float),
+            vn_pitch_unflipped=S.VN_PITCH_BACKWARDS,    # pose_roll_pitch already turned round
             floor_cut_m=cmap.floor_cut_m,
             range_m=cur["range"], sector=np.array(cur["sector"]),
             threshold=cmap.threshold, state=run["state"], map_epoch=cur["epoch"],

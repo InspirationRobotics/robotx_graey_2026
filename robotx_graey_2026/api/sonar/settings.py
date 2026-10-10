@@ -43,6 +43,14 @@ MIN_RANGE_M = 0.75          # near-field blanking. Inside this the sonar is
 SONAR_FWD_M = 0.42
 SONAR_RIGHT_M = 0.0
 
+# The VN-100's pitch comes out backwards on /graey/vn100/imu. Measured on Graey
+# 2026-10-10 with Ruth, sub on land: nose down 17 deg -> VN-100 pitch +16, Cube
+# -17; right side down 17 deg -> both roll +17 (roll is right). It's the
+# `pitch = -pitch` in vn100_node.py's flip_180 block (noted Aug 2026). The sonar
+# code turns the pitch back round itself; set False once that driver is fixed,
+# or every pitch will be backwards again.
+VN_PITCH_BACKWARDS = True
+
 # THE calibration constant. Which hardware gradian points straight down.
 # Every angle this package reports is measured from here, so if the whole
 # picture looks rotated, this is why.
