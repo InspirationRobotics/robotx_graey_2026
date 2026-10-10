@@ -12,6 +12,7 @@ rotates the reading into the vehicle body frame.
 import math
 
 from rclpy.node import Node
+from rcl_interfaces.msg import ParameterDescriptor
 from std_msgs.msg import Float32
 from sensor_msgs.msg import Imu
 import serial
@@ -36,8 +37,12 @@ class VN100Node(Node):
         super().__init__('vn100_node')
         self.declare_parameter('port', DEFAULT_PORT)
         self.declare_parameter('baud', 115200)
-        self.declare_parameter('flip_180', True)    # unit is mounted upside down
-        self.declare_parameter('yaw_offset_deg', 0.0)
+        # Cached frame settings must not accept runtime writes that would only
+        # change parameter readback, leaving the published transform unchanged.
+        frame_setting = ParameterDescriptor(read_only=True,
+            description='Startup-only frame setting; restart with a parameter override.')
+        self.declare_parameter('flip_180', True, frame_setting)
+        self.declare_parameter('yaw_offset_deg', 0.0, frame_setting)
         self.port = self.get_parameter('port').value
         self.baud = self.get_parameter('baud').value
         self.flip = self.get_parameter('flip_180').value

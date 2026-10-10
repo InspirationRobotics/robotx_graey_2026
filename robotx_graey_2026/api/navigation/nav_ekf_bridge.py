@@ -21,6 +21,7 @@ import time
 import uuid
 
 from rclpy.node import Node
+from rcl_interfaces.msg import ParameterDescriptor
 from std_msgs.msg import String
 from sensor_msgs.msg import Imu
 
@@ -54,7 +55,9 @@ class NavEKFBridge(Node):
     def __init__(self):
         super().__init__('nav_ekf_bridge')
         self.declare_parameter('mavlink', 'udpout:127.0.0.1:14551')
-        self.declare_parameter('yaw_offset_deg', 0.0)   # frame alignment, not a calibration
+        self.declare_parameter('yaw_offset_deg', 0.0, ParameterDescriptor(
+            read_only=True,
+            description='Startup-only frame alignment; restart requires frame revalidation.'))
         self.declare_parameter('allow_alignment', False)
         self.yaw_off = self.get_parameter('yaw_offset_deg').value
         self.link = Link(self.get_parameter('mavlink').value, 197, self.get_logger())
