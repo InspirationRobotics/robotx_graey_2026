@@ -134,9 +134,12 @@ changed.
 The true-north/forward-axis validation flag defaults false; offsets and check
 thresholds are startup-only read-only parameters. Commission these references
 before setting the flag true. The DVL check assumes configured body-forward is
-positive x. The current VN driver exposes gyro rate in degrees/second, despite
-the ROS IMU convention; the gate now uses the driver's actual units directly,
-without changing the IMU message shared with the existing external-nav bridge.
+positive x. This session originally asserted that the VN driver exposed gyro
+rate in degrees/second. **Correction, October 10 waypoint validation:** the
+manufacturer's VNYBA definition specifies radians/second. The driver was
+correct; the supervisor's conversion to degrees/second has been restored and
+tested with a 10-degree/second input expressed in radians. The shared IMU
+message and external-nav bridge were not changed by this correction.
 GUI status includes state and reason. Focused unit tests exercise sustained
 agreement, mismatch latching/recovery, wraparound, invalid/stale data, and
 stationary/strafe/reverse gating.

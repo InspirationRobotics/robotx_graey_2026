@@ -181,7 +181,15 @@ class NavigationView:
                     reference['gps_msl_alt'], self.origin) if self.origin else None
                 reference['live'] = bool(supervisor.get('fresh') and
                     supervisor.get('data', {}).get('reference_current'))
+            g = streams.get('global', {})
+            a = streams.get('attitude', {})
+            cube = dict(valid=bool(g.get('fresh') and g.get('data', {}).get('valid')),
+                        lat=g.get('data', {}).get('lat'), lon=g.get('data', {}).get('lon'),
+                        heading_deg=a.get('data', {}).get('rpy', [None]*3)[2] if a.get('fresh') else None,
+                        source='Cube GLOBAL_POSITION_INT / ATTITUDE',
+                        depth_m=supervisor.get('data', {}).get('depth_m') if supervisor.get('fresh') else None)
             return {'streams': streams, 'origin': copy.deepcopy(self.origin), 'session': self.session,
+                    'cube_estimate': cube,
                     'mission_reference': reference,
                     'mission_target': target,
                     'origin_revision': self.origin_revision,

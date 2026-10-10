@@ -80,6 +80,19 @@ class HeadingTests(unittest.TestCase):
 
 
 class DiveGateTests(unittest.TestCase):
+    def test_completed_gate_survives_descent_and_ascent_hysteresis(self):
+        r=Rig().run(5);r.o.intent='DIVE';r.run(2)
+        self.assertTrue(r.s.allowed)
+        r.o.depth=.45;r.o.heading_allowed=False;r.run(.1)
+        self.assertTrue(r.s.surface)
+        self.assertTrue(r.s.allowed)
+        r.o.intent='UNDERWATER';r.run(3)
+        r.o.depth=.1;r.run(3)
+        self.assertTrue(r.s.surface)
+        self.assertTrue(r.s.allowed)
+        r.o.intent='SURFACE';r.run(.1)
+        self.assertFalse(r.s.dive_heading_approved)
+
     def test_disagreement_blocks_capture_alignment_and_switch(self):
         r=Rig().run(5)
         r.o.intent='DIVE';r.o.heading_allowed=False;r.o.heading_reason='Heading disagreement'

@@ -204,14 +204,14 @@ class TelemetryTests(unittest.TestCase):
         self.receive('SCALED_PRESSURE2', time_boot_ms=101, press_abs=1200.)
         self.assertEqual(self.s.fresh('depth'), .5)
 
-    def test_vn_turn_rate_uses_current_driver_degrees_per_second(self):
+    def test_vn_turn_rate_converts_radians_to_degrees_per_second(self):
         self.s.stamps = {}
         self.s.put = lambda key, value: self.s.samples.__setitem__(key, (self.clock.now, value))
         msg = NS(header=NS(stamp=NS(sec=1, nanosec=0)),
             orientation=NS(w=1., x=0., y=0., z=0.),
-            angular_velocity=NS(z=2.))
+            angular_velocity=NS(z=math.radians(10.)))
         self.s.vn(msg)
-        self.assertEqual(self.s.samples['heading_vn'][1]['rate'], 2.)
+        self.assertAlmostEqual(self.s.samples['heading_vn'][1]['rate'], 10.)
 
     def test_cube_reboot_and_origin_change_invalidate_frame(self):
         self.receive('LOCAL_POSITION_NED', time_boot_ms=10000, x=0., y=0., z=0.)

@@ -3,6 +3,7 @@ from pathlib import Path
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
+from launch.conditions import UnlessCondition
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -14,6 +15,7 @@ def generate_launch_description():
     east = LaunchConfiguration('waypoint_east_m')
     result_file = str(Path(__file__).resolve().parents[1] / 'sitl' / 'logs' / 'scenario-result.json')
     return LaunchDescription([
+        DeclareLaunchArgument('interactive_waypoint', default_value='false'),
         DeclareLaunchArgument('home_lat', default_value='32.9240586'),
         DeclareLaunchArgument('home_lon', default_value='-117.0385389'),
         DeclareLaunchArgument('waypoint_north_m', default_value='1.5'),
@@ -34,6 +36,7 @@ def generate_launch_description():
         Node(package='robotx_graey_2026', executable='sitl_sensor_sim',
              name='sitl_sensor_sim', output='screen'),
         Node(package='robotx_graey_2026', executable='sitl_mission',
+             condition=UnlessCondition(LaunchConfiguration('interactive_waypoint')),
              name='sitl_mission', parameters=[{
                  'home_lat': ParameterValue(home_lat, value_type=float),
                  'home_lon': ParameterValue(home_lon, value_type=float),

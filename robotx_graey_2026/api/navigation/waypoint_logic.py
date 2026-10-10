@@ -1,0 +1,199 @@
+"""Bounded single-waypoint mission. Pure decisions; transport belongs to adapter."""
+import math
+
+R = 6378137.0
+
+
+def geo_to_ne(lat, lon, origin):
+    if not all(not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v)
+               for v in (lat, lon, *origin[:2])):
+        raise ValueError('Finite geographic coordinates required')
+    if not -85 <= lat <= 85 or not -180 <= lon <= 180 or not -85 <= origin[0] <= 85:
+        raise ValueError('Geographic coordinates outside supported range')
+    return (math.radians(lat-origin[0])*R,
+            math.radians((lon-origin[1]+180)%360-180)*R*math.cos(math.radians(origin[0])))
+
+
+def ne_to_geo(north, east, origin):
+    return (origin[0]+math.degrees(north/R),
+            (origin[1]+math.degrees(east/(R*math.cos(math.radians(origin[0]))))+180)%360-180)
+
+
+def validate_plan(value):
+    if not isinstance(value, dict):
+        raise ValueError('Expected waypoint object')
+    lat, lon, depth = (value.get(k) for k in ('lat', 'lon', 'depth_m'))
+    geo_to_ne(lat, lon, (0., 0.))
+    if isinstance(depth, bool) or not isinstance(depth, (int, float)) or not math.isfinite(depth) or not .3 <= depth <= 1.0:
+        raise ValueError('Dive depth must be 0.3 to 1.0 m')
+    if value.get('map') not in ('pool', 'geographic'):
+        raise ValueError('Unknown map')
+    return dict(lat=float(lat), lon=float(lon), depth_m=float(depth), map=value['map'])
+
+
+class WaypointRun:
+    moving = {'DIVE', 'TRANSIT', 'SURFACE'}
+    terminal = {'COMPLETE', 'ABORTED'}
+
+    def __init__(self, plan, run_id, now):
+        self.plan = validate_plan(plan)
+        self.run_id, self.stage, self.since = run_id, 'WAIT_SURFACE', now
+        self.reason = 'Qualifying surfaced navigation'
+        self.origin = self.reference_id = self.start = self.target = self.start_gps = None
+        self.heading = None
+        self.surface_down = None
+        self.last = now
+        self.arrival = None
+        self.last_command = -math.inf
+        self.last_position = None
+        self.pilot_takeover = False
+        self.takeover_requested = False
+
+    @property
+    def phase(self):
+        if self.stage in ('WAIT_SURFACE', 'RECOVER_GPS', 'COMPLETE'):
+            return 'SURFACE'
+        return 'DIVE' if self.stage in ('PREPARE', 'GUIDED', 'ARM', 'DIVE') else 'UNDERWATER'
+
+    def enter(self, stage, now, reason):
+        self.stage, self.since, self.reason = stage, now, reason
+        self.arrival, self.last_command = None, -math.inf
+
+    def abort(self, now, reason, pilot=False):
+        self.pilot_takeover = pilot
+        self.takeover_requested = self.stage in self.moving | {'GUIDED', 'ARM', 'DISARM'}
+        self.enter('ABORTED', now, reason)
+
+    def abort_actions(self, now, o):
+        if self.takeover_requested and not self.pilot_takeover and o.get('mode') in (None, 4):
+            return self.command(now, 'manual')
+        return []
+
+    def command(self, now, action, payload=None, interval=1.):
+        if now-self.last_command < interval:
+            return []
+        self.last_command = now
+        return [(action, payload)]
+
+    def settled(self, now, condition):
+        self.arrival = (now if self.arrival is None else self.arrival) if condition else None
+        return self.arrival is not None and now-self.arrival >= 1.
+
+    def step(self, now, o):
+        gap, self.last = now-self.last, now
+        if self.stage == 'COMPLETE':
+            return []
+        if self.stage == 'ABORTED':
+            return self.abort_actions(now, o)
+        s = o.get('supervisor') or {}
+        moving = self.stage in self.moving
+        failure = o.get('failure') or ''
+        if moving and not 0 <= gap < 1.:
+            failure = 'Mission callback missed freshness deadline'
+        if o.get('abort'):
+            failure = 'Operator aborted; pilot takeover requested'
+        if moving and (o.get('armed') is False or o.get('mode') not in (None, 4)):
+            self.abort(now, 'Pilot changed mode or vehicle disarmed', pilot=True)
+            return []
+        if now-self.since > (10. if self.stage in ('GUIDED', 'ARM', 'DISARM') else 90.):
+            failure = 'Mission stage timed out: '+self.stage
+        if self.origin is not None and tuple(o.get('origin') or ()) != self.origin:
+            failure = 'Cube origin unavailable or changed'
+        if (moving or self.stage in ('GUIDED', 'ARM')) and (not s.get('navigation_ready') or not s.get('reference_current')
+                       or s.get('confirmed_source') != 'Underwater'
+                       or (s.get('reference') or {}).get('reference_id') != self.reference_id):
+            failure = 'Underwater navigation permission or reference lost: '+str(s.get('reason'))
+        if s.get('state') == 'Fault':
+            failure = 'Supervisor fault: '+str(s.get('reason'))
+        if failure:
+            self.abort(now, failure)
+            return self.abort_actions(now, o)
+        # Every stage uses fresh status for this run, including pre-arm waits.
+        if not o.get('fresh') or s.get('run_id') != self.run_id:
+            if moving or self.stage in ('GUIDED', 'ARM', 'DISARM'):
+                self.abort(now, 'Fresh navigation telemetry for this run unavailable')
+                return self.abort_actions(now, o)
+            return []
+        if self.stage == 'WAIT_SURFACE':
+            if o.get('armed'):
+                self.abort(now, 'Start requires a disarmed vehicle')
+            elif s.get('surfaced') is True and s.get('confirmed_source') == 'Surface GPS' and s.get('navigation_ready'):
+                self.enter('PREPARE', now, 'Capture surface start and confirm underwater sources')
+        elif self.stage == 'PREPARE':
+            ref = s.get('reference') or {}
+            if s.get('navigation_ready') and s.get('reference_current') and s.get('confirmed_source') == 'Underwater':
+                try:
+                    origin = tuple(o['origin'])
+                    target = geo_to_ne(self.plan['lat'], self.plan['lon'], origin)
+                    start = tuple(o['local'])
+                    global_ne = geo_to_ne(*o['global'], origin)
+                    if math.dist(global_ne, start[:2]) > .75:
+                        raise ValueError('Cube global/local frames disagree')
+                    if not .3 <= math.dist(start[:2], target) <= 20.:
+                        raise ValueError('Waypoint must be 0.3 to 20 m from start')
+                    # Calibrated pressure depth and Cube NED down need not have
+                    # the same zero. Freeze their offset; never reset the EKF.
+                    surface_down = start[2]-o['depth']
+                    heading = float(o['yaw'])
+                    target = (*target, surface_down+self.plan['depth_m'])
+                    if not all(math.isfinite(v) for v in (*start, *target, heading)):
+                        raise ValueError('Non-finite mission reference')
+                    self.origin, self.reference_id = origin, ref['reference_id']
+                    self.start, self.target = start, target
+                    self.surface_down, self.heading = surface_down, heading
+                    self.start_gps = tuple(o['global'])
+                    self.last_position = (now, start)
+                    self.enter('GUIDED', now, 'Waiting for GUIDED mode confirmation')
+                except (KeyError, ValueError, TypeError) as error:
+                    self.abort(now, str(error))
+        elif self.stage in ('GUIDED', 'ARM'):
+            if not s.get('navigation_ready') or not s.get('reference_current'):
+                self.abort(now, 'Navigation permission lost before arming')
+                return self.command(now, 'manual') if o.get('mode') == 4 else []
+            if self.stage == 'GUIDED':
+                if o.get('mode') == 4:
+                    self.enter('ARM', now, 'Waiting for arm confirmation')
+                else:
+                    return self.command(now, 'guided')
+            elif o.get('armed'):
+                self.enter('DIVE', now, 'Descending at the surface start')
+            elif o.get('mode') != 4:
+                self.abort(now, 'GUIDED mode lost before arming', pilot=True)
+            else:
+                return self.command(now, 'arm')
+        elif moving:
+            local = o['local']
+            if self.last_position:
+                t, p = self.last_position
+                if math.dist(local, p) > .5+2.*(now-t):
+                    self.abort(now, 'Cube position discontinuity')
+                    return self.command(now, 'manual')
+            self.last_position = (now, tuple(local))
+            target = (self.start[0], self.start[1], self.target[2]) if self.stage == 'DIVE' else (
+                (*self.target[:2], self.surface_down) if self.stage == 'SURFACE' else self.target)
+            depth = o['depth']
+            reached = (math.dist(local[:2], target[:2]) <= .35 and o['speed'] <= .15
+                       and (abs(depth-self.plan['depth_m']) <= .08 if self.stage != 'SURFACE' else -.1 <= depth <= .12))
+            if self.settled(now, reached):
+                next_stage = {'DIVE': 'TRANSIT', 'TRANSIT': 'SURFACE', 'SURFACE': 'DISARM'}[self.stage]
+                self.enter(next_stage, now, {'TRANSIT': 'Traveling underwater to waypoint',
+                    'SURFACE': 'Ascending at waypoint', 'DISARM': 'Surface reached; waiting for disarm'}[next_stage])
+                return []
+            return self.command(now, 'target', (*target, self.heading), interval=3.)
+        elif self.stage == 'DISARM':
+            if o.get('armed'):
+                return self.command(now, 'disarm')
+            self.enter('RECOVER_GPS', now, 'Disarmed; verifying surface GPS recovery')
+            return [('manual', None)]
+        elif self.stage == 'RECOVER_GPS':
+            if o.get('armed'):
+                self.abort(now, 'Vehicle rearmed during GPS recovery', pilot=True)
+            elif s.get('surfaced') is True and s.get('confirmed_source') == 'Surface GPS' and s.get('navigation_ready'):
+                self.enter('COMPLETE', now, 'Surfaced at waypoint and disarmed; GPS recovered')
+        return []
+
+    def snapshot(self):
+        return dict(run_id=self.run_id, stage=self.stage, reason=self.reason, plan=self.plan,
+                    surface_start=self.start_gps, start_cube=self.start, target_cube=self.target,
+                    surface_down=self.surface_down,
+                    heading_rad=self.heading, complete=self.stage == 'COMPLETE')

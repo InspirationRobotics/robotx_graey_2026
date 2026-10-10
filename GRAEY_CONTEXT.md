@@ -530,15 +530,55 @@ default heading-reference validation remains false; offsets and thresholds are
 read-only startup parameters. No Cube yaw, EKF, arm, kill, or ESC command is
 changed by this feature.
 
-The VN-100 driver currently publishes gyro values without converting the VN
-degrees/second values into the ROS Imu convention. The new supervisor consumes
-this existing driver-specific value directly for its 5-degree/second turn
-threshold; it does not change the sensor message because the external-nav bridge
-also consumes it. This records code behavior, not independent hardware
-validation. The DVL check assumes its configured body-forward axis is +x, as
-used by the existing bridge and simulator; verify that during commissioning.
+Correction during October 10 waypoint work: the prior assertion that VNYBA gyro
+fields are degrees/second was wrong. Manufacturer UM005 section 9.2.9 specifies
+radians/second, consistent with the existing ROS driver. The supervisor now
+converts radians to degrees for its turn threshold, with a regression test. No
+driver/bridge units or vehicle parameters were changed. The DVL check assumes
+its configured body-forward axis is +x, as used by the existing bridge and
+simulator; verify that during commissioning.
 
 This feature is local source work only. No vehicle access, parameter write,
 deployment, or in-water check was performed. The pre-dive gate and source
 transition require software tests and isolated simulation; physical heading
 north calibration and surface-to-underwater behavior remain unverified.
+
+## Click-to-waypoint implementation — October 10, 2026
+
+User authorized implementing/verifying a map-click mission: mark surface start,
+dive to 0.5 m, travel underwater, surface at the clicked waypoint, and display
+Cube location/heading throughout. Implemented locally on tether_toggle_beichen:
+main GUI Waypoint mission tab /waypoint, shared /pool-map page, reviewed single-use
+plans, owned waypoint_mission controller, explicit live commissioning gate.
+GUI starts one mission process; supervisor owns EKF source selection/reference;
+bridge remains core-owned; Cube estimates and controls. No EKF origin reset.
+Cube global/ATTITUDE telemetry supplies the marker on surface and underwater;
+raw GPS stays separate. Pressure-to-local-down offset is frozen before descent.
+Underwater aiding is retained through ascent; surface GPS recovery follows disarm.
+
+SITL exposed and corrected the pre-dive heading gate expiring during depth
+hysteresis. It now remains approved for a prepared current dive with confirmed
+Underwater source and saved reference, and resets on new run/SURFACE intent.
+SITL timing investigation measured WSL wall-clock rollback (-2.260 s) without a
+monotonic scheduling gap. Bridge/supervisor/GUI/waypoint/SITL timers now use a
+steady clock; synthetic sensor timestamps use steady ordering. ROS wall clock
+and physical VN/DVL timestamp conventions are unchanged. Live clock-sync/restart
+behavior remains to be checked; no sensor freshness limits were relaxed.
+
+Validation: 130 tests passed with ROS loaded/no skips. Three complete isolated
+waypoint missions passed after the clock fix, including GPS absence underwater,
+Cube heading/location display, surface arrival/disarm/GPS recovery. Two operator
+abort runs and missing-ACK/missing-source-report injections passed. Earlier
+failed runs are retained and explained in docs/waypoint-mission-2026-10-10.md.
+No QGC forwarding, vehicle access, deployment, physical arming, live parameter
+writes, or main changes occurred. This is simulation validation, not wet readiness.
+
+Mapping remains approximate (existing screenshot reference/scale/north-up).
+Live pool-image mission starts are blocked pending a measured survey and boundary
+validation; the software does not yet ingest a survey. Proposed solution:
+multiple measured pool control points plus independent hold-out check, then
+independent vehicle position/heading and underwater endpoint measurements.
+IMU/DVL cannot identify a constant absolute GPS/map bias. Live waypoint execution
+defaults disabled; GRAEY_WAYPOINT_ENABLED is only a commissioning opt-in, not a
+replacement for source/depth/heading/control checks. No collision avoidance or
+validated pool geofence has been added.

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from rclpy.node import Node
+from robotx_graey_2026.api.steady_node import SteadyNode as Node
 from rcl_interfaces.msg import ParameterDescriptor
 from std_msgs.msg import Bool, String
 from std_msgs.msg import Float32
@@ -125,10 +125,8 @@ class NavigationSupervisor(Node):
             if math.isfinite(norm) and .9 < norm < 1.1:
                 self.put('heading_vn', dict(received=time.monotonic(),
                     yaw=math.degrees(math.atan2(2*(q.w*q.z+q.x*q.y), 1-2*(q.y*q.y+q.z*q.z))) % 360,
-                    # vn100_node currently publishes the VN YBA gyro values
-                    # unchanged (degrees/second) in Imu.angular_velocity.
-                    # Do not convert them a second time here.
-                    rate=getattr(getattr(msg, 'angular_velocity', None), 'z', math.nan)))
+                    # VNYBA gyro fields and ROS Imu use radians/second.
+                    rate=math.degrees(getattr(getattr(msg, 'angular_velocity', None), 'z', math.nan))))
             else:
                 self.samples.pop('heading_vn', None)
 

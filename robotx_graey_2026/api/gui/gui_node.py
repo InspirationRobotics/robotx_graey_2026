@@ -21,10 +21,11 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-from rclpy.node import Node
+from robotx_graey_2026.api.steady_node import SteadyNode as Node
 from std_msgs.msg import Int32, Bool, Float32, String
 from geometry_msgs.msg import TwistWithCovarianceStamped
 from robotx_graey_2026.api.gui.navigation_view import NavigationView
+from robotx_graey_2026.api.gui.waypoint_api import WaypointAPI
 
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.process_ownership import executable_pids
@@ -54,7 +55,8 @@ FILES = {
     '/navigation-supervisor': 'navigation_supervisor.html',
     '/': 'gui.html',
     '/planner': 'pool_planner.html',
-    '/pool-map': 'pool_map.html',
+    '/pool-map': 'waypoint.html',
+    '/waypoint': 'waypoint.html',
     '/pool_reference.png': 'pool_reference.png',
     '/pool.png': 'pool.png',
     '/neighbor_pool.png': 'neighbor_pool.png',
@@ -71,6 +73,8 @@ LED_SOURCE = 'pixhawk_led_node'
 
 MISSION = 'prequal_mission_cv'
 MISSION_EXECUTABLES = (
+    'waypoint_mission',
+    'sitl_mission',
     'prequal_mission',
     'prequal_mission_cv',
     'demo_mission',
@@ -116,6 +120,84 @@ link = None
 led_off = False
 control_bridge = None
 navigation = NavigationView()
+waypoint_api = WaypointAPI()
+waypoint_aborts = queue.Queue()
+waypoint_process = None
+waypoint_launch = None
+
+
+def waypoint_simulation():
+    return (os.environ.get('GRAEY_RUNTIME_SCOPE') == 'sitl'
+            and os.environ.get('ROS_LOCALHOST_ONLY') == '1'
+            and os.environ.get('ROS_DOMAIN_ID') == '73')
+
+
+def waypoint_capabilities():
+    sim = waypoint_simulation()
+    enabled = sim or os.environ.get('GRAEY_WAYPOINT_ENABLED') == '1'
+    return dict(simulation=sim, enabled=enabled,
+                pool_registration='approximate',
+                mapping_note=('Screenshot scale/anchor are approximate, not surveyed. Live pool-image starts are blocked.'
+                    + ('' if enabled else ' Live waypoint execution is disabled pending vehicle commissioning.')))
+
+
+def waypoint_request(body):
+    global waypoint_process, waypoint_launch
+    action = body.get('action')
+    nav = navigation.snapshot()
+    if action == 'preview':
+        return waypoint_api.preview(body.get('plan'), nav)
+    if action == 'abort':
+        status = nav['streams'].get('waypoint', {}).get('data', {})
+        expected = waypoint_launch['run_id'] if waypoint_launch and waypoint_process.poll() is None else status.get('run_id')
+        if not body.get('run_id') or body['run_id'] != expected:
+            raise ValueError('Current mission run ID required')
+        waypoint_aborts.put(body['run_id'])
+        return dict(ok=True, msg='Abort requested; verify MANUAL mode and take control')
+    if action != 'start':
+        raise ValueError('Unknown waypoint action')
+    item, duplicate = waypoint_api.consume(body.get('plan_id'), nav)
+    if duplicate:
+        return dict(ok=True, run_id=item['run_id'], duplicate=True)
+    cap = waypoint_capabilities()
+    if not cap['enabled']:
+        raise ValueError('Live waypoint commissioning is not enabled')
+    if not cap['simulation']:
+        if item['plan']['map'] == 'pool':
+            raise ValueError('Pool image registration is approximate; survey required for live pool targets')
+        c = control_bridge.snapshot()
+        if not (c.get('online') and c.get('vehicle_fresh') and not c.get('inhibit')
+                and not c.get('sa_active') and c.get('esc_commanded_on')):
+            raise ValueError('Control watchdog/ESC permission unavailable')
+    if any_mission_running() or (waypoint_process is not None and waypoint_process.poll() is None):
+        raise ValueError('Another mission is running')
+    run_id = uuid.uuid4().hex
+    folder = Path(os.environ.get('GRAEY_WAYPOINT_LOG_DIR', str(Path.home()/'robotx_ws/logs')))
+    folder.mkdir(parents=True, exist_ok=True)
+    argv = ['ros2', 'run', 'robotx_graey_2026', 'waypoint_mission', '--ros-args',
+            '-p', "plan_json:='"+json.dumps(item['plan'])+"'", '-p', 'run_id:='+json.dumps(run_id),
+            '-p', 'simulation:='+str(cap['simulation']).lower(), '-p', 'commissioned:=true',
+            '-p', 'result_file:='+str(folder/('waypoint-'+run_id+'.json'))]
+    with (folder/('waypoint-'+run_id+'.log')).open('w') as log:
+        # Inherit the GUI process group: isolated SITL shutdown must reap this child too.
+        waypoint_process = subprocess.Popen(argv, stdout=log, stderr=subprocess.STDOUT)
+    item['run_id'] = run_id
+    waypoint_launch = dict(run_id=run_id, started=time.monotonic(), plan=item['plan'])
+    return dict(ok=True, run_id=run_id)
+
+
+def waypoint_snapshot():
+    nav = navigation.snapshot()
+    if waypoint_launch:
+        current = nav['streams'].get('waypoint', {}).get('data', {})
+        if current.get('run_id') != waypoint_launch['run_id']:
+            exited = waypoint_process.poll()
+            age = time.monotonic()-waypoint_launch['started']
+            nav['streams']['waypoint'] = dict(age=age, fresh=exited is None and age < 5,
+                data=dict(run_id=waypoint_launch['run_id'], plan=waypoint_launch['plan'],
+                          stage='STARTING' if exited is None else 'ABORTED',
+                          reason='Waiting for mission process' if exited is None else 'Mission process failed to start; check mission log'))
+    return dict(capabilities=waypoint_capabilities(), navigation=nav)
 
 # Serializes GUI-originated mission changes and watchdog changes.
 operation_lock = threading.Lock()
@@ -389,7 +471,8 @@ def pids_for(name):
 
 
 def any_mission_running():
-    return any(pids_for(name) for name in MISSION_EXECUTABLES)
+    return ((waypoint_process is not None and waypoint_process.poll() is None)
+            or any(pids_for(name) for name in MISSION_EXECUTABLES))
 
 
 def spawn(argv, out=subprocess.DEVNULL):
@@ -539,6 +622,15 @@ def mission_start(query):
 
 
 def mission_stop():
+    if waypoint_launch and waypoint_process is not None and waypoint_process.poll() is None:
+        waypoint_aborts.put(waypoint_launch['run_id'])
+        return True, 'Waypoint abort requested; verify MANUAL mode and take control'
+    if pids_for('waypoint_mission'):
+        current = navigation.snapshot()['streams'].get('waypoint', {}).get('data', {})
+        if not current.get('run_id'):
+            return False, 'Waypoint status unavailable; use pilot controls. Stop has not been confirmed.'
+        waypoint_aborts.put(current['run_id'])
+        return True, 'Waypoint abort requested; verify MANUAL mode and take control'
     if link:
         link.disarm()
 
@@ -578,7 +670,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path not in ('/api/controller', '/api/navigation/reset'):
+        if path not in ('/api/controller', '/api/navigation/reset', '/api/waypoint'):
             self.send_error(404)
             return
 
@@ -600,6 +692,16 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(size))
             if not isinstance(body, dict):
                 raise ValueError('expected object')
+
+            if path == '/api/waypoint':
+                with operation_lock:
+                    try:
+                        result = waypoint_request(body)
+                    except (ValueError, TypeError, OSError) as error:
+                        self.reply_json(409, dict(ok=False, msg=str(error)))
+                        return
+                self.reply_json(202, result)
+                return
 
             if path == '/api/navigation/reset':
                 if body != {'action': 'reset_display'}:
@@ -640,6 +742,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         query = parse_qs(u.query)
+
+        if u.path == '/api/waypoint':
+            with operation_lock:
+                self.reply_json(200, waypoint_snapshot())
+            return
 
         if u.path == '/api/navigation':
             self.reply_json(200, navigation.snapshot())
@@ -837,6 +944,10 @@ class GuiNode(Node):
             lambda m: navigation.put('dvl_velocity', {'xyz': [m.twist.twist.linear.x,
                 m.twist.twist.linear.y, m.twist.twist.linear.z], 'frame': m.header.frame_id}), 10)
         self.create_subscription(String, '/graey/navigation/status', self.on_navigation_status, 10)
+        self.create_subscription(String, '/graey/waypoint/status', self.on_waypoint_status, 10)
+        self.waypoint_abort_pub = self.create_publisher(String, '/graey/waypoint/abort', 10)
+        self.waypoint_abort_runs = set()
+        self.create_timer(.2, self.flush_waypoint_aborts)
         self.create_timer(0.1, self.pump)
         self.create_timer(0.2, self.hold_led)
 
@@ -850,6 +961,23 @@ class GuiNode(Node):
         ).start()
 
         self.get_logger().info(f'GUI on http://0.0.0.0:{port}')
+
+    def on_waypoint_status(self, msg):
+        try:
+            value = json.loads(msg.data)
+            if isinstance(value, dict):
+                navigation.put('waypoint', value)
+        except (ValueError, TypeError):
+            pass
+
+    def flush_waypoint_aborts(self):
+        while not waypoint_aborts.empty():
+            self.waypoint_abort_runs.add(waypoint_aborts.get_nowait())
+        current = navigation.snapshot()['streams'].get('waypoint', {}).get('data', {})
+        if current.get('stage') in ('ABORTED', 'COMPLETE'):
+            self.waypoint_abort_runs.discard(current.get('run_id'))
+        for run_id in self.waypoint_abort_runs:
+            self.waypoint_abort_pub.publish(String(data=run_id))
 
     def hold_led(self):
         global led_off

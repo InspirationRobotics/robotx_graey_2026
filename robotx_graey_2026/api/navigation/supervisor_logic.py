@@ -167,7 +167,13 @@ class Supervisor:
         self.desired = 1 if diving else 2 if qualified or (o.source == 2 and grace) else 1
         if diving:
             self.state = 'Preparing dive' if o.intent == 'DIVE' else 'Underwater'
-            if self.surface:
+            # Once this dive has a saved reference and confirmed underwater
+            # aiding, the pre-dive check is complete. During depth hysteresis
+            # descent/ascent may still report surfaced while GPS/heading course
+            # is no longer applicable; do not revoke the completed gate then.
+            prepared = (self.dive_heading_approved and o.source == 1
+                        and o.reference_ready and o.reference_saved)
+            if self.surface and not prepared:
                 if not o.heading_allowed:
                     self.state, self.reason = 'Checking dive heading', o.heading_reason
                     return actions

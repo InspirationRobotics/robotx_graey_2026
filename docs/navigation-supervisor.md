@@ -104,11 +104,19 @@ blocked until a team commissioning procedure establishes the heading north
 references and DVL forward axis. The fixed offsets and thresholds are startup
 only. They are read-only ROS parameters and must be changed by a deliberate
 restart after independent frame checks; do not set validation true merely to
-make the gate pass. The current VN driver publishes angular-rate values in
-degrees/second despite the ROS IMU field convention; this gate consumes that
-driver-specific rate without a second unit conversion. The external-nav bridge
-also consumes the same field, so this scoped change does not rewrite the sensor
-message or change its existing EKF behavior.
+make the gate pass. Correction verified during waypoint work on October 10:
+VectorNav VNYBA gyro fields are radians/second, consistent with ROS Imu. The
+supervisor converts that rate to degrees/second for its turn threshold. The
+earlier assertion that the driver published degrees/second was incorrect.
+The driver and external-nav message remain unchanged. See the manufacturer's
+[VNYBA message definition, UM005 section 9.2.9](https://smode.whoi.edu/waveglider/doc/VN-300.pdf).
+
+Once this run's heading gate has passed, its reference is saved, and the
+Underwater source is confirmed, pre-dive approval remains latched through
+descent/ascent depth hysteresis. It resets for a new run or SURFACE intent.
+Fresh sensor/estimate checks still apply throughout; this does not waive
+underwater navigation health. The waypoint controller retains UNDERWATER intent
+through ascent and disarms before asking for surface GPS recovery.
 
 The bridge consumes one atomic DVL sample containing velocity and validity;
 legacy DVL GUI topics remain. It rejects stale/replayed samples and invalid

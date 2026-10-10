@@ -54,6 +54,7 @@
   <button data-panel="nodes" class="on" onclick="show('nodes')">Nodes</button>
   <button data-panel="sensors" onclick="show('sensors')">Sensors</button>
   <button data-panel="gps" onclick="show('gps')">Navigation</button>
+  <button data-panel="waypoint" onclick="show('waypoint')">Waypoint mission</button>
   <button data-panel="supervisor" onclick="show('supervisor')">Navigation Supervisor</button>
   <button data-panel="camera" onclick="show('camera')">Camera</button>
   <button data-panel="sonar" onclick="show('sonar')">Sonar</button>
@@ -85,6 +86,9 @@
 
 <div id="gps" class="embedded-page" style="display:none">
   <iframe title="GPS and vehicle pose map" data-src="/navigation"></iframe>
+</div>
+<div id="waypoint" class="embedded-page" style="display:none">
+  <iframe title="Waypoint mission and Cube map" data-src="/waypoint"></iframe>
 </div>
 
 <div id="supervisor" class="embedded-page" style="display:none">
@@ -145,7 +149,7 @@
 </div>
 
 <script>
-var TABS = ['nodes','sensors','gps','supervisor','camera','sonar','planner','logs','system'];
+var TABS = ['nodes','sensors','gps','waypoint','supervisor','camera','sonar','planner','logs','system'];
 var ledOff = false;                          // mirrored from /api/status
 
 // The log is only fetched while its tab is open - no point pulling 60 KB a second
@@ -203,7 +207,7 @@ function show(t){
   document.querySelectorAll('#tabs button').forEach(function(b,i){
     b.classList.toggle('on', b.dataset.panel === t);
   });
-  if (t === 'gps' || t === 'supervisor' || t === 'planner') {
+  if (t === 'gps' || t === 'waypoint' || t === 'supervisor' || t === 'planner') {
     var frame = document.querySelector('#' + t + ' iframe');
     if (frame && !frame.src) frame.src = frame.dataset.src;
   }

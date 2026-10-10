@@ -40,6 +40,7 @@ setup(
             'demo_mission = robotx_graey_2026.api.navigation.demo_mission:main',
             'sitl_sensor_sim = robotx_graey_2026.api.navigation.sitl_sensor_sim:main',
             'sitl_mission = robotx_graey_2026.api.navigation.sitl_mission:main',
+            'waypoint_mission = robotx_graey_2026.api.navigation.waypoint_mission:main',
         ],
     },
 )
