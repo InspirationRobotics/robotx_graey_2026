@@ -12,7 +12,7 @@ import tempfile
 root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--modes', nargs='+', default=['nominal', 'drop-ack', 'drop-source', 'nominal'],
-                    choices=['nominal', 'drop-ack', 'drop-source'])
+                    choices=['nominal', 'drop-ack', 'drop-source', 'waypoint', 'waypoint-abort'])
 args = parser.parse_args()
 stage = Path(tempfile.mkdtemp(prefix='graey-switch-', dir='/tmp'))
 source = stage/'source'
@@ -22,7 +22,7 @@ binary = Path(os.environ.get('SITL_BIN', str(root.parent/'output/gps-sitl-2026-1
 shutil.copy2(binary, stage/'ardusub')
 (stage/'ardusub').chmod(0o700)
 hashes = {str(p.relative_to(source)): hashlib.sha256(p.read_bytes()).hexdigest()
-          for p in source.rglob('*') if p.is_file() and p.suffix in ('.py', '.sh', '.parm', '.lua')}
+          for p in source.rglob('*') if p.is_file() and p.suffix in ('.py', '.sh', '.parm', '.lua', '.html')}
 manifest = dict(stage=str(stage), binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
                 source_sha256=hashes, results=[])
 env = dict(os.environ, SITL_BIN=str(stage/'ardusub'))
@@ -33,7 +33,8 @@ try:
     subprocess.run(['python3', '-m', 'unittest', 'discover', '-s', 'test'], cwd=source,
                    env=env, check=True)
     for mode in args.modes:
-        result = subprocess.run(['python3', 'sitl/validate_switching.py', '--mode', mode],
+        command = (['python3', '-m', 'sitl.validate_waypoint'] + (['--abort'] if mode == 'waypoint-abort' else [])) if mode.startswith('waypoint') else ['python3', 'sitl/validate_switching.py', '--mode', mode]
+        result = subprocess.run(command,
                                 cwd=source, env=env)
         manifest['results'].append(dict(mode=mode, returncode=result.returncode))
         shutil.copytree(source/'sitl/logs', evidence, dirs_exist_ok=True)

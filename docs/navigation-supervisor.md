@@ -78,6 +78,46 @@ GPS fusion. Innovation/log inspection is still required during commissioning.
 | Rejected/missing confirmation, alignment timeout, position jump | Latch fault; do not automatically retry/resume |
 | Cube reboot/origin change or bridge restart | Invalidate permission/frame; operator revalidation required |
 
+### Pre-dive heading consistency gate
+
+Before a DIVE/UNDERWATER request can switch from the surfaced source profile,
+the supervisor checks that fresh VN-100 and Cube headings agree. It then uses
+GPS course-over-ground only when the M9N reports a fresh, advancing course and
+speed, the speed uncertainty is low enough, and valid DVL samples show sustained
+straight forward motion. Five distinct GPS measurements must span the configured
+three-second dwell. The default comparison tolerance is 15 degrees; the default
+minimum speed is 0.5 m/s. GPS course is direction of travel, not antenna or body
+heading, so stationary, reverse, strafe, turn, vertical motion, stale GPS, poor
+velocity uncertainty, or GPS/DVL speed disagreement causes the course comparison
+to be skipped. A skip may proceed only when the north references and forward
+axes have already been commissioned and the VN/Cube headings agree.
+
+A sustained GPS-course disagreement blocks dive preparation until a sustained
+agreement window passes. The GUI reports `Waiting`, `Skipped`, `Passed`, or
+`Blocked` and the reason. This check does **not** rotate or overwrite VN/Cube yaw,
+send a yaw setpoint, reset the Cube EKF, or alter sensor fusion. GPS course alone
+cannot identify mounting error while stationary. A single-antenna M9N does not
+provide independent stationary heading.
+
+`heading_reference_validated` defaults false, so autonomous dive permission is
+blocked until a team commissioning procedure establishes the heading north
+references and DVL forward axis. The fixed offsets and thresholds are startup
+only. They are read-only ROS parameters and must be changed by a deliberate
+restart after independent frame checks; do not set validation true merely to
+make the gate pass. Correction verified during waypoint work on October 10:
+VectorNav VNYBA gyro fields are radians/second, consistent with ROS Imu. The
+supervisor converts that rate to degrees/second for its turn threshold. The
+earlier assertion that the driver published degrees/second was incorrect.
+The driver and external-nav message remain unchanged. See the manufacturer's
+[VNYBA message definition, UM005 section 9.2.9](https://smode.whoi.edu/waveglider/doc/VN-300.pdf).
+
+Once this run's heading gate has passed, its reference is saved, and the
+Underwater source is confirmed, pre-dive approval remains latched through
+descent/ascent depth hysteresis. It resets for a new run or SURFACE intent.
+Fresh sensor/estimate checks still apply throughout; this does not waive
+underwater navigation health. The waypoint controller retains UNDERWATER intent
+through ascent and disarms before asking for surface GPS recovery.
+
 The bridge consumes one atomic DVL sample containing velocity and validity;
 legacy DVL GUI topics remain. It rejects stale/replayed samples and invalid
 attitude/rates. It withholds combined ODOMETRY when DVL or VN-100 fails, rather
@@ -163,9 +203,11 @@ Before enabling source commands on a disarmed bench vehicle:
    scripting on that firmware. No script has been installed. Missing feedback
    leaves the source Unknown and blocks activation; ACK alone is insufficient.
 4. Verify Cube NED and bridge external FRD axes agree, including magnetic/true
-   north and yaw offset. Test one-time alignment/reset-counter behavior and pose
-   continuity. Only then enable bridge `allow_alignment` and supervisor
-   `vehicle_validation_complete` plus `active`. Parameter readback must match.
+   north and yaw offset. Commission and set the startup-only heading reference
+   validation and offsets before permitting a dive. Test one-time
+   alignment/reset-counter behavior and pose continuity. Only then enable bridge
+   `allow_alignment` and supervisor `vehicle_validation_complete` plus `active`.
+   Parameter readback must match.
 5. Validate source transitions, GPS loss/recovery, sensor interruption and node
    restart while disarmed, then controlled water tests with an operator.
 

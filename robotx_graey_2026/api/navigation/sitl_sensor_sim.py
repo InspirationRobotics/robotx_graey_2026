@@ -10,7 +10,7 @@ import math
 import time
 
 from geometry_msgs.msg import TwistWithCovarianceStamped
-from rclpy.node import Node
+from robotx_graey_2026.api.steady_node import SteadyNode as Node
 from sensor_msgs.msg import Imu
 from std_msgs.msg import Bool, Float32, String
 
@@ -64,7 +64,9 @@ class SitlSensorSim(Node):
             depth_velocity = local['velocity'][2]
             world_velocity = (world_velocity[0], world_velocity[1], depth_velocity)
         body_velocity = qrotate((q[0], -q[1], -q[2], -q[3]), world_velocity)
-        stamp = self.get_clock().now().to_msg()
+        # Synthetic ordering/integration timestamps, not UTC. WSL can step its
+        # wall clock backwards; that must not freeze these generated samples.
+        stamp = self.steady_clock.now().to_msg()
         stamp_ns = stamp.sec*1_000_000_000+stamp.nanosec
         imu = Imu()
         imu.header.stamp = stamp

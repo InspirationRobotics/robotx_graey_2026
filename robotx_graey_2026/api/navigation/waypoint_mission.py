@@ -1,0 +1,171 @@
+"""Operator-started waypoint mission; the same controller runs in isolated SITL."""
+import json
+import math
+import os
+import time
+from pathlib import Path
+
+from robotx_graey_2026.api.steady_node import SteadyNode as Node
+from std_msgs.msg import Bool, String
+from robotx_graey_2026.api.node_util import run
+from robotx_graey_2026.api.gui.navigation_view import NavigationView
+from robotx_graey_2026.api.navigation.waypoint_logic import WaypointRun
+from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL
+
+
+class WaypointMission(Node):
+    def __init__(self):
+        super().__init__('waypoint_mission')
+        for key, value in dict(plan_json='', run_id='', commissioned=False, simulation=False,
+                              mavlink='udpout:127.0.0.1:14553', result_file='').items():
+            self.declare_parameter(key, value)
+        cfg = {key: self.get_parameter(key).value for key in
+               ('plan_json', 'run_id', 'commissioned', 'simulation', 'mavlink', 'result_file')}
+        self.sim = cfg['simulation']
+        if self.sim and not (os.environ.get('GRAEY_RUNTIME_SCOPE') == 'sitl'
+                            and os.environ.get('ROS_LOCALHOST_ONLY') == '1'
+                            and os.environ.get('ROS_DOMAIN_ID') == '73'
+                            and cfg['mavlink'] == 'udpout:127.0.0.1:14553'):
+            raise ValueError('Simulation requires isolated localhost SITL domain and endpoint')
+        if not cfg['run_id'] or (not self.sim and not cfg['commissioned']):
+            raise ValueError('Mission run ID and commissioned live configuration required')
+        self.logic = WaypointRun(json.loads(cfg['plan_json']), cfg['run_id'], time.monotonic())
+        self.result_file = cfg['result_file']
+        self.link = Link(cfg['mavlink'], 198, self.get_logger())
+        self.view = NavigationView()
+        self.supervisor, self.safety = {}, {}
+        self.supervisor_time = self.safety_time = -math.inf
+        self.aborted, self.written = False, False
+        self.sequence, self.stamps = 0, {}
+        self.gps_enabled = True
+        self.last_stage = None
+        self.pub = self.create_publisher(String, '/graey/waypoint/status', 10)
+        self.intent_pub = self.create_publisher(String, '/graey/navigation/intent', 10)
+        self.auto_pub = self.create_publisher(Bool, '/graey/autonomy_active', 10)
+        self.create_subscription(String, '/graey/navigation/status', self.on_status, 10)
+        self.create_subscription(String, '/graey/control_watchdog/status', self.on_safety, 10)
+        self.create_subscription(String, '/graey/waypoint/abort', self.on_abort, 10)
+        self.create_timer(.02, self.pump)
+        self.create_timer(.1, self.tick)
+        self.create_timer(1., self.link.heartbeat)
+        self.create_timer(5., self.request)
+        self.request()
+
+    def request(self):
+        for mid in (24, 30, 32, 33, 49, 193):
+            self.link.command(511, mid, 100000)
+
+    def on_status(self, msg):
+        try:
+            data = json.loads(msg.data)
+            if isinstance(data, dict):
+                self.supervisor, self.supervisor_time = data, time.monotonic()
+        except (ValueError, TypeError):
+            pass
+
+    def on_safety(self, msg):
+        try:
+            data = json.loads(msg.data)
+            if isinstance(data, dict):
+                self.safety, self.safety_time = data, time.monotonic()
+        except (ValueError, TypeError):
+            pass
+
+    def on_abort(self, msg):
+        if msg.data == self.logic.run_id:
+            self.aborted = True
+
+    def pump(self):
+        def receive(kind, m):
+            if m.get_srcSystem() != 1 or m.get_srcComponent() != 1:
+                return
+            if kind in ('LOCAL_POSITION_NED', 'ATTITUDE', 'GLOBAL_POSITION_INT'):
+                previous = self.stamps.get(kind, -1)
+                if m.time_boot_ms+1000 < previous:
+                    self.aborted = True
+                if m.time_boot_ms <= previous:
+                    return
+                self.stamps[kind] = m.time_boot_ms
+            self.view.consume(kind, m)
+        self.link.drain(receive)
+
+    def observation(self, now):
+        streams = self.view.snapshot()['streams']
+        def sample(name, limit):
+            s = streams.get(name, {})
+            return s.get('data', {}) if s.get('age', math.inf) < limit else {}
+        hb, local, att = sample('heartbeat', 2), sample('local', .5), sample('attitude', .5)
+        glob, origin = sample('global', .5), sample('cube_origin', 10)
+        s = self.supervisor
+        fresh = bool(hb and local and att and origin and self.view.position_healthy()
+                     and 0 <= now-self.supervisor_time < .7
+                     and 0 <= now-s.get('published_monotonic', -math.inf) < .7)
+        ned, velocity = local.get('ned'), local.get('velocity')
+        depth = s.get('depth_m')
+        fresh = fresh and all(isinstance(v, (int, float)) and math.isfinite(v)
+                             for v in (*(ned or [None]), *(velocity or [None]),
+                                       *att.get('rpy', [None]), depth))
+        failure = ''
+        if not self.sim:
+            c = self.safety
+            if not (0 <= now-self.safety_time < 2 and c.get('vehicle_fresh')
+                    and not c.get('inhibit') and not c.get('sa_active') and c.get('esc_commanded_on')):
+                fresh = False
+                # DDS subscriptions can take a moment to match at startup.
+                # Wait disarmed for the first status, without granting readiness.
+                if not (self.safety_time == -math.inf and self.logic.stage == 'WAIT_SURFACE'
+                        and now-self.logic.since < 2):
+                    failure = 'Control watchdog or ESC permission unavailable'
+        return dict(fresh=fresh, failure=failure, abort=self.aborted,
+            supervisor=s, armed=hb.get('armed'), mode=hb.get('mode_id'),
+            local=ned, speed=math.hypot(*velocity[:2]) if velocity and all(v is not None for v in velocity) else math.inf,
+            yaw=math.radians(att['rpy'][2]) if att and att['rpy'][2] is not None else None,
+            depth=depth, origin=(origin['lat'], origin['lon'], origin['alt']) if origin else None,
+            global_healthy=glob.get('valid'),
+            **{'global': (glob['lat'], glob['lon']) if glob.get('valid') else None})
+
+    def tick(self):
+        now = time.monotonic()
+        self.sequence += 1
+        # Keep the underwater profile through ascent; recover GPS after disarm.
+        if self.logic.stage not in self.logic.terminal:
+            self.intent_pub.publish(String(data=json.dumps(dict(run_id=self.logic.run_id,
+                phase=self.logic.phase, sequence=self.sequence, target_gps=self.logic.plan))))
+        o = self.observation(now)
+        for action, payload in self.logic.step(now, o):
+            if action == 'target':
+                self.link.goto_ned(*payload)
+            elif action in ('guided', 'manual'):
+                self.link.set_mode(MODE_GUIDED if action == 'guided' else MODE_MANUAL)
+            elif action in ('arm', 'disarm'):
+                self.link.command(400, 1 if action == 'arm' else 0)
+        if self.sim:
+            enabled = not (self.logic.stage in ('DIVE', 'TRANSIT', 'SURFACE')
+                           and isinstance(o['depth'], (int, float)) and o['depth'] > .2)
+            if enabled != self.gps_enabled:
+                self.gps_enabled = enabled
+                self.link.send('param_set_send', 1, 1, b'SIM_GPS_DISABLE', float(not enabled), 9)
+        status = self.logic.snapshot()
+        status.update(simulation=self.sim, published_monotonic=now,
+                      telemetry_fresh=bool(o['fresh']), confirmed_source=self.supervisor.get('confirmed_source'))
+        if self.logic.stage != self.last_stage:
+            self.last_stage = self.logic.stage
+            self.get_logger().info('WAYPOINT_STAGE '+json.dumps(status, allow_nan=False))
+        self.pub.publish(String(data=json.dumps(status, allow_nan=False)))
+        self.auto_pub.publish(Bool(data=self.logic.stage not in self.logic.terminal))
+        if self.logic.stage in self.logic.terminal:
+            if self.result_file and not self.written:
+                path = Path(self.result_file)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(json.dumps(status, indent=2), encoding='utf-8')
+                self.written = True
+            # Publish the terminal state long enough for the GUI. On a nav abort
+            # continue requesting takeover until the Cube acknowledges leaving GUIDED.
+            if now-self.logic.since > 3 and (self.logic.stage == 'COMPLETE'
+                    or o.get('mode') not in (None, 4) or self.logic.pilot_takeover
+                    or not self.logic.takeover_requested):
+                raise SystemExit(0)
+
+
+def main():
+    run(WaypointMission, ownership='waypoint_mission')
