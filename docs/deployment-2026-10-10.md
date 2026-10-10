@@ -71,3 +71,19 @@ MANUAL, disarmed, ESC off, SA kill active, and no mission claim.
   later commissioning. No mapping accuracy was inferred from sensor agreement.
 - Pushed combined branch and fast-forwarded the Windows checkout. Existing
   untracked Jetson backups, helper files and sonar data were preserved.
+
+### Session surface depth calibration (2026-10-10)
+
+User confirmed stationary floating surface, pressure sensor immersed, and requested
+calibration without disarming. Captured 57 advancing SCALED_PRESSURE2 samples over
+12 seconds via unused diagnostic endpoint14554: median997.4154663085938hPa,
+range997.38232421875–997.4569091796875hPa (0.000742m equivalent span at configured
+1025kg/m3). Applied only to current supervisor launch parameter file, preserving
+active=false, and SIGINT/reloaded observation supervisor only. Core, kill switch,
+bridge and GUI PIDs unchanged; controller remained armed MANUAL/TETHER, no mission.
+Three fresh readings verified Surfaced with depth0.00148–0.00166m. No Cube source
+or parameter command issued. Remaining status: Mission intent unavailable or
+stale, configuration unverified; heading references not validated. This session
+baseline is lost when the core launch is recreated/rebooted; do not reuse as an
+automatic zero at unknown depth. Pool water density setting remains1025kg/m3 and
+should be reviewed for quantitative depth commissioning. No persistent code change.

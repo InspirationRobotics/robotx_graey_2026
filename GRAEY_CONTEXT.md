@@ -598,3 +598,10 @@ configuration unverified. Restart reset control selection to RF/STARTUP inhibit;
 vehicle remained disarmed with ESC off and SA kill active. Bridge frame continuity
 must be revalidated after restart. See docs/deployment-2026-10-10.md for evidence;
 these are dated observations, not permanent live status.
+
+2026-10-10 follow-up: user-confirmed water-surface calibration set the current
+observation supervisor session baseline to997.4154663085938hPa (57 samples).
+Verified Surfaced, depthabout0.0015m. Only observation supervisor reloaded;
+bridge/control processes unchanged. No source switching performed. Baseline is
+session-only and must be re-established after core restart at confirmed surface.
+See deployment-2026-10-10.md for remaining commissioning blockers and evidence.
