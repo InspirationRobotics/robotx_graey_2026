@@ -109,6 +109,7 @@ class SitlMission(Node):
             phase=self.phase, sequence=self.sequence, target_gps=self.target_gps))))
 
     def pump(self):
+        started = time.monotonic()
         self.link.heartbeat()
         def consume(kind, msg):
             if msg.get_srcSystem() != 1 or msg.get_srcComponent() != 1:
@@ -127,6 +128,7 @@ class SitlMission(Node):
             elif kind == 'HEARTBEAT':
                 self.armed = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
         self.link.drain(consume)
+        self.last_pump_seconds = time.monotonic()-started
 
     def set_gps(self, enabled):
         if self.gps_enabled == enabled:
@@ -148,6 +150,7 @@ class SitlMission(Node):
 
     def write_result(self, passed):
         result = dict(schema=1, passed=bool(passed), run_id=self.run_id,
+            failure_reason=getattr(self, 'failure_reason', None),
             completed_utc=datetime.now(timezone.utc).isoformat(),
             starting_gps={'lat': self.home[0], 'lon': self.home[1]},
             waypoint_gps=self.target_gps, waypoint_local_ne_m=[self.target_n, self.target_e],
@@ -174,6 +177,7 @@ class SitlMission(Node):
             self.last_target, self.last_target_time = target, now
 
     def fail(self, reason):
+        self.failure_reason = reason
         self.get_logger().error(reason)
         # This abort is for the isolated simulator, not the live mission policy.
         self.link.disarm(tries=2, gap=.1)
@@ -182,6 +186,9 @@ class SitlMission(Node):
         self.write_result(False)
 
     def tick(self):
+        now = time.monotonic()
+        tick_gap = now-getattr(self, '_last_tick', now)
+        self._last_tick = now
         if not hasattr(self, 'intent_pub'):
             self.intent_pub = self.create_publisher(String, '/graey/navigation/intent', 10)
         self.publish_intent()
@@ -192,10 +199,19 @@ class SitlMission(Node):
             return
         status = self.status
         if self.stage in ('DIVE_TO_0_5M', 'UNDERWATER_WAYPOINT', 'SURFACING'):
-            if (not 0 <= time.monotonic()-self.status_received < 1.
-                    or status.get('run_id') != self.run_id
-                    or status.get('state') in ('Fault', 'Waiting for healthy navigation')):
-                self.fail('Navigation health lost during simulated mission: '+str(status.get('reason')))
+            age = time.monotonic()-self.status_received
+            failure = ('Supervisor status age outside [0,1) seconds: '+str(age)
+                       if not 0 <= age < 1. else
+                       'Supervisor mission run mismatch' if status.get('run_id') != self.run_id else
+                       str(status.get('reason')) if status.get('state') in
+                       ('Fault', 'Waiting for healthy navigation') else '')
+            if failure:
+                self.get_logger().warning('MISSION_TIMING '+json.dumps(dict(
+                    now=time.monotonic(), tick_gap=tick_gap,
+                    last_pump_seconds=getattr(self, 'last_pump_seconds', None),
+                    status_received=self.status_received,
+                    status_published=status.get('published_monotonic'))))
+                self.fail('Navigation health lost during simulated mission: '+failure)
                 return
         if self.stage == 'WAIT_SURFACE_GPS':
             if status.get('state') == 'Surface GPS' and status.get('navigation_ready'):

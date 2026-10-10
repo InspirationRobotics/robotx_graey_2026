@@ -61,6 +61,8 @@ class NavigationSupervisor(Node):
         self.gps_quality = GPSQuality(self.settings['gps_max_accuracy_m'],
             self.settings['gps_motion_margin_m'], self.settings['gps_motion_window_s'])
         self.baseline = None
+        self.switch_trace = None
+        self.switch_serial = 0
         self.pub = self.create_publisher(String, '/graey/navigation/status', 10)
         self.align_pub = self.create_publisher(String, '/graey/navigation/bridge_request', 10)
         self.create_subscription(String, '/graey/navigation/intent', self.intent, 10)
@@ -222,17 +224,42 @@ class NavigationSupervisor(Node):
         elif kind == 'NAMED_VALUE_FLOAT' and m.name.rstrip('\x00') == 'NAV_SRC':
             if self.advancing('source', m.time_boot_ms) and m.value in (1., 2.):
                 self.put('source', int(m.value))
+                if (self.switch_trace is not None and self.logic.pending
+                        and 'outcome' not in self.switch_trace):
+                    self.switch_trace['reported_source'] = int(m.value)
+                    self.switch_trace['source_received'] = now
+                    self.switch_trace['source_boot_ms'] = m.time_boot_ms
+                    target, sent = self.logic.pending
+                    if int(m.value) == target and sent < now <= sent+self.logic.timeout:
+                        self.switch_trace.setdefault('first_matching_source_received', now)
         elif kind == 'COMMAND_ACK' and m.command == 42007:
-            if getattr(m, 'target_component', 196) not in (0, 196):
+            target_system = getattr(m, 'target_system', 0)
+            target_component = getattr(m, 'target_component', 0)
+            self.get_logger().info('SOURCE_ACK '+json.dumps(dict(
+                received=now, result=m.result, target_system=target_system,
+                target_component=target_component,
+                transaction=self.switch_trace['id'] if self.switch_trace else None)))
+            if target_system not in (0, 1) or target_component not in (0, 196):
                 return
+            if not self.logic.pending:
+                return  # Unsolicited/old ACK must not seed a later transaction.
             if m.result != 5:  # IN_PROGRESS is neither success nor failure.
                 self.put('ack', 'accepted' if m.result == 0 else 'rejected')
+                if self.switch_trace is not None and 'outcome' not in self.switch_trace:
+                    self.switch_trace['ack_received'] = now
+                    self.switch_trace['ack_result'] = m.result
         elif kind == 'PARAM_VALUE':
             self.params[m.param_id.rstrip('\x00')] = m.param_value
 
     def tick(self):
+        started = time.monotonic()
         self.link.drain(self.consume)
         now = time.monotonic()
+        gap = started-getattr(self, '_last_tick', started)
+        self._last_tick = started
+        if gap > .5 or now-started > .1:
+            self.get_logger().warning('SUPERVISOR_TIMING '+json.dumps(dict(
+                started=started, tick_gap=gap, drain_seconds=now-started)))
         intent = self.fresh('intent') or {}
         depth = self.fresh('depth')
         pose = self.fresh('pose', .5)
@@ -255,7 +282,7 @@ class NavigationSupervisor(Node):
             alignment_id=self.alignment_id, reference_ready=ref_ready, reference_saved=ref_ready,
             configuration_verified=bool(self.settings['vehicle_validation_complete']
                 and all(self.params.get(k) == v for k, v in PROFILE.items())))
-        if self.baseline and pose and self.logic.pending and self.logic.pending[0] == 1:
+        if self.baseline and pose and self.logic.pending:
             elapsed = now-self.baseline[0]
             o.continuity_ok = math.dist(pose['ned'][:2], self.baseline[1][:2]) <= .5+2*elapsed
         for action, value in self.logic.step(now, o):
@@ -275,7 +302,18 @@ class NavigationSupervisor(Node):
                 self.align_pub.publish(String(data=json.dumps(dict(request_id=value, cube_ned=pose['ned'],
                     expires_at=now+.5))))
             elif action == 'select_source':
+                self.samples.pop('ack', None)
+                self.baseline = (now, pose['ned'])
+                self.switch_serial += 1
+                self.switch_trace = dict(id=self.switch_serial, target=value,
+                    sent=self.logic.pending[1], previous_source=o.source)
+                self.get_logger().info('SOURCE_REQUEST '+json.dumps(self.switch_trace))
                 self.link.command(42007, value)
+        if self.switch_trace and 'outcome' not in self.switch_trace:
+            if self.logic.fault or self.logic.pending is None:
+                self.switch_trace['outcome'] = self.logic.fault or 'confirmed'
+                self.switch_trace['finished'] = time.monotonic()
+                self.get_logger().info('SOURCE_RESULT '+json.dumps(self.switch_trace))
         status = self.logic.snapshot(o)
         status['reference'] = self.reference.snapshot() if self.reference else None
         status['mission_ned'] = self.reference.from_cube(pose['ned'], vehicle_epoch=self.epoch) if ref_ready and pose else None
@@ -285,6 +323,8 @@ class NavigationSupervisor(Node):
         status['gps_quality_reason'] = self.fresh('gps_reason') or 'GPS measurement stale or unavailable'
         status['configuration_verified'] = o.configuration_verified
         status['target_gps'] = intent.get('target_gps')
+        status['source_transaction'] = self.switch_trace
+        status['published_monotonic'] = time.monotonic()
         self.pub.publish(String(data=json.dumps(status, allow_nan=False)))
 
 

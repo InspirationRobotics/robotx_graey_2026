@@ -1,0 +1,13 @@
+{
+  "note": "Selected live parameter readback through MAVProxy, October 9 2026 Pacific. Not a complete parameter backup. GPS1_TYPE did not respond; GPS_TYPE did.",
+  "parameters": {
+    "AHRS_EKF_TYPE": 3, "EK3_ENABLE": 1,
+    "EK3_SRC1_POSXY": 6, "EK3_SRC1_VELXY": 6, "EK3_SRC1_YAW": 6,
+    "EK3_SRC2_POSXY": 0, "EK3_SRC2_VELXY": 0, "EK3_SRC2_YAW": 0,
+    "EK3_SRC1_POSZ": 1, "EK3_SRC2_POSZ": 1, "EK3_SRC_OPTIONS": 1,
+    "VISO_TYPE": 1, "VISO_ORIENT": 0, "AHRS_ORIENTATION": 0,
+    "GPS_TYPE": 1, "SERIAL4_PROTOCOL": 5, "SERIAL4_BAUD": 38,
+    "SCR_ENABLE": 0, "LOG_DISARMED": 1,
+    "EK3_POSNE_M_NSE": 0.5, "EK3_VELNE_M_NSE": 0.5, "EK3_GPS_CHECK": 31
+  }
+}

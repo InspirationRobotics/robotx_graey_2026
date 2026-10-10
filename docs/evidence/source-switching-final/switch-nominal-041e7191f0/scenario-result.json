@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "passed": true,
+  "run_id": "6e756994-719a-419f-a5a8-0afd6857895a",
+  "failure_reason": null,
+  "completed_utc": "2026-10-09T23:07:24.519958+00:00",
+  "starting_gps": {
+    "lat": 32.9240586,
+    "lon": -117.0385389
+  },
+  "waypoint_gps": {
+    "lat": 32.92407207466763,
+    "lon": -117.0385281980695,
+    "label": "Configured SITL target; pool position is approximate"
+  },
+  "waypoint_local_ne_m": [
+    1.5,
+    1.0
+  ],
+  "requested_dive_depth_m": 0.5,
+  "dive_depth_reached": true,
+  "gps_loss_verified": true,
+  "underwater_waypoint_reached": true,
+  "gps_recovery_verified": true,
+  "gps_fix_type": 6,
+  "confirmed_source_history": [
+    "Unknown",
+    "Underwater",
+    "Surface GPS",
+    "Underwater",
+    "Surface GPS"
+  ],
+  "final_local_ned": [
+    1.3630503416061401,
+    1.0048987865447998,
+    -0.004752039909362793
+  ],
+  "final_gps": {
+    "lat": 32.9240707,
+    "lon": -117.0385283
+  },
+  "final_supervisor_state": "Surface GPS"
+}

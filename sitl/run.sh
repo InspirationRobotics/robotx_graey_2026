@@ -6,8 +6,8 @@ export ROS_LOCALHOST_ONLY=1
 export GRAEY_RUNTIME_SCOPE=sitl
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUN_DIR="$ROOT/sitl/run"
-LOG_DIR="$ROOT/sitl/logs"
+RUN_DIR="${SITL_RUN_DIR:-$ROOT/sitl/run}"
+LOG_DIR="${SITL_LOG_DIR:-$ROOT/sitl/logs}"
 SITL_BIN="${SITL_BIN:-/mnt/c/Users/libei/OneDrive/Documents/ChatGPT/RX 2026 GRAEY/output/gps-sitl-2026-10-02/ardusub}"
 QGC_HOST="${QGC_HOST:-}"
 mkdir -p "$RUN_DIR/scripts" "$LOG_DIR"
@@ -34,7 +34,12 @@ try:
         for port in ports:
             s = socket.socket(socket.AF_INET, kind)
             held.append(s)
-            s.bind(('127.0.0.1', port))
+            if kind == socket.SOCK_STREAM:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind(('127.0.0.1', port))
+            except OSError as error:
+                raise RuntimeError(f'SITL endpoint busy: 127.0.0.1:{port} ({kind})') from error
 finally:
     for s in held:
         s.close()
@@ -95,6 +100,8 @@ cd "$ROOT"
 colcon build --symlink-install --packages-select robotx_graey_2026
 source install/setup.bash
 ros2 launch robotx_graey_2026 sitl.launch.py \
+  supervisor_mavlink:="${SUPERVISOR_MAVLINK:-udpout:127.0.0.1:14557}" \
+  result_file:="$LOG_DIR/scenario-result.json" \
   home_lat:="${HOME_LAT:-32.9240586}" home_lon:="${HOME_LON:--117.0385389}" \
   waypoint_north_m:="${WAYPOINT_NORTH_M:-1.5}" waypoint_east_m:="${WAYPOINT_EAST_M:-1.0}" \
   >"$LOG_DIR/ros.log" 2>&1 &

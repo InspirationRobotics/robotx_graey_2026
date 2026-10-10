@@ -56,10 +56,17 @@ class Supervisor:
         self.healthy_since = None
         self.source_since = None
         self.last_source = 0
+        self.last_step = None
+        self.evidence_for = None
+        self.switch_ack = ''
+        self.switch_source_seen = False
 
     def step(self, now, o):
         actions = []
         self.allowed = False
+        if self.last_step is not None and now < self.last_step:
+            self.fault = 'Supervisor clock moved backwards; revalidate navigation'
+        self.last_step = now
         self.healthy_since = (now if self.healthy_since is None else self.healthy_since) if o.healthy else None
         if o.source != self.last_source or not o.healthy:
             self.source_since = now
@@ -92,17 +99,37 @@ class Supervisor:
 
         if self.pending:
             target, sent = self.pending
-            if o.ack_updated > sent and o.ack == 'rejected':
+            if self.evidence_for != self.pending:
+                self.evidence_for = self.pending
+                self.switch_ack = ''
+                self.switch_source_seen = False
+            deadline = sent + self.timeout
+            ack_current = sent < o.ack_updated <= min(now, deadline)
+            source_current = sent < o.source_updated <= min(now, deadline)
+            if ack_current:
+                self.switch_ack = o.ack
+            if source_current and o.source == target:
+                self.switch_source_seen = True
+            # Retain timely transaction evidence while still requiring a current
+            # matching report. Later periodic reports must not erase the first.
+            source_ready = (self.switch_source_seen and o.source == target
+                            and sent < o.source_updated <= now
+                            and now-o.source_updated < 1.)
+            if self.switch_ack == 'rejected':
                 self.fault = 'Pixhawk rejected the source change'
-            elif (o.source == target and o.source_updated > sent
-                  and o.ack_updated > sent and o.ack == 'accepted'):
+            elif source_ready and self.switch_ack == 'accepted':
                 if not o.continuity_ok:
                     self.fault = 'Position discontinuity after source change'
                 else:
                     self.pending = None
                     self.alignment = None
             elif now-sent > self.timeout:
-                self.fault = 'Source change not confirmed before timeout'
+                missing = []
+                if self.switch_ack != 'accepted':
+                    missing.append('accepted command ACK')
+                if not source_ready:
+                    missing.append('fresh '+LABELS[target]+' source feedback')
+                self.fault = 'Source change not confirmed before timeout: missing '+', '.join(missing)
         if self.alignment and now-self.alignment[1] > self.timeout and not self.pending:
             self.fault = 'External position alignment timed out'
         if self.fault:

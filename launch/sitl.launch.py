@@ -18,6 +18,8 @@ def generate_launch_description():
         DeclareLaunchArgument('home_lon', default_value='-117.0385389'),
         DeclareLaunchArgument('waypoint_north_m', default_value='1.5'),
         DeclareLaunchArgument('waypoint_east_m', default_value='1.0'),
+        DeclareLaunchArgument('supervisor_mavlink', default_value='udpout:127.0.0.1:14557'),
+        DeclareLaunchArgument('result_file', default_value=result_file),
         Node(package='robotx_graey_2026', executable='nav_ekf_bridge',
              additional_env={'GRAEY_RUNTIME_SCOPE': 'sitl'},
              name='nav_ekf_bridge', parameters=[{'allow_alignment': True}], output='screen'),
@@ -25,6 +27,7 @@ def generate_launch_description():
              additional_env={'GRAEY_RUNTIME_SCOPE': 'sitl'},
              name='navigation_supervisor', parameters=[{
                  'active': True, 'vehicle_validation_complete': True,
+                 'mavlink': LaunchConfiguration('supervisor_mavlink'),
                  'depth_topic': '/graey/sitl/depth_m',
                  'reference_file': '/tmp/graey-sitl-navigation-reference.json'}], output='screen'),
         Node(package='robotx_graey_2026', executable='sitl_sensor_sim',
@@ -35,6 +38,6 @@ def generate_launch_description():
                  'home_lon': ParameterValue(home_lon, value_type=float),
                  'waypoint_north_m': ParameterValue(north, value_type=float),
                  'waypoint_east_m': ParameterValue(east, value_type=float),
-                 'result_file': result_file}], output='screen'),
+                 'result_file': LaunchConfiguration('result_file')}], output='screen'),
         Node(package='robotx_graey_2026', executable='gui_node', name='gui_node', output='screen'),
     ])

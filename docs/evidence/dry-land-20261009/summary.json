@@ -1,0 +1,173 @@
+{
+  "samples": 60,
+  "start": "2026-10-10T03:17:22.245660+00:00",
+  "end": "2026-10-10T03:18:25.018732+00:00",
+  "controller": {
+    "session": "c033800ef6dc415695efc54298908b1f",
+    "revision": 14,
+    "source": "RF",
+    "inhibit": null,
+    "armed": false,
+    "mode": "MANUAL",
+    "vehicle_fresh": true,
+    "rf_alive": true,
+    "tether_alive": true,
+    "ping_age": 0.05687741500014454,
+    "ping_detail": "Reply received",
+    "tether_ip": "192.168.2.1",
+    "tether_interface": "enP8p1s0",
+    "sa_active": true,
+    "esc_commanded_on": false,
+    "autonomous": false,
+    "mission_claimed": false,
+    "can_select_rf": true,
+    "can_select_tether": true,
+    "can_recover_tether": false,
+    "online": true
+  },
+  "streams": {
+    "vn_heading": {
+      "data": {
+        "degrees": 339.0740051269531
+      },
+      "age": 2308.3298093410003,
+      "fresh": false
+    },
+    "supervisor": {
+      "data": {
+        "state": "Waiting for healthy navigation",
+        "reason": "Unavailable: EKF estimate, Cube position, DVL velocity, DVL validity, VN-100, Navigation bridge",
+        "mode": "Observation",
+        "requested_source": "Unknown",
+        "confirmed_source": "Unknown",
+        "navigation_ready": false,
+        "surfaced": null,
+        "surface_state": "Unknown",
+        "run_id": "",
+        "reference": null,
+        "mission_ned": null,
+        "reference_current": false,
+        "depth_m": null,
+        "gps_qualified_input": false,
+        "gps_quality_reason": "Fresh valid DVL motion unavailable",
+        "configuration_verified": false,
+        "target_gps": null
+      },
+      "age": 0.06855024000014964,
+      "fresh": true
+    },
+    "dvl_velocity": {
+      "data": {
+        "xyz": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "frame": "dvl"
+      },
+      "age": 1703.171616264,
+      "fresh": false
+    },
+    "dvl_valid": {
+      "data": {
+        "valid": false
+      },
+      "age": 1703.1702182820002,
+      "fresh": false
+    },
+    "clearance": {
+      "data": {
+        "meters": null
+      },
+      "age": 1703.1696407650002,
+      "fresh": false
+    },
+    "attitude": {
+      "data": {
+        "rpy": [
+          -1.668595257275134,
+          -0.08246891799813721,
+          154.55196325591777
+        ]
+      },
+      "age": 0.018694062000122358,
+      "fresh": true
+    },
+    "global": {
+      "data": {
+        "lat": 32.9236223,
+        "lon": -117.0386055,
+        "alt": 222.26,
+        "valid": false,
+        "ned": null,
+        "velocity": [
+          0.02,
+          0.0,
+          0.0
+        ],
+        "heading": 154.55,
+        "position_healthy": false
+      },
+      "age": 0.018368866999935562,
+      "fresh": true
+    },
+    "gps": {
+      "data": {
+        "lat": 32.9236223,
+        "lon": -117.0386055,
+        "alt": 222.26,
+        "valid": true,
+        "ned": [
+          -2.051778455959123,
+          -3.5637561724229005,
+          -2.7899986743342238
+        ],
+        "fix": 4,
+        "satellites": 26,
+        "hdop": 0.55,
+        "accuracy": 1.464,
+        "vertical_accuracy": 1.859,
+        "receiver_time_us": 2433809000
+      },
+      "age": 0.11823447500000839,
+      "fresh": true
+    },
+    "ekf": {
+      "data": {
+        "flags": 167,
+        "velocity_variance": 0.0,
+        "horizontal_variance": 0.005849560257047415,
+        "vertical_variance": 0.006386594381183386
+      },
+      "age": 0.11794793700028094,
+      "fresh": true
+    },
+    "heartbeat": {
+      "data": {
+        "armed": false,
+        "mode_id": 19
+      },
+      "age": 0.7133768870003223,
+      "fresh": true
+    },
+    "cube_origin": {
+      "data": {
+        "lat": 32.9236358,
+        "lon": -117.0385561,
+        "alt": 215.13
+      },
+      "age": 0.11774949800019385,
+      "fresh": true
+    }
+  },
+  "gps_summary": {
+    "mean_lat": 32.92362412833333,
+    "mean_lon": -117.03860868166666,
+    "north_range_m": 0.42301600019754915,
+    "east_range_m": 1.2147400720006203,
+    "reported_accuracy_range_m": [
+      1.442,
+      1.481
+    ]
+  }
+}

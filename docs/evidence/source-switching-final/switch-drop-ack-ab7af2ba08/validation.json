@@ -1,0 +1,58 @@
+{
+  "mode": "drop-ack",
+  "passed": true,
+  "evidence_directory": "/tmp/graey-switch-fyvz37yd/source/sitl/logs/switch-drop-ack-ab7af2ba08",
+  "supervisor": {
+    "state": "Fault",
+    "reason": "Source change not confirmed before timeout: missing accepted command ACK",
+    "mode": "Active",
+    "requested_source": "Surface GPS",
+    "confirmed_source": "Surface GPS",
+    "navigation_ready": false,
+    "surfaced": true,
+    "surface_state": "Surfaced",
+    "run_id": "0005609a-8920-49c7-ab33-f93920dd4a3c",
+    "reference": {
+      "schema": 1,
+      "reference_id": "ff69cc57-4150-4599-955b-cdade4516af0",
+      "run_id": "6e756994-719a-419f-a5a8-0afd6857895a",
+      "vehicle_epoch": "a336d97d-e529-4c57-b9be-a0a7f1fa9cf1",
+      "gps_lat": 32.9240585,
+      "gps_lon": -117.0385389,
+      "gps_msl_alt": -0.13,
+      "gps_accuracy_m": 0.3,
+      "gps_time_us": 21620000,
+      "cube_ned": [
+        -0.0018350875470787287,
+        0.0020354038570076227,
+        0.006420224905014038
+      ],
+      "captured_utc": "2026-10-09T23:07:09.971683+00:00"
+    },
+    "mission_ned": null,
+    "reference_current": false,
+    "depth_m": 0.11360199749469757,
+    "gps_qualified_input": true,
+    "gps_quality_reason": "GPS quality and DVL motion checks passed",
+    "configuration_verified": true,
+    "target_gps": {
+      "lat": 32.92407207466763,
+      "lon": -117.0385281980695,
+      "label": "Configured SITL target; pool position is approximate"
+    },
+    "source_transaction": {
+      "id": 1,
+      "target": 2,
+      "sent": 69.655643361,
+      "previous_source": 1,
+      "reported_source": 2,
+      "source_received": 72.754478523,
+      "source_boot_ms": 23920,
+      "first_matching_source_received": 69.854666192,
+      "outcome": "Source change not confirmed before timeout: missing accepted command ACK",
+      "finished": 72.75470243
+    },
+    "published_monotonic": 72.855329328
+  },
+  "dropped_messages": 1
+}

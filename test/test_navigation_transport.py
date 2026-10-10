@@ -102,12 +102,48 @@ class TelemetryTests(unittest.TestCase):
         self.s.boot_ms = self.s.cube_origin = self.s.last_gps = self.s.last_gps_time = None
         self.s.epoch = 'original'
         self.s.logic = NS(fault='')
+        self.s.logic.pending = None
+        self.s.switch_trace = None
+        self.s.get_logger = Mock(return_value=Mock())
         self.s.bridge_identity = BridgeIdentity()
         self.s.gps_quality = GPSQuality()
         self.s.gps_quality.motion(self.clock.now, (0, 0, 0), True)
 
     def receive(self, kind, **fields):
         self.s.consume(kind, NS(get_srcSystem=lambda: 1, get_srcComponent=lambda: 1, **fields))
+
+    def test_ack_rejects_wrong_target_and_unsolicited_messages(self):
+        self.receive('COMMAND_ACK', command=42007, result=0, target_system=1, target_component=196)
+        self.assertNotIn('ack', self.s.samples)
+        self.s.logic.pending = (2, 9.)
+        for sys, comp in ((2, 196), (1, 197)):
+            self.receive('COMMAND_ACK', command=42007, result=0, target_system=sys, target_component=comp)
+        self.assertNotIn('ack', self.s.samples)
+        self.receive('COMMAND_ACK', command=42007, result=5, target_system=1, target_component=196)
+        self.assertNotIn('ack', self.s.samples)
+        self.receive('COMMAND_ACK', command=42007, result=0, target_system=1, target_component=196)
+        self.assertEqual(self.s.fresh('ack'), 'accepted')
+
+    def test_replayed_source_report_does_not_refresh_receive_time(self):
+        self.receive('NAMED_VALUE_FLOAT', name='NAV_SRC', time_boot_ms=100, value=2.)
+        received = self.s.samples['source'][0]
+        self.clock.now += 2
+        self.receive('NAMED_VALUE_FLOAT', name='NAV_SRC', time_boot_ms=100, value=2.)
+        self.assertEqual(self.s.samples['source'][0], received)
+        self.assertIsNone(self.s.fresh('source'))
+
+    def test_transaction_trace_preserves_first_source_and_completed_outcome(self):
+        self.s.logic.pending = (2, 9.)
+        self.s.logic.timeout = 3.
+        self.s.switch_trace = dict(id=1, target=2, sent=9.)
+        self.receive('NAMED_VALUE_FLOAT', name='NAV_SRC', time_boot_ms=100, value=2.)
+        self.clock.now += .2
+        self.receive('NAMED_VALUE_FLOAT', name='NAV_SRC', time_boot_ms=200, value=2.)
+        self.assertEqual(self.s.switch_trace['first_matching_source_received'], 10.)
+        self.s.switch_trace['outcome'] = 'confirmed'
+        saved = dict(self.s.switch_trace)
+        self.receive('NAMED_VALUE_FLOAT', name='NAV_SRC', time_boot_ms=300, value=1.)
+        self.assertEqual(self.s.switch_trace, saved)
 
     def test_bridge_duplicates_latch_fault_and_malformed_status_does_not_refresh(self):
         for data in ('null', '[]', '42', '{}', '{"instance": 12}'):
@@ -229,6 +265,25 @@ class RuntimeRegressionTests(unittest.TestCase):
         port.close.assert_called_once()
         self.assertIsNone(node.ser)
         self.assertEqual(node.buf, b'')
+
+    def test_sitl_stale_healthy_status_aborts_with_actual_reason(self):
+        node, clock = load_callbacks('sitl_mission.py', 'SitlMission')
+        node.intent_pub = Mock()
+        node.publish_intent = Mock()
+        node.stage = 'SURFACING'
+        node.stage_started, node.timeout = clock.now, 90
+        node.status_received, node.run_id = clock.now-1.17, 'run'
+        node.status = dict(run_id='run', state='Surface GPS',
+                           reason='Navigation inputs healthy', navigation_ready=True)
+        node.link, node.write_result, node.command_target = Mock(), Mock(), Mock()
+        node.get_logger = Mock(return_value=Mock())
+        node.tick()
+        self.assertEqual(node.stage, 'FAULT')
+        self.assertIn('status age', node.failure_reason)
+        self.assertNotIn('Navigation inputs healthy', node.failure_reason)
+        node.write_result.assert_called_once_with(False)
+        node.command_target.assert_not_called()
+        node.link.disarm.assert_called_once()
 
     def test_simulator_does_not_restamp_cached_attitude(self):
         node, clock = load_callbacks('sitl_sensor_sim.py', 'SitlSensorSim')
