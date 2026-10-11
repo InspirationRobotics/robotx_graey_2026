@@ -15,25 +15,17 @@ What counts as an echo: the ping smoothed over 5 bins, then every stretch at or
 above the threshold, past the blind zone, gives one crumb at its brightest
 point. Up to MAX_PER_PING per ping, brightest first.
 
-TWO MODES (Map tab checkbox "combine looks"). Classic, the default, is the map
-as it was on Oct 4. Combine looks (looks.py) shows only crumbs where 3+ looks
-agree and fades only in the beam's middle. Replaying Ruth's real Oct 4 run
-(Oct 10): classic 1446 crumbs with readable walls; combine 2605 agreed crumbs,
-mostly arcs and blobs, because a hovering sub's looks come from one spot. So
-classic stays the default until combine is proven on real data.
-
-FADING. When a newer sweep looks at the spot a crumb is in again, the crumb
-fades: one newer sweep = half faded, two = gone. In classic mode "looks at"
-means anywhere in the beam (CLASSIC_FADE_DEG); with combine looks, only the
-MIDDLE of one of that sweep's pings - within half a step of its bearing,
-within FADE_FAN_DEG fore-aft, and between the blind zone and the range. Only
-the middle, because that is where the ping would put a new crumb: if the thing
-is still there, the old crumb is replaced by an almost identical one. The
-first version used the whole 25 deg fan, and a crumb at the fan's edge was
-faded while the echo that replaced it went in the middle, up to ~0.6 m away 3 m
-down; a sub turning on the spot wiped out 9 crumbs in 10 that way (sim, Oct 9). It does not matter
+FADING (Map tab checkbox, on by default). When a newer sweep looks at the spot
+a crumb is in again - anywhere in one of its pings' beams (FADE_DEG fore-aft,
+within half a step of its bearing, between the blind zone and the range) - the
+crumb fades: one newer sweep = half faded, two = gone. It does not matter
 whether that sweep found something there: nothing there now is news too. A
-crumb's own sweep never fades it, and a sweep fades a crumb at most once.
+crumb's own sweep never fades it, and a sweep fades a crumb at most once. Off,
+crumbs stay until Reset.
+
+(A "combine looks" mode - crumbs only where 3+ sweeps' pings agreed, looks.py -
+was tried Oct 9-10 and removed: on the real pool runs it made arcs and blobs
+and Ruth found it confusing.)
 
 A ping with no pose, or one the DVL can't vouch for (valid=False), adds nothing
 and fades nothing, because we would not know where it was looking.
@@ -79,15 +71,13 @@ import math
 import numpy as np
 
 from . import settings as S
-from .looks import LookMap
 
 THRESHOLD = 100         # smoothed echo strength, 0-255, that makes a crumb. A guess:
                         # the pool pipe peaked ~125 out to 2.25 m.
 SMOOTH_BINS = 5
 MAX_PER_PING = 5
 FADE_SWEEPS = 2         # newer sweeps that must look at a crumb to wipe it out
-FADE_FAN_DEG = 3.0      # ... within this many deg fore-aft of the beam's middle (combine looks)
-CLASSIC_FADE_DEG = S.BEAM_FORE_AFT_DEG / 2.0    # ... anywhere in the beam (classic, the default)
+FADE_DEG = S.BEAM_FORE_AFT_DEG / 2.0    # ... anywhere in the beam, fore-aft
 MAX_TURN_DPS = 10.0     # turning faster than this, deg/s: ping ignored
 FLOOR_CUT_M = 0.5       # echoes less than this above the floor make no crumbs
 
@@ -107,16 +97,13 @@ def body_to_map(pose):
 class CrumbMap:
     def __init__(self, threshold=THRESHOLD, max_per_ping=MAX_PER_PING,
                  sonar_fwd_m=S.SONAR_FWD_M, sonar_right_m=S.SONAR_RIGHT_M,
-                 max_turn_dps=MAX_TURN_DPS, floor_cut_m=FLOOR_CUT_M, looks=True, combine=False,
-                 fade=True, band=None):
+                 max_turn_dps=MAX_TURN_DPS, floor_cut_m=FLOOR_CUT_M, fade=True, band=None):
         self.threshold = threshold
         self.floor_cut_m = floor_cut_m
         self.max_per_ping = max_per_ping
         self.max_turn_dps = max_turn_dps
         self.sonar_fwd_m = sonar_fwd_m
         self.sonar_right_m = sonar_right_m
-        self.looks = LookMap() if looks else None      # looks.py: where pings agree
-        self.combine = combine      # False = classic (Oct 4); True = agreed crumbs + middle fading
         self.fade = fade            # False: crumbs stay until Reset (a faint pipe builds up)
         self.band = band            # (lo, hi) m from the sonar's height, or None = every height
         self.clear()
@@ -126,8 +113,6 @@ class CrumbMap:
         self.sweep_id = 0
         self.turning = False        # was the last ping ignored for turning?
         self.skipped_turning = 0
-        if getattr(self, "looks", None) is not None:
-            self.looks.clear()
 
     def new_sweep(self):
         """Call at the start of every sweep, including one cut short."""
@@ -163,28 +148,13 @@ class CrumbMap:
         """Copies of every live crumb's fields. seen = 0 fresh, 1 half faded."""
         return {f: v.copy() for f, v in self._c.items()}
 
-    def agreed(self):
-        """Crumbs where enough looks agree (looks.py), or None if off."""
-        return None if self.looks is None else self.looks.agreed()
-
     def for_page(self):
-        """What the Map tab gets: crumbs [x, y, brightness, seen, up] - the agreed
-        ones when looks are on - the one-look crumbs [x, y, seen] to draw faintly,
-        and the crumbs as arrays (x, y, up, seen) for outlines.py."""
-        one = self.crumbs()
-        faint = np.column_stack([np.round(one["x"], 2), np.round(one["y"], 2), one["seen"]]).tolist()
-        g = self.agreed() if self.combine else None
-        if g is None:
-            arrays = dict(one, raw=(one["x"], one["y"], one["up"]))
-            bright = one["brightness"]
-        else:
-            arrays = {"x": g["x"], "y": g["y"], "up": g["up"], "seen": np.zeros(len(g["x"])),
-                      "raw": (one["x"], one["y"], one["up"])}
-            # more looks agreeing = stronger colour, on the same scale as echoes
-            bright = self.threshold + (255 - self.threshold) * np.clip((g["looks"] - 2) / 8.0, 0, 1)
-        crumbs = np.column_stack([np.round(arrays["x"], 2), np.round(arrays["y"], 2), np.round(bright),
-                                  arrays["seen"], np.round(arrays["up"], 2)]).tolist()
-        return crumbs, (faint if g is not None else []), arrays
+        """What the Map tab gets: crumbs [x, y, brightness, seen, up], and the
+        same crumbs as arrays for outlines.py (raw = their x, y, up)."""
+        c = self.crumbs()
+        crumbs = np.column_stack([np.round(c["x"], 2), np.round(c["y"], 2), np.round(c["brightness"]),
+                                  c["seen"], np.round(c["up"], 2)]).tolist()
+        return crumbs, dict(c, raw=(c["x"], c["y"], c["up"]))
 
     def __len__(self):
         return len(self._c["x"])
@@ -217,8 +187,7 @@ class CrumbMap:
         bearing = np.degrees(np.arctan2(up, right))
         half = max(step_deg, S.BEAM_IN_PLANE_DEG) / 2.0
         in_slice = np.abs((bearing - a_deg + 180.0) % 360.0 - 180.0) <= half
-        fan = FADE_FAN_DEG if self.combine else CLASSIC_FADE_DEG
-        in_fan = np.abs(np.degrees(np.arctan2(fwd, across))) <= fan
+        in_fan = np.abs(np.degrees(np.arctan2(fwd, across))) <= FADE_DEG
         dist = np.hypot(across, fwd)
         in_range = (dist >= S.MIN_RANGE_M) & (dist <= max_range_m)
 
@@ -261,8 +230,6 @@ class CrumbMap:
         peaks = sorted(peaks, key=lambda b: -sm[b])[:self.max_per_ping]
 
         r = np.array(peaks) * metres_per_bin
-        if self.looks is not None:
-            self.looks.add((sx, sy, sup), m, a_deg, r, self.sweep_id, pose.alt_m, self.floor_cut_m)
         # the echo in the sub's frame: in the scan plane, so forward = 0
         n, e, d = m @ np.vstack([np.zeros_like(r), r * math.cos(a), -r * math.sin(a)])
         new = {"x": sx + e,
