@@ -98,6 +98,15 @@ def angle_deg_to_gradian(angle_deg, down_gradian=None):
     return int(round(g)) % S.GRADIANS
 
 
+# How long to wait for the Ping360's answer to one ping. brping's transmitAngle
+# waits 4 s, and on Oct 10-11 the Ping360 sometimes didn't answer (0.1-2% of
+# pings, in bursts), so each miss froze the sweep for 4 s. Real answers took
+# 0.29 s (median) and never more than 0.48 s inside a sweep (14,396 pings); the
+# first ping of a sweep, after the head swings back, took up to 1.4 s with the
+# previous sweep's saving included. A miss now costs at most these.
+REPLY_WAIT_S = 1.0
+FIRST_REPLY_WAIT_S = 2.0
+
 # the Ping360's own settings, as each reply reports them
 PING_FIELDS = ("mode", "gain_setting", "transmit_duration", "sample_period",
                "transmit_frequency", "number_of_samples")
@@ -130,6 +139,31 @@ class Sonar:
         self.down_gradian = S.DOWN_GRADIAN if down_gradian is None else down_gradian
         self._configured_range = None
         self.settings = {}
+        self.missed = 0             # pings the Ping360 never answered, since start
+
+    def _transmit(self, gradian, wait_s):
+        """Ping at one hardware angle; its answer, or None after wait_s.
+
+        brping's transmitAngle does the same send but waits 4 s and takes the
+        first data message that turns up. Here the wait is short, and only an
+        answer for this angle counts: if an earlier ping's answer arrives late,
+        it is dropped instead of being filed under this angle."""
+        from brping import definitions
+        p = self._ping
+        p.control_transducer(0, p._gain_setting, gradian, p._transmit_duration, p._sample_period,
+                             p._transmit_frequency, p._number_of_samples, 1, 0)
+        deadline = time.monotonic() + wait_s
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                break
+            msg = p.wait_message([definitions.PING360_DEVICE_DATA, definitions.COMMON_NACK], left)
+            if msg is None or msg.message_id != definitions.PING360_DEVICE_DATA:
+                break                   # no answer in time, or the sonar refused (NACK)
+            if getattr(msg, "angle", gradian) == gradian:
+                return msg
+        self.missed += 1
+        return None
 
     def _configure_range(self, max_range_m):
         """Set sample count and timing for the range we want.
@@ -177,8 +211,9 @@ class Sonar:
             a += step_deg
 
         rows, times = [], []
-        for ang in angles:
-            resp = self._ping.transmitAngle(angle_deg_to_gradian(ang, self.down_gradian))
+        for k, ang in enumerate(angles):
+            resp = self._transmit(angle_deg_to_gradian(ang, self.down_gradian),
+                                  FIRST_REPLY_WAIT_S if k == 0 else REPLY_WAIT_S)
             times.append(time.monotonic())
             if resp is not None:            # what the head actually used, for recordings
                 self.settings = {k: getattr(resp, k) for k in PING_FIELDS if hasattr(resp, k)}
