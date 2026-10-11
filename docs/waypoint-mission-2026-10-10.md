@@ -261,3 +261,10 @@ this comparison that removing it is warranted. Earlier20deg difference cleared;
 restart vs estimator settling cannot be distinguished from this sampling alone.
 Agreement is not independent geographic-heading or physical-axis validation.
 Evidence on Jetson: /home/graey/robotx_ws/logs/heading-restart-20261010.json.
+
+2026-10-10 follow-up: user requested net90degree counterclockwise VN yaw. Existing
+offset180 plus CCW90 means net yaw_offset_deg90. Current state checked before
+application: disarmed MANUAL, ESC commanded on, no autonomous mission. Planned
+core reload changes startup-only VN yaw offset to90, leaves flip_180true. After
+reload verify live parameter and preserve/re-establish pressure baseline. Heading
+accuracy and physical alignment still require independent observation.
