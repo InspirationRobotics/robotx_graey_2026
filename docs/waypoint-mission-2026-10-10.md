@@ -268,3 +268,12 @@ application: disarmed MANUAL, ESC commanded on, no autonomous mission. Planned
 core reload changes startup-only VN yaw offset to90, leaves flip_180true. After
 reload verify live parameter and preserve/re-establish pressure baseline. Heading
 accuracy and physical alignment still require independent observation.
+
+2026-10-10: user requested another90deg counterclockwise adjustment from active
+180deg. Net configured VN yaw_offset_deg90 (counterclockwise subtracts90); retained
+flip_180true. Verified vehicle disarmed at application, rebuilt and safely restarted
+core, restored previous measured pressure baseline. Readback confirmed yaw90,
+fliptrue.20 paired samples after startup: VN~15.6deg, Cube~358deg; median absolute
+wrapped disagreement15.87deg (final ~17.65deg). Correction is applied but heading
+is still not commissioned; investigate Cube alignment/source convergence before
+waypoints. Restart reset controller RF/STARTUP, disarmed/ESCoff. No mission.

@@ -628,3 +628,8 @@ on final sample; do not equate applied offset with commissioned heading accuracy
 Cube kept running).45 fresh paired samples: VN/Cubeabout196.3deg; median wrapped
 absolute error0.0251deg. Retained yaw180. Previous20deg disagreement cleared;
 no independent physical heading validation and no causal claim restart vs settling.
+
+2026-10-10 latest: user requested net VN yaw offset90deg CCW; deployed/readback
+verified. Surface pressure baseline restored. After reload VN~15.6deg, Cube~358deg;
+20 paired samples median error15.87deg. Heading still uncommissioned. Details in
+waypoint-mission-2026-10-10.md.
