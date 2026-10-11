@@ -230,3 +230,12 @@ panel polls it at2Hz, retains explicit stale/connection handling and never treat
 cached values as current. This reduces traffic; it does not repair underwater
 Wi-Fi propagation or establish that the original issue is resolved in water.
 Regression covers missing stream, freshness expiry, independent copies and depth.
+
+### Pending operator heading reversal (2026-10-10)
+
+User explicitly requested reversing heading180degrees without further directional
+verification. Live VN parameter readback yaw_offset_deg0, flip_180true. Flip is
+upside-down mounting transform, not the temporary yaw correction. Prepared core
+launch VN yaw_offset_deg180 (bridge unchanged). NOT deployed: vehicle armed with
+ESC power on; requires disarmed sensor reload and subsequent frame revalidation.
+Physical correctness is operator-directed, not independently measured.

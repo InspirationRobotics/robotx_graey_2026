@@ -30,7 +30,10 @@ def generate_launch_description():
         # mission happens to be loaded.
         Node(package=PKG, executable='kill_switch', name='kill_switch', output='screen', **RESPAWN),
         Node(package=PKG, executable='dvl_node', name='dvl_node', output='screen', **RESPAWN),
-        Node(package=PKG, executable='vn100_node', name='vn100_node', output='screen', **RESPAWN),
+        # Operator-requested heading correction, 2026-10-10. Keep the sensor's
+        # separate roll mounting transform; do not add this again in the bridge.
+        Node(package=PKG, executable='vn100_node', name='vn100_node',
+             parameters=[{'yaw_offset_deg': 180.0}], output='screen', **RESPAWN),
         Node(package=PKG, executable='nav_ekf_bridge', name='nav_ekf_bridge', output='screen', respawn=False),
         Node(package=PKG, executable='navigation_supervisor', name='navigation_supervisor',
              parameters=[{'active': False}], output='screen', **RESPAWN),
