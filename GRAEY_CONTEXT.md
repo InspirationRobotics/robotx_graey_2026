@@ -633,3 +633,15 @@ no independent physical heading validation and no causal claim restart vs settli
 verified. Surface pressure baseline restored. After reload VN~15.6deg, Cube~358deg;
 20 paired samples median error15.87deg. Heading still uncommissioned. Details in
 waypoint-mission-2026-10-10.md.
+
+## 2026-10-11 continuous-EKF redesign checkpoint
+User requested replacement of source switching with Jetson-qualified GPS feeding
+one continuous Cube fusion configuration, with accurate receiver timing. Authorized
+online tether_toggle_beichen development, not deployment. Investigation only:
+upstream ArduPilot GPS_RAW_INT carries Cube last-fix time; GPS_INPUT backend uses
+GPS week/time-of-week for jitter correction. Exact vehicle firmware/time transport
+not verified. Do not claim receiver synchronization or implement it by retimestamping
+old fixes. Runtime replacement paused at this uncertainty per user's instruction;
+existing source-switching code is unchanged. 134 baseline regressions passed.
+See docs/single-ekf-redesign-2026-10-11.md for pipeline, migration, and saved questions.
+No vehicle access or parameter changes. This is a proposal, not deployed behavior.
