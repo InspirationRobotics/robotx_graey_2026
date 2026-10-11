@@ -605,3 +605,11 @@ Verified Surfaced, depthabout0.0015m. Only observation supervisor reloaded;
 bridge/control processes unchanged. No source switching performed. Baseline is
 session-only and must be re-established after core restart at confirmed surface.
 See deployment-2026-10-10.md for remaining commissioning blockers and evidence.
+
+2026-10-10 commissioning follow-up: Cube surface source profile now matches code
+(SRC2 POSXY3 VELXY6 YAW6, SRC_OPTIONS0); SCR_ENABLE1 and telemetry-only Lua source
+reporter installed/readback verified. All persisted after disarmed Cube reboot;
+75 NAV_SRC reports/15s confirmed Underwater selected. No transition test completed:
+guarded test aborted before command when vehicle was armed again. Supervisor stays
+Observation, commissioning validation incomplete. Detailed evidence/failures in
+docs/deployment-2026-10-10.md. Calibration restored after core restarted on reboot.

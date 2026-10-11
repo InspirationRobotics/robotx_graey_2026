@@ -104,3 +104,25 @@ telemetry-only deploy/scripts/navigation_source_report.lua into Cube APM/scripts
 Requires disarmed setup/reboot and readback, then actual NAV_SRC confirmation.
 Do not claim heading/frame commissioning from merely matching instantaneous yaw.
 Surface classification is now calibrated but is separate from EKF source selection.
+
+### Source configuration applied and feedback verified (2026-10-10)
+
+After user ready and fresh disarmed/ESC-off verification, backed up all976 Cube
+parameters under /root/robotx_ws/logs/source-commissioning-20261010/parameters-before.json.
+Uploaded navigation_source_report.lua to /APM/scripts and verified byte-for-byte
+readback. Installed pymavlink used older list_result API; first directory inspection
+failed with AttributeError, corrected. First parameter pass wrote only SRC2_POSXY
+then stopped on an unfiltered heartbeat assertion; corrected filtering to Cube1/1.
+Completed and read back SRC2_POSXY=3, SRC2_VELXY=6, SRC2_YAW=6,
+SRC_OPTIONS=0, SCR_ENABLE=1. Requested disarmed Cube reboot. All profile values
+persisted;75 NAV_SRC reports in15seconds confirmed source1/Underwater. Lua reports
+selection only, not actual GPS fusion. Reboot triggered core restart; restored the
+previous session pressure baseline to observation supervisor only. Surfaced seen
+at depth-0.033m; no fresh zero was taken. Controller rebooted RF/STARTUP.
+DVL initially invalid (user said expected), subsequently valid on a snapshot.
+Attempted a guarded disarmed surface-source test; preflight stopped BEFORE sending
+any source command when fresh controller state showed armed/ESC-on again. No live
+source transition test completed, no active supervisor or waypoint enablement.
+Still need disarmed transition/continuity test, heading/frame commissioning and
+supervisor mission intent. Do not mark vehicle_validation_complete from parameter
+match alone. User must keep disarmed through the test. Evidence logs on Jetson.
