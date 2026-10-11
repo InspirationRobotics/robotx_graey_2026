@@ -748,6 +748,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.reply_json(200, waypoint_snapshot())
             return
 
+        if u.path == '/api/navigation/supervisor':
+            self.reply_json(200, navigation.supervisor_snapshot())
+            return
+
         if u.path == '/api/navigation':
             self.reply_json(200, navigation.snapshot())
             return

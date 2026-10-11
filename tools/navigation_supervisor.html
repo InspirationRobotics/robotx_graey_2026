@@ -20,7 +20,7 @@
 <footer>Observation mode displays recommendations. Source selection alone does not prove GPS fusion. Dive zero uses a Jetson mission reference; the Cube coordinate frame stays continuous.</footer></main>
 <script>
 'use strict';const $=id=>document.getElementById(id);let last=null,received=0,pollError='';
-function render(){const live=last?.fresh&&performance.now()-received<1500,s=live?last.data:null;
+function render(){const live=last?.fresh&&performance.now()-received<2000,s=live?last.data:null;
 $('connection').textContent=live?'Supervisor status current':'Supervisor unavailable or stale'+(pollError?' — '+pollError:'');
 for(const [id,key] of [['mode','mode'],['state','state'],['confirmed','confirmed_source']])$(id).textContent=s?.[key]??'Unavailable';
 const depthKnown=Number.isFinite(s?.depth_m);
@@ -33,6 +33,7 @@ $('depth').textContent=Number.isFinite(s?.depth_m)?s.depth_m.toFixed(2)+' m · p
 $('surfaceState').textContent=depthKnown?(s?.surface_state??(s?.surfaced===true?'Surfaced':s?.surfaced===false?'Submerged':'Unknown')):'Unknown';
 const r=s?.reference;
 $('reference').textContent=r?`${s.reference_current?'Current dive':'Historical / unverified reference'}\n${r.gps_lat.toFixed(7)}, ${r.gps_lon.toFixed(7)}\nCaptured: ${r.captured_utc}\nRun: ${r.run_id}\nMission N / E / D: ${s.mission_ned?.map(v=>v.toFixed(2)).join(' / ')??'Unavailable'} m`:'No qualified dive reference captured';}
-async function poll(){const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),3000);try{const r=await fetch('/api/navigation',{cache:'no-store',signal:controller.signal});if(!r.ok)throw Error('HTTP '+r.status);const data=await r.json();if(!data.streams?.supervisor)throw Error('Supervisor stream missing');last=data.streams.supervisor;received=performance.now();pollError=''}catch(e){pollError=e.name==='AbortError'?'Request timed out':e.message}finally{clearTimeout(timeout);render();setTimeout(poll,200)}}
+async function poll(){const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),3000);try{const r=await fetch('/api/navigation/supervisor',{cache:'no-store',signal:controller.signal});if(!r.ok)throw Error('HTTP '+r.status);const data=await r.json();if(!data.streams?.supervisor)throw Error('Supervisor stream missing');last=data.streams.supervisor;received=performance.now();pollError=''}catch(e){pollError=e.name==='AbortError'?'Request timed out':e.message}finally{clearTimeout(timeout);render();setTimeout(poll,500)}}
 setInterval(render,250);poll();
 </script></body></html>
+

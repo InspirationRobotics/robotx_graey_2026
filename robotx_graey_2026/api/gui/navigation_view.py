@@ -161,6 +161,16 @@ class NavigationView:
                 and all(v is not None and 0 <= v < 1 for v in
                         (data.get('horizontal_variance'), data.get('velocity_variance'))))
 
+    def supervisor_snapshot(self):
+        """Small status response, independent of map trail serialization."""
+        with self.lock:
+            sample = self.samples.get('supervisor')
+            if sample is None:
+                return {'streams': {}}
+            age = max(0, self.clock()-sample['received'])
+            return {'streams': {'supervisor': {
+                'data': copy.deepcopy(sample['data']), 'age': age, 'fresh': age < 2}}}
+
     def snapshot(self):
         with self.lock:
             self._expire_reset()

@@ -218,3 +218,15 @@ latches abort, preventing rearm. Other armed initial modes rejected. Completion
 still surfaces/disarms. Live commissioning flag remains disabled.133 Python tests
 passed; JS page test passed. No armed live mission test performed. Initial JS test
 command used a wrong output path; corrected and reran successfully.
+
+### Supervisor transport follow-up (2026-10-10)
+
+User reported lost calibration/source display when submerging. Live inspection
+found the same supervisor/bridge PIDs, valid pressure depth and Surface GPS source;
+no actual source transition reproduced. GUI logs showed broken client connections
+on navigation/waypoint full snapshot responses. Added a dedicated compact
+/api/navigation/supervisor endpoint without up to1200 map-trail points. Supervisor
+panel polls it at2Hz, retains explicit stale/connection handling and never treats
+cached values as current. This reduces traffic; it does not repair underwater
+Wi-Fi propagation or establish that the original issue is resolved in water.
+Regression covers missing stream, freshness expiry, independent copies and depth.
