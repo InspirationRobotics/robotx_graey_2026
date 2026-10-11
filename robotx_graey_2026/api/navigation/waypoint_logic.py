@@ -48,6 +48,7 @@ class WaypointRun:
         self.last_position = None
         self.pilot_takeover = False
         self.takeover_requested = False
+        self.started_armed = None
 
     @property
     def phase(self):
@@ -86,6 +87,14 @@ class WaypointRun:
         if self.stage == 'ABORTED':
             return self.abort_actions(now, o)
         s = o.get('supervisor') or {}
+        if self.started_armed is None and o.get('fresh') and isinstance(o.get('armed'), bool):
+            self.started_armed = o['armed']
+        if self.started_armed and self.stage in ('WAIT_SURFACE', 'PREPARE', 'GUIDED', 'ARM') and o.get('armed') is False:
+            self.abort(now, 'Pilot disarmed during mission preparation', pilot=True)
+            return []
+        if self.stage in ('WAIT_SURFACE', 'PREPARE') and o.get('armed') and o.get('mode') not in (0, 19):
+            self.abort(now, 'Armed preparation requires MANUAL or STABILIZE', pilot=True)
+            return []
         moving = self.stage in self.moving
         failure = o.get('failure') or ''
         if moving and not 0 <= gap < 1.:
@@ -115,9 +124,7 @@ class WaypointRun:
                 return self.abort_actions(now, o)
             return []
         if self.stage == 'WAIT_SURFACE':
-            if o.get('armed'):
-                self.abort(now, 'Start requires a disarmed vehicle')
-            elif s.get('surfaced') is True and s.get('confirmed_source') == 'Surface GPS' and s.get('navigation_ready'):
+            if s.get('surfaced') is True and s.get('confirmed_source') == 'Surface GPS' and s.get('navigation_ready'):
                 self.enter('PREPARE', now, 'Capture surface start and confirm underwater sources')
         elif self.stage == 'PREPARE':
             ref = s.get('reference') or {}

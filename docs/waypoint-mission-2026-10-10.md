@@ -200,3 +200,21 @@ that control inputs are neutral before enabling autonomous execution. Then run
 a supervised short in-water trial with measured start/endpoint and bottom lock.
 Pool registration and absolute position error remain unverified. Passing SITL
 does not establish live GPS accuracy, stopping distance, drift or pool clearance.
+
+## GUI diagnostics and armed waypoint preparation (2026-10-10)
+
+Live supervisor API had fresh calibrated pressure depth around-0.03m while user
+reported unavailable depth on its panel. Sensor failure not reproduced. Panel now
+uses AbortController timeout rather than AbortSignal.timeout and displays network,
+HTTP or missing-stream errors explicitly; pressure source identified separately
+from mission readiness. Node VM test verifies rendering without timeout API and
+error cases. This fixes a demonstrated compatibility failure, but original user
+browser cause remains unverified until refresh/recheck.
+
+Waypoint preview accepts already-armed MANUAL/STABILIZE. Mission waits for the
+same navigation/source/reference checks, enters GUIDED and uses the already-armed
+state without sending another ARM command. Pilot disarming during preparation
+latches abort, preventing rearm. Other armed initial modes rejected. Completion
+still surfaces/disarms. Live commissioning flag remains disabled.133 Python tests
+passed; JS page test passed. No armed live mission test performed. Initial JS test
+command used a wrong output path; corrected and reran successfully.

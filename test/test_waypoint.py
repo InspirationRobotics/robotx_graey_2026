@@ -59,6 +59,30 @@ class WaypointTests(unittest.TestCase):
         self.step()
         self.assertEqual(self.run.stage, 'COMPLETE')
 
+    def test_already_armed_start_does_not_send_arm(self):
+        self.o['armed'] = True
+        self.step()
+        self.o['supervisor']['confirmed_source'] = 'Underwater'
+        self.step()
+        self.assertEqual(self.step()[0][0], 'guided')
+        self.o['mode'] = 4
+        self.assertEqual(self.step(), [])
+        self.assertEqual(self.step(), [])
+        self.assertEqual(self.run.stage, 'DIVE')
+
+    def test_pilot_disarm_during_armed_preparation_never_rearms(self):
+        self.o['armed'] = True
+        self.step()
+        self.o['armed'] = False
+        self.assertEqual(self.step(), [])
+        self.assertEqual(self.run.stage, 'ABORTED')
+        self.assertEqual(self.step(), [])
+
+    def test_armed_nonpilot_mode_rejected(self):
+        self.o.update(armed=True, mode=4)
+        self.assertEqual(self.step(), [])
+        self.assertEqual(self.run.stage, 'ABORTED')
+
     def test_faults_never_continue_guided_targets(self):
         for fault in ('fresh', 'origin', 'source', 'reference', 'jump', 'deadline', 'abort'):
             with self.subTest(fault=fault):

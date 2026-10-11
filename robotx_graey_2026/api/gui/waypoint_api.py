@@ -20,8 +20,8 @@ class WaypointAPI:
         hb = fresh('heartbeat', 2.)
         cube = nav.get('cube_estimate', {})
         s = fresh('supervisor')
-        if hb.get('armed'):
-            raise ValueError('Disarm before starting a waypoint mission')
+        if hb.get('armed') and hb.get('mode_id') not in (0, 19):
+            raise ValueError('Armed start requires MANUAL or STABILIZE pilot mode')
         if not cube.get('valid') or cube.get('heading_deg') is None:
             raise ValueError('Healthy Cube location and heading required')
         if not s.get('configuration_verified') or s.get('mode') != 'Active':
