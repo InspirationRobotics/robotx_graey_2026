@@ -44,7 +44,7 @@ GROUPS = {
 CORE_MANAGED_GROUPS = {'nav'}
 CORE_MANAGED_EXECUTABLES = frozenset(
     name for key in CORE_MANAGED_GROUPS for name in GROUPS[key][1]
-) | {'navigation_supervisor'}
+) | {'navigation_supervisor', 'fused_nav_bridge'}
 READ_ONLY = {
     'mavproxy': ('MAVProxy', ['mavproxy.py']),
 }

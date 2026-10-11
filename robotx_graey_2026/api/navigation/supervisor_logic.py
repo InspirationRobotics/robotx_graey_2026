@@ -28,6 +28,8 @@ class Observation:
     continuity_ok: bool = True
     heading_allowed: bool = False
     heading_reason: str = 'Pre-dive heading check unavailable'
+    surface_authoritative: bool = False
+    surface_observed: object = None
 
 
 class Supervisor:

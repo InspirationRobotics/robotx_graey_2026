@@ -1,0 +1,498 @@
+{
+  "evidence": "/mnt/c/Users/libei/OneDrive/Documents/ChatGPT/RX 2026 GRAEY/robotx_graey_2026/sitl/logs/bridge-tst3la7l",
+  "binary_sha256": "f272e76ef10b8e9314f3efa4c8fa0ec30bcf2731280e85a73ef61edaeab7a971",
+  "passed": true,
+  "phases": [
+    {
+      "phase": "surface",
+      "accepted": 113,
+      "emitted": 560,
+      "max_horizontal_m": 0.006644548945129424,
+      "latest": {
+        "HEARTBEAT": {
+          "mavpackettype": "HEARTBEAT",
+          "type": 12,
+          "autopilot": 3,
+          "base_mode": 81,
+          "custom_mode": 19,
+          "system_status": 3,
+          "mavlink_version": 3
+        },
+        "GLOBAL_POSITION_INT": {
+          "mavpackettype": "GLOBAL_POSITION_INT",
+          "time_boot_ms": 37699,
+          "lat": 329240000,
+          "lon": -1170385000,
+          "alt": -170,
+          "relative_alt": -57,
+          "vx": 0,
+          "vy": 0,
+          "vz": 0,
+          "hdg": 5
+        },
+        "EKF_STATUS_REPORT": {
+          "mavpackettype": "EKF_STATUS_REPORT",
+          "flags": 831,
+          "velocity_variance": 0.010359004139900208,
+          "pos_horiz_variance": 0.0016520116478204727,
+          "pos_vert_variance": 0.00036275191814638674,
+          "compass_variance": 0.001452060416340828,
+          "terrain_alt_variance": 0.0,
+          "airspeed_variance": 0.0
+        },
+        "GPS_RAW_INT": {
+          "mavpackettype": "GPS_RAW_INT",
+          "time_usec": 37620000,
+          "fix_type": 6,
+          "lat": 329240000,
+          "lon": -1170385000,
+          "alt": -140,
+          "eph": 121,
+          "epv": 200,
+          "vel": 0,
+          "cog": 0,
+          "satellites_visible": 10,
+          "alt_ellipsoid": -140,
+          "h_acc": 300,
+          "v_acc": 300,
+          "vel_acc": 40,
+          "hdg_acc": 0,
+          "yaw": 0
+        },
+        "LOCAL_POSITION_NED": {
+          "mavpackettype": "LOCAL_POSITION_NED",
+          "time_boot_ms": 37699,
+          "x": -0.00474164355546236,
+          "y": 0.00465476606041193,
+          "z": 0.007887735031545162,
+          "vx": -0.007482236251235008,
+          "vy": 0.00724954204633832,
+          "vz": -0.006146583240479231
+        }
+      },
+      "status": {
+        "healthy": true,
+        "navigation_valid": true,
+        "fault": "",
+        "initialized": true,
+        "depth_m": 0.0,
+        "surfaced": true,
+        "gps_eligible": true,
+        "gps_admission": {
+          "qualified": true,
+          "reason": "GPS admitted; Cube-fix timing approximation",
+          "cube_fix_age_upper_s": 0.0234592653242,
+          "timing_basis": "Cube last-fix time; not receiver epoch",
+          "receiver_delay_bound_s": null,
+          "fault": "",
+          "fix": {
+            "cube_fix_time_us": 37620000,
+            "received": 202.145342437,
+            "lat": 32.924,
+            "lon": -117.0385,
+            "alt": -0.14,
+            "accuracy": 0.3,
+            "fix": 6,
+            "speed_mps": 0.0,
+            "course_deg": 0.0,
+            "speed_accuracy_mps": 0.04
+          },
+          "applied_recently": true
+        },
+        "position_ned": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "distance_travelled_m": 0.0,
+        "position_sigma_m": 0.5009818168040131,
+        "heading_bias_deg": 0.0,
+        "velocity_bias_mps": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "heading_reference_validated": true
+      },
+      "ages": {
+        "HEARTBEAT": 0.9037253589999921,
+        "GLOBAL_POSITION_INT": 0.09481092600000807,
+        "EKF_STATUS_REPORT": 0.09416169899998295,
+        "GPS_RAW_INT": 0.09428969999999026,
+        "LOCAL_POSITION_NED": 0.09413107099999252
+      }
+    },
+    {
+      "phase": "submerged_live_gps",
+      "accepted": 0,
+      "emitted": 211,
+      "max_horizontal_m": 0.011196112773386706,
+      "latest": {
+        "HEARTBEAT": {
+          "mavpackettype": "HEARTBEAT",
+          "type": 12,
+          "autopilot": 3,
+          "base_mode": 209,
+          "custom_mode": 19,
+          "system_status": 4,
+          "mavlink_version": 3
+        },
+        "GLOBAL_POSITION_INT": {
+          "mavpackettype": "GLOBAL_POSITION_INT",
+          "time_boot_ms": 47800,
+          "lat": 329240000,
+          "lon": -1170385000,
+          "alt": -670,
+          "relative_alt": -903,
+          "vx": -1,
+          "vy": 1,
+          "vz": 0,
+          "hdg": 9
+        },
+        "EKF_STATUS_REPORT": {
+          "mavpackettype": "EKF_STATUS_REPORT",
+          "flags": 831,
+          "velocity_variance": 0.01543197687715292,
+          "pos_horiz_variance": 0.0026743959169834852,
+          "pos_vert_variance": 0.00037129910197108984,
+          "compass_variance": 0.0026605126913636923,
+          "terrain_alt_variance": 0.0,
+          "airspeed_variance": 0.0
+        },
+        "GPS_RAW_INT": {
+          "mavpackettype": "GPS_RAW_INT",
+          "time_usec": 47620000,
+          "fix_type": 6,
+          "lat": 329244499,
+          "lon": -1170385000,
+          "alt": -130,
+          "eph": 121,
+          "epv": 200,
+          "vel": 0,
+          "cog": 0,
+          "satellites_visible": 10,
+          "alt_ellipsoid": -130,
+          "h_acc": 300,
+          "v_acc": 300,
+          "vel_acc": 40,
+          "hdg_acc": 0,
+          "yaw": 0
+        },
+        "LOCAL_POSITION_NED": {
+          "mavpackettype": "LOCAL_POSITION_NED",
+          "time_boot_ms": 47800,
+          "x": -0.007885347120463848,
+          "y": 0.007948222570121288,
+          "z": 0.5032793283462524,
+          "vx": -0.01171006541699171,
+          "vy": 0.011832266114652157,
+          "vz": -0.008613825775682926
+        }
+      },
+      "status": {
+        "healthy": true,
+        "navigation_valid": true,
+        "fault": "",
+        "initialized": true,
+        "depth_m": 0.5,
+        "surfaced": false,
+        "gps_eligible": false,
+        "gps_admission": {
+          "qualified": false,
+          "reason": "Pressure surface eligibility unavailable",
+          "cube_fix_age_upper_s": 0.1086203413160044,
+          "timing_basis": "Cube last-fix time; not receiver epoch",
+          "receiver_delay_bound_s": null,
+          "fault": "",
+          "fix": {
+            "cube_fix_time_us": 37620000,
+            "received": 202.145342437,
+            "lat": 32.924,
+            "lon": -117.0385,
+            "alt": -0.14,
+            "accuracy": 0.3,
+            "fix": 6,
+            "speed_mps": 0.0,
+            "course_deg": 0.0,
+            "speed_accuracy_mps": 0.04
+          },
+          "applied_recently": false
+        },
+        "position_ned": [
+          0.0,
+          0.0,
+          0.5
+        ],
+        "distance_travelled_m": 0.0,
+        "position_sigma_m": 0.6756974693560976,
+        "heading_bias_deg": 0.0,
+        "velocity_bias_mps": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "heading_reference_validated": true
+      },
+      "ages": {
+        "HEARTBEAT": 0.945853311999997,
+        "GLOBAL_POSITION_INT": 0.04657090800000674,
+        "EKF_STATUS_REPORT": 0.04573137099998803,
+        "GPS_RAW_INT": 0.04621592000000874,
+        "LOCAL_POSITION_NED": 0.045637079000016456
+      }
+    },
+    {
+      "phase": "submerged_stale_gps",
+      "accepted": 0,
+      "emitted": 321,
+      "max_horizontal_m": 0.011272475467102175,
+      "latest": {
+        "HEARTBEAT": {
+          "mavpackettype": "HEARTBEAT",
+          "type": 12,
+          "autopilot": 3,
+          "base_mode": 209,
+          "custom_mode": 19,
+          "system_status": 4,
+          "mavlink_version": 3
+        },
+        "GLOBAL_POSITION_INT": {
+          "mavpackettype": "GLOBAL_POSITION_INT",
+          "time_boot_ms": 62799,
+          "lat": 329240000,
+          "lon": -1170385000,
+          "alt": -670,
+          "relative_alt": -909,
+          "vx": -1,
+          "vy": 1,
+          "vz": 0,
+          "hdg": 16
+        },
+        "EKF_STATUS_REPORT": {
+          "mavpackettype": "EKF_STATUS_REPORT",
+          "flags": 831,
+          "velocity_variance": 0.014454835094511509,
+          "pos_horiz_variance": 0.002884130459278822,
+          "pos_vert_variance": 0.0002254272549180314,
+          "compass_variance": 0.004733370151370764,
+          "terrain_alt_variance": 0.0,
+          "airspeed_variance": 0.0
+        },
+        "GPS_RAW_INT": {
+          "mavpackettype": "GPS_RAW_INT",
+          "time_usec": 48020000,
+          "fix_type": 1,
+          "lat": 329244499,
+          "lon": -1170385000,
+          "alt": -140,
+          "eph": 121,
+          "epv": 200,
+          "vel": 0,
+          "cog": 0,
+          "satellites_visible": 3,
+          "alt_ellipsoid": -140,
+          "h_acc": 300,
+          "v_acc": 300,
+          "vel_acc": 40,
+          "hdg_acc": 0,
+          "yaw": 0
+        },
+        "LOCAL_POSITION_NED": {
+          "mavpackettype": "LOCAL_POSITION_NED",
+          "time_boot_ms": 62799,
+          "x": -0.007629112806171179,
+          "y": 0.007675639353692532,
+          "z": 0.5091841816902161,
+          "vx": -0.011076372116804123,
+          "vy": 0.011161851696670055,
+          "vz": -0.002643047831952572
+        }
+      },
+      "status": {
+        "healthy": true,
+        "navigation_valid": true,
+        "fault": "",
+        "initialized": true,
+        "depth_m": 0.5,
+        "surfaced": false,
+        "gps_eligible": false,
+        "gps_admission": {
+          "qualified": false,
+          "reason": "Pressure surface eligibility unavailable",
+          "cube_fix_age_upper_s": 14.72671207289618,
+          "timing_basis": "Cube last-fix time; not receiver epoch",
+          "receiver_delay_bound_s": null,
+          "fault": "",
+          "fix": {
+            "cube_fix_time_us": 37620000,
+            "received": 202.145342437,
+            "lat": 32.924,
+            "lon": -117.0385,
+            "alt": -0.14,
+            "accuracy": 0.3,
+            "fix": 6,
+            "speed_mps": 0.0,
+            "course_deg": 0.0,
+            "speed_accuracy_mps": 0.04
+          },
+          "applied_recently": false
+        },
+        "position_ned": [
+          0.0,
+          0.0,
+          0.5
+        ],
+        "distance_travelled_m": 0.0,
+        "position_sigma_m": 0.8740744011457526,
+        "heading_bias_deg": 0.0,
+        "velocity_bias_mps": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "heading_reference_validated": true
+      },
+      "ages": {
+        "HEARTBEAT": 0.9555229099999849,
+        "GLOBAL_POSITION_INT": 0.04712572600001863,
+        "EKF_STATUS_REPORT": 0.04683293499999763,
+        "GPS_RAW_INT": 0.046966150000002926,
+        "LOCAL_POSITION_NED": 0.04680388400001334
+      }
+    },
+    {
+      "phase": "surface_recovery",
+      "accepted": 34,
+      "emitted": 317,
+      "max_horizontal_m": 0.011635712062096714,
+      "latest": {
+        "HEARTBEAT": {
+          "mavpackettype": "HEARTBEAT",
+          "type": 12,
+          "autopilot": 3,
+          "base_mode": 209,
+          "custom_mode": 19,
+          "system_status": 4,
+          "mavlink_version": 3
+        },
+        "GLOBAL_POSITION_INT": {
+          "mavpackettype": "GLOBAL_POSITION_INT",
+          "time_boot_ms": 77799,
+          "lat": 329240000,
+          "lon": -1170385000,
+          "alt": -170,
+          "relative_alt": -407,
+          "vx": -1,
+          "vy": 1,
+          "vz": 0,
+          "hdg": 23
+        },
+        "EKF_STATUS_REPORT": {
+          "mavpackettype": "EKF_STATUS_REPORT",
+          "flags": 831,
+          "velocity_variance": 0.015824614092707634,
+          "pos_horiz_variance": 0.0029813942965120077,
+          "pos_vert_variance": 0.000643036502879113,
+          "compass_variance": 0.006768216844648123,
+          "terrain_alt_variance": 0.0,
+          "airspeed_variance": 0.0
+        },
+        "GPS_RAW_INT": {
+          "mavpackettype": "GPS_RAW_INT",
+          "time_usec": 77620000,
+          "fix_type": 6,
+          "lat": 329240000,
+          "lon": -1170385000,
+          "alt": -130,
+          "eph": 121,
+          "epv": 200,
+          "vel": 0,
+          "cog": 0,
+          "satellites_visible": 10,
+          "alt_ellipsoid": -130,
+          "h_acc": 300,
+          "v_acc": 300,
+          "vel_acc": 40,
+          "hdg_acc": 0,
+          "yaw": 0
+        },
+        "LOCAL_POSITION_NED": {
+          "mavpackettype": "LOCAL_POSITION_NED",
+          "time_boot_ms": 77799,
+          "x": -0.00795131828635931,
+          "y": 0.007865849882364273,
+          "z": 0.007579151075333357,
+          "vx": -0.011731305159628391,
+          "vy": 0.01166356261819601,
+          "vz": -0.005003104917705059
+        }
+      },
+      "status": {
+        "healthy": true,
+        "navigation_valid": true,
+        "fault": "",
+        "initialized": true,
+        "depth_m": 0.0,
+        "surfaced": true,
+        "gps_eligible": true,
+        "gps_admission": {
+          "qualified": true,
+          "reason": "GPS admitted; Cube-fix timing approximation",
+          "cube_fix_age_upper_s": 0.13165645681829105,
+          "timing_basis": "Cube last-fix time; not receiver epoch",
+          "receiver_delay_bound_s": null,
+          "fault": "",
+          "fix": {
+            "cube_fix_time_us": 77620000,
+            "received": 242.167829764,
+            "lat": 32.924,
+            "lon": -117.0385,
+            "alt": -0.13,
+            "accuracy": 0.3,
+            "fix": 6,
+            "speed_mps": 0.0,
+            "course_deg": 0.0,
+            "speed_accuracy_mps": 0.04
+          },
+          "applied_recently": true
+        },
+        "position_ned": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "distance_travelled_m": 0.0,
+        "position_sigma_m": 0.5019002580936031,
+        "heading_bias_deg": 0.0,
+        "velocity_bias_mps": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "heading_reference_validated": true
+      },
+      "ages": {
+        "HEARTBEAT": 0.9323210460000269,
+        "GLOBAL_POSITION_INT": 0.046592319000012594,
+        "EKF_STATUS_REPORT": 0.04601817500000038,
+        "GPS_RAW_INT": 0.04629036000000042,
+        "LOCAL_POSITION_NED": 0.04593287599999485
+      }
+    }
+  ],
+  "origins": [
+    [
+      32.924,
+      -117.0385,
+      0.0
+    ],
+    [
+      32.924,
+      -117.0385,
+      -0.17
+    ]
+  ],
+  "fixture": "independent stationary DVL/VN; prescribed pressure depth",
+  "profile_verified": true,
+  "profile_mismatches": {}
+}

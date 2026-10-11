@@ -633,3 +633,39 @@ no independent physical heading validation and no causal claim restart vs settli
 verified. Surface pressure baseline restored. After reload VN~15.6deg, Cube~358deg;
 20 paired samples median error15.87deg. Heading still uncommissioned. Details in
 waypoint-mission-2026-10-10.md.
+
+## 2026-10-11 continuous-EKF redesign checkpoint
+User requested replacement of source switching with Jetson-qualified GPS feeding
+one continuous Cube fusion configuration, with accurate receiver timing. Authorized
+online tether_toggle_beichen development, not deployment. Investigation only:
+upstream ArduPilot GPS_RAW_INT carries Cube last-fix time; GPS_INPUT backend uses
+GPS week/time-of-week for jitter correction. Exact vehicle firmware/time transport
+not verified. Do not claim receiver synchronization or implement it by retimestamping
+old fixes. Runtime replacement paused at this uncertainty per user's instruction;
+existing source-switching code is unchanged. 134 baseline regressions passed.
+See docs/single-ekf-redesign-2026-10-11.md for pipeline, migration, and saved questions.
+No vehicle access or parameter changes. This is a proposal, not deployed behavior.
+
+2026-10-11 follow-up: user accepted timing approximation. Experimental GPS gate
+and continuous supervisor implemented on tether_toggle_beichen, opt-in only;
+GPS forwarding disabled by default, legacy observation default retained. Matched
+TIMESYNC estimates Cube-fix transport age; receiver delay remains unknown. Fixed
+GPS history expiry allowing prolonged stationary jumps to requalify. 145 Python
+regressions and browser test pass. Native isolated SITL admission/recovery passes,
+but GPS loss produces EKF flags39 (no horizontal position validity), including a
+confirmed-armed simulator run. Full underwater replacement is NOT complete; no
+health-check bypass, vehicle deployment, parameter changes or main changes.
+See docs/single-ekf-redesign-2026-10-11.md and its committed JSON evidence.
+
+2026-10-11 subsequent user revision: external navigation sensors now enter an
+experimental fused_nav_bridge. Pressure gates GPS; admitted GPS corrects bridge
+position and conditional forward-motion heading/speed, then one ODOMETRY stream
+feeds external-only Cube source settings. Virtual GPS prototype removed. Supervisor
+retained as mission/reference guard, using authoritative bridge sensor assessment;
+no continuous-mode source selection. Opt-in and output disabled by default.
+156 regressions, ROS build and GUI rendering pass. Isolated native stationary
+fixture passes GPS jump/outage/recovery with horizontal validity retained. Failed
+origin-startup runs retained; altitude-only origin metadata is independent of
+pressure depth, horizontal origin changes still fault. No vehicle deployment.
+See docs/bridge-odometry-2026-10-11.md for conditions, evidence and outstanding
+full ROS/native integration, moving mission and commissioning.
