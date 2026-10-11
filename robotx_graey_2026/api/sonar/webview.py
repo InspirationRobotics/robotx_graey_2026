@@ -65,6 +65,8 @@ _threshold = None                   # crumb threshold, 0-255
 _floor_cut = 0.0                     # m above the floor with no crumbs; 0 = off
 _looks = False                       # combine looks (looks.py); False = classic map
 _fade = True                         # newer sweeps wipe crumbs they don't see again
+_band = None                         # (lo, hi) m from the sonar's height that make crumbs; None = all
+_radar_geom = None                   # {size, range} of the radar picture, for the band's lines
 _rows = []                          # one summary per detection, for the buttons
 _per_page = 10
 _view = {"page": 0, "selected": []}
@@ -250,6 +252,27 @@ def fade():
         return _fade
 
 
+def set_band(band):
+    """(lo, hi) in m, or None for every height."""
+    global _band
+    with _lock:
+        _band = None if band is None else (float(band[0]), float(band[1]))
+
+
+def band():
+    with _lock:
+        return _band
+
+
+def set_radar_geom(size, max_range_m):
+    """How the radar picture is drawn (viewer.render): a size x size square at the
+    left, the sonar in its middle, max_range_m out to the edge of the circle. The
+    Radar page draws the height band's lines over it from this."""
+    global _radar_geom
+    with _lock:
+        _radar_geom = {"size": int(size), "range": float(max_range_m)}
+
+
 def set_floor_cut(value):
     global _floor_cut
     with _lock:
@@ -291,9 +314,13 @@ color:#eee;border:1px solid #444;border-radius:3px;padding:5px;font:13px ui-mono
 <button id="sgo" style="background:#3a3632;color:#eee;border:1px solid #555;border-radius:3px;
 padding:5px 10px;font:13px ui-monospace,Menlo,monospace;cursor:pointer">set</button>
 <span id="sgn" style="color:#8ea"></span></span>
+<span id="hbw" style="display:none;white-space:nowrap" title="only echoes between the two lines (height from the sonar) become map crumbs. Drag the lines on the picture"><label><input id="hbon" type="checkbox" style="vertical-align:middle"> height band</label>
+<span id="hbt" style="color:#ffb84d"></span></span>
 <span id="note" style="color:#8ea;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 max-width:45vw"></span></div>
-<img src="/stream" style="flex:1;min-height:0;width:100%;object-fit:contain">
+<div style="flex:1;min-height:0;position:relative">
+<img id="im" src="/stream" style="position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain">
+<canvas id="hb" style="position:absolute;left:0;top:0;width:100%;height:100%;touch-action:none;pointer-events:none"></canvas></div>
 <div id="bar" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;
 padding:7px 12px;background:#221f1c;font:13px ui-monospace,Menlo,monospace;color:#ddd">
 <button id="prev" style="background:#3a3632;color:#eee;border:1px solid #555;border-radius:3px;
@@ -333,6 +360,46 @@ document.getElementById('next').onclick=function(){turn(1);};
 document.getElementById('none').onclick=function(){sel=[];push();paint();};
 function toggle(i){var k=sel.indexOf(i);if(k<0)sel.push(i);else sel.splice(k,1);
 push();paint();}
+var im=document.getElementById('im'),hc=document.getElementById('hb'),hx=hc.getContext('2d'),
+hbon=document.getElementById('hbon'),hbw=document.getElementById('hbw'),hbt=document.getElementById('hbt'),
+BAND=null,GEOM=null,drag=null,LAST=[-0.3,0.2];
+function fmt(b){function f(v){return(v>=0?'+':'')+v.toFixed(2);}return f(b[0])+' to '+f(b[1])+' m';}
+function geom(){if(!GEOM||!im.naturalWidth)return null;
+var W=hc.clientWidth,H=hc.clientHeight,nw=im.naturalWidth,nh=im.naturalHeight,
+s=Math.min(W/nw,H/nh),x0=(W-nw*s)/2,y0=(H-nh*s)/2,c=Math.floor(nh/2),m=Math.floor(nh*0.065);
+return{left:x0,right:x0+nh*s,top:y0,bottom:y0+nh*s,cy:y0+c*s,ppm:(c-m)/GEOM.range*s};}
+function drawBand(){var W=hc.clientWidth,H=hc.clientHeight;
+if(hc.width!==W||hc.height!==H){hc.width=W;hc.height=H;}
+hx.clearRect(0,0,W,H);var b=drag?drag.b:BAND,g=geom();
+hc.style.pointerEvents=(b&&g)?'auto':'none';if(!b||!g)return;
+var yh=g.cy-b[1]*g.ppm,yl=g.cy-b[0]*g.ppm,w=g.right-g.left;
+hx.fillStyle='rgba(0,0,0,0.4)';
+hx.fillRect(g.left,g.top,w,Math.max(0,Math.min(yh,g.bottom)-g.top));
+hx.fillRect(g.left,Math.max(yl,g.top),w,Math.max(0,g.bottom-Math.max(yl,g.top)));
+[[yh,b[1],-7],[yl,b[0],20]].forEach(function(p){if(p[0]<g.top||p[0]>g.bottom)return;
+hx.strokeStyle='#ffb84d';hx.lineWidth=2;hx.setLineDash([9,5]);hx.beginPath();
+hx.moveTo(g.left,p[0]);hx.lineTo(g.right,p[0]);hx.stroke();hx.setLineDash([]);
+hx.fillStyle='#ffb84d';hx.fillRect(g.left+6,p[0]-8,16,16);
+hx.font='13px ui-monospace,Menlo,monospace';hx.fillStyle='#fff';
+hx.fillText((p[1]>=0?'+':'')+p[1].toFixed(2)+' m',g.left+28,p[0]+p[2]);});}
+function sendBand(b){fetch('/band',{method:'POST',body:b?(b[0]+' '+b[1]):'off'})
+.then(function(r){return r.text();}).then(function(x){hbt.textContent=x==='ok'?(b?fmt(b):''):x;});}
+function nearest(e){var g=geom();if(!BAND||!g)return null;var r=hc.getBoundingClientRect(),y=e.clientY-r.top,
+dh=Math.abs(y-(g.cy-BAND[1]*g.ppm)),dl=Math.abs(y-(g.cy-BAND[0]*g.ppm));
+return Math.min(dh,dl)<=16?(dh<=dl?1:0):null;}
+hc.addEventListener('pointerdown',function(e){var k=nearest(e);if(k===null)return;
+drag={k:k,b:BAND.slice()};hc.setPointerCapture(e.pointerId);e.preventDefault();});
+hc.addEventListener('pointermove',function(e){var g=geom();
+if(!drag){hc.style.cursor=nearest(e)!==null?'ns-resize':'default';return;}if(!g)return;
+var r=hc.getBoundingClientRect(),h=Math.round((g.cy-(e.clientY-r.top))/g.ppm*20)/20;
+h=Math.max(-GEOM.range,Math.min(GEOM.range,h));
+if(drag.k===1)drag.b[1]=Math.max(h,drag.b[0]+0.05);else drag.b[0]=Math.min(h,drag.b[1]-0.05);
+drag.b=[Math.round(drag.b[0]*100)/100,Math.round(drag.b[1]*100)/100];
+hbt.textContent=fmt(drag.b);drawBand();});
+function endDrag(){if(!drag)return;BAND=LAST=drag.b;drag=null;sendBand(BAND);drawBand();}
+hc.addEventListener('pointerup',endDrag);hc.addEventListener('pointercancel',endDrag);
+hbon.onchange=function(){BAND=hbon.checked?LAST.slice():null;sendBand(BAND);drawBand();};
+window.addEventListener('resize',drawBand);im.addEventListener('load',drawBand);
 function paint(){
 var pages=Math.max(1,Math.ceil(rows.length/per));
 if(page>pages-1)page=pages-1;
@@ -366,7 +433,11 @@ if(s.sector&&document.activeElement!==s0&&document.activeElement!==s1){
 s0.value=Math.round(s.sector[0]);s1.value=Math.round(s.sector[1]);}
 s0.disabled=s1.disabled=sgo.disabled=!s.sectorEditable;
 rg.disabled=rgo.disabled=!s.rangeEditable;
-rows=s.rows||[];per=s.perPage||10;paint();})
+rows=s.rows||[];per=s.perPage||10;paint();
+hbw.style.display=(s.map&&s.radar)?'inline':'none';GEOM=s.radar;
+if(!drag){BAND=s.band;if(s.band)LAST=s.band;if(document.activeElement!==hbon)hbon.checked=!!s.band;
+if(hbt.textContent.indexOf('need')<0&&hbt.textContent.indexOf('say')<0)hbt.textContent=s.band?fmt(s.band):'';}
+drawBand();})
 .catch(function(){}).then(function(){setTimeout(poll,1000);});})();
 </script></body></html>"""
 
@@ -403,6 +474,8 @@ border-radius:4px;color:#fff;display:none}
 <label style="white-space:nowrap"><input id="ol" type="checkbox" checked style="width:auto"> outlines</label>
 <label style="white-space:nowrap" title="off (classic, as on Oct 4): every echo is a crumb. On: crumbs only where 3+ looks agree - best while moving past things; hovering makes blobs"><input id="cl" type="checkbox" style="width:auto"> combine looks</label>
 <label style="white-space:nowrap" title="on: a crumb is wiped when 2 newer sweeps look at that spot and don't hear it again. Off: crumbs stay until Reset, so a faint pipe builds up (so does noise)"><input id="fd" type="checkbox" checked style="width:auto"> fade old crumbs</label>
+<span style="white-space:nowrap" title="only echoes this high from the sonar (m, up is +) make crumbs. Drag its lines on the Radar tab"><label><input id="hbo" type="checkbox" style="width:auto"> height band</label>
+<input id="hb0" type="number" step="0.05" min="-20" max="20"> to <input id="hb1" type="number" step="0.05" min="-20" max="20"> m</span>
 <label style="white-space:nowrap" title="with combine looks: grey = every echo, put in the middle of the 25 deg beam"><input id="ok1" type="checkbox" checked style="width:auto"> one-look dots</label>
 <span id="msg" style="color:#8ea"></span></div>
 <div class="bar" style="padding-top:0"><span id="st" style="color:#bbb"></span></div>
@@ -444,6 +517,11 @@ $('cl').addEventListener('change',function(){post('/looks',$('cl').checked?'on':
 .then(function(x){$('msg').textContent='combine looks: '+x;});});
 $('fd').addEventListener('change',function(){post('/fade',$('fd').checked?'on':'off')
 .then(function(x){$('msg').textContent='fade: '+x;});});
+function sendBand(){post('/band',$('hbo').checked?($('hb0').value+' '+$('hb1').value):'off')
+.then(function(x){$('msg').textContent='height band: '+x;});}
+$('hbo').addEventListener('change',function(){if($('hbo').checked&&($('hb0').value===''||$('hb1').value==='')){
+$('hb0').value=-0.3;$('hb1').value=0.2;}sendBand();});
+['hb0','hb1'].forEach(function(i){$(i).addEventListener('change',function(){if($('hbo').checked)sendBand();});});
 window.addEventListener('resize',draw);
 function fill(i,v){var e=$(i);
 if(!dirty[i]&&document.activeElement!==e&&v!==null&&v!==undefined)e.value=v;}
@@ -510,6 +588,9 @@ if(d.sector){fill('s0',Math.round(d.sector[0]));fill('s1',Math.round(d.sector[1]
 fill('th',d.threshold);if(d.floorCut!=null)fill('fc',d.floorCut);
 if(document.activeElement!==$('cl'))$('cl').checked=!!d.looks;
 if(document.activeElement!==$('fd')&&d.fade!=null)$('fd').checked=!!d.fade;
+if(document.activeElement!==$('hbo'))$('hbo').checked=!!d.band;
+if(d.band){if(document.activeElement!==$('hb0'))$('hb0').value=d.band[0];
+if(document.activeElement!==$('hb1'))$('hb1').value=d.band[1];}
 $('go').textContent={waiting:'Start',running:'Pause',paused:'Resume'}[d.state]||'Start';
 var p=d.pose;
 var rc=d.recording;$('rec').textContent=rc?'Stop rec':'Record';
@@ -564,7 +645,7 @@ class _Handler(BaseHTTPRequestHandler):
         """
         global _target, _range, _sector, _threshold
         if self.path in ('/sector', '/threshold', '/floorcut', '/mapcmd', '/record', '/mark',
-                         '/missionpoint', '/looks', '/fade'):
+                         '/missionpoint', '/looks', '/fade', '/band'):
             self._map_post()
             return
         if self.path == '/view':
@@ -621,13 +702,30 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(b'ok', 'text/plain')
 
     def _map_post(self):
-        global _sector, _threshold, _floor_cut, _mission_point, _looks, _fade
+        global _sector, _threshold, _floor_cut, _mission_point, _looks, _fade, _band
         with _lock:
             on = _map_on
         if not on:
             self.send_error(404)
             return
         text = self._body().decode('utf-8', 'replace').strip()[:300]
+        if self.path == '/band':
+            if text == 'off':
+                band = None
+            else:
+                try:
+                    lo, hi = (float(v) for v in text.split()[:2])
+                except ValueError:
+                    self._send(b'say "lo hi" in m, or off', 'text/plain')
+                    return
+                if not -20 <= lo < hi <= 20:           # also refuses nan and inf
+                    self._send(b'need -20 <= lo < hi <= 20 m', 'text/plain')
+                    return
+                band = (round(lo, 3), round(hi, 3))
+            with _lock:
+                _band = band
+            self._send(b'ok', 'text/plain')
+            return
         if self.path in ('/looks', '/fade'):
             if text not in ('on', 'off'):
                 self._send(b'say on or off', 'text/plain')
@@ -732,6 +830,7 @@ class _Handler(BaseHTTPRequestHandler):
                          'rangeMin': _range_lo, 'rangeMax': _range_hi, 'map': _map_on,
                          'sector': list(_sector) if _sector else None,
                          'sectorEditable': _sector_editable,
+                         'band': list(_band) if _band else None, 'radar': _radar_geom,
                          'rows': _rows, 'perPage': _per_page,
                          'page': _view["page"], 'selected': _view["selected"]}
             self._send(json.dumps(state).encode(), 'application/json')

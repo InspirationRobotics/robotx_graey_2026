@@ -64,6 +64,15 @@ with the VN-100's roll and pitch as well as the heading. A sub rolled 9 deg
 would otherwise put a wall 2 m away ~0.3 m off in height and a little off in
 distance, and its "straight down" ~0.25 m to one side. "up" is height relative
 to the DVL, measured against gravity.
+
+HEIGHT BAND (Ruth, Oct 10). In the 0.9 m pool, pings aimed up hear the pipe's
+mirror image in the water surface, drawn in the air above it (77% of crumbs in
+one run), and pings aimed down hear the floor. A narrower sector cuts those out
+but can miss the pipe. The band keeps the sector and drops echoes whose height
+from the sonar (against gravity, along the middle of the beam) is outside
+(lo, hi) instead - before the strongest MAX_PER_PING are picked, so junk
+outside the band can't crowd the pipe out. It moves with the sub: fine while
+the depth is held.
 """
 import math
 
@@ -99,7 +108,7 @@ class CrumbMap:
     def __init__(self, threshold=THRESHOLD, max_per_ping=MAX_PER_PING,
                  sonar_fwd_m=S.SONAR_FWD_M, sonar_right_m=S.SONAR_RIGHT_M,
                  max_turn_dps=MAX_TURN_DPS, floor_cut_m=FLOOR_CUT_M, looks=True, combine=False,
-                 fade=True):
+                 fade=True, band=None):
         self.threshold = threshold
         self.floor_cut_m = floor_cut_m
         self.max_per_ping = max_per_ping
@@ -109,6 +118,7 @@ class CrumbMap:
         self.looks = LookMap() if looks else None      # looks.py: where pings agree
         self.combine = combine      # False = classic (Oct 4); True = agreed crumbs + middle fading
         self.fade = fade            # False: crumbs stay until Reset (a faint pipe builds up)
+        self.band = band            # (lo, hi) m from the sonar's height, or None = every height
         self.clear()
 
     def clear(self):
@@ -235,6 +245,11 @@ class CrumbMap:
             # height above the floor at range r: alt + sup - r * down
             near_floor = (pose.alt_m + sup - self.floor_cut_m) / down
             sm[max(0, int(near_floor / metres_per_bin)):] = 0
+        if self.band is not None:
+            # height above the sonar at range r is r * rise, the same sum that places the crumb
+            rise = -(m @ (0.0, math.cos(a), -math.sin(a)))[2]
+            h = np.arange(len(sm)) * metres_per_bin * rise
+            sm[(h < self.band[0]) | (h > self.band[1])] = 0
         above = sm >= self.threshold
         if not above.any():
             return 0

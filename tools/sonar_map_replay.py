@@ -33,9 +33,13 @@ from robotx_graey_2026.api.sonar import webview
 from robotx_graey_2026.api.sonar.outlines import Outliner
 from robotx_graey_2026.api.sonar.crumbs import MAX_TURN_DPS, CrumbMap
 from robotx_graey_2026.api.sonar.pose import Pose, wrap180
+from robotx_graey_2026.api.sonar.detect import perceive
+from robotx_graey_2026.api.sonar.sweep import Sweep
+from robotx_graey_2026.api.sonar.viewer import SIZE, Radar, render
 from sonar_map import SNAPSHOT_S, TRACK_STEP_M, reach, sector_arc
 
 TURN_WINDOW_S = 0.3         # the same window DeadReckoner.turn_rate uses
+RADAR_S = 0.5               # Radar tab picture at most this often (wall clock)
 
 
 def load(folder):
@@ -96,6 +100,8 @@ def main():
                           else float(first.get("floor_cut_m", 0.0)))
     webview.set_looks(bool(first.get("combine_looks", False)))
     webview.set_fade(bool(first.get("fade", True)))           # not saved before Oct 10 pm
+    saved = first.get("band_m")                                # nor this
+    webview.set_band(tuple(saved) if saved is not None and np.isfinite(saved).all() else None)
     print(f"[INFO] replay: http://localhost:{args.port}/map")
 
     play = {"state": "running", "done": False}
@@ -112,9 +118,26 @@ def main():
             elif cmd == "reset":
                 return True
         return (webview.threshold() != cmap.threshold or webview.floor_cut() != cmap.floor_cut_m
-                or webview.looks() != cmap.combine or webview.fade() != cmap.fade)
+                or webview.looks() != cmap.combine or webview.fade() != cmap.fade
+                or webview.band() != cmap.band)
 
     outliner = Outliner()
+    radar, last_radar = Radar(), [-1e9]
+
+    def show_radar(s, force=False):
+        """The Radar tab's picture of sweep s, drawn as the live tool draws it,
+        so the height band's lines can be dragged in a replay too."""
+        if not force and time.monotonic() - last_radar[0] < RADAR_S:
+            return
+        sw = Sweep(s["image"], [float(a) for a in s["angles_deg"]], float(s["metres_per_bin"]),
+                   None, [float(t) for t in s["ping_times"]])
+        radar.update(sw)
+        per = perceive(sw, target=None, tuning={"threshold": S.DETECT["threshold"]},
+                       floor=None, require_floor=False)
+        webview.publish(render(per, None, radar=radar, size=SIZE,
+                               state=f"REPLAY  range={float(s['range_m']):g}m"))
+        webview.set_radar_geom(SIZE, radar.max_range_m)
+        last_radar[0] = time.monotonic()
 
     def snapshot(cmap, track, here, n, s):
         crumbs, faint, c = cmap.for_page()
@@ -131,6 +154,7 @@ def main():
             "outlines": outliner.update(c, time.monotonic(), force=play["done"]),
             "sector": [float(v) for v in s["sector"]], "threshold": cmap.threshold,
             "floorCut": cmap.floor_cut_m, "looks": cmap.combine, "fade": cmap.fade,
+            "band": list(cmap.band) if cmap.band else None,
             "turning": cmap.turning, "skippedTurning": cmap.skipped_turning,
             "slice": reach(*sector_arc(*s["sector"]), float(s["range_m"]))})
 
@@ -139,6 +163,7 @@ def main():
         play["state"] = "running"
         cmap = CrumbMap(threshold=webview.threshold(), max_turn_dps=args.max_turn,
                         floor_cut_m=webview.floor_cut(), combine=webview.looks(), fade=webview.fade(),
+                        band=webview.band(),
                         sonar_fwd_m=float(first["sonar_fwd_m"]),
                         sonar_right_m=float(first["sonar_right_m"]))
         track, recent, here = [], [], None
@@ -186,10 +211,12 @@ def main():
                     last_snap = time.monotonic()
             if restart:
                 break
+            show_radar(s)
         if restart:
             continue
         play["done"] = True
         snapshot(cmap, track, here, n, s)
+        show_radar(s, force=True)
         print(f"[INFO] end of run: {len(cmap)} crumbs. Resume or Reset on the page plays it again.")
         while not controls(cmap):
             time.sleep(0.1)
