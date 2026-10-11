@@ -62,7 +62,8 @@ _mission_point = None               # (x, y) a mission is heading for, map frame
 _sector = None                      # (start, end) degrees, swept counterclockwise
 _sector_editable = True
 _threshold = None                   # crumb threshold, 0-255
-_floor_cut = 0.0                     # m above the floor with no crumbs; 0 = off
+_floor_cut = 0.0                     # m above the floor with no crumbs; 0 = off. Only missions set
+                                     # it now (pipeline_mission's harbor scans); not on the Map page
 _fade = True                         # newer sweeps wipe crumbs they don't see again
 _band = None                         # (lo, hi) m from the sonar's height that make crumbs; None = all
 _radar_geom = None                   # {size, range} of the radar picture, for the band's lines
@@ -455,7 +456,6 @@ border-radius:4px;color:#fff;display:none}
 <span>sector <input id="s0" type="number" step="1" min="0" max="359"> to
 <input id="s1" type="number" step="1" min="0" max="359"></span>
 <span>threshold <input id="th" type="number" step="5" min="1" max="255"></span>
-<span title="no crumbs from echoes this close above the seafloor (DVL altitude); 0 = off">floor cut <input id="fc" type="number" step="0.1" min="0" max="3"> m</span>
 <button id="set">set</button>
 <span>map area <input id="ar" type="number" step="1" min="1" max="200" value="10"> m</span>
 <label style="white-space:nowrap"><input id="fo" type="checkbox" checked style="width:auto"> follow sub</label>
@@ -480,7 +480,7 @@ var $=function(i){return document.getElementById(i);};
 var cv=$('cv'),ctx=cv.getContext('2d'),D=null,dirty={};
 function post(path,body){return fetch(path,{method:'POST',body:body})
 .then(function(r){return r.text();});}
-['rg','s0','s1','th','fc'].forEach(function(i){
+['rg','s0','s1','th'].forEach(function(i){
 $(i).addEventListener('input',function(){dirty[i]=1;});
 $(i).addEventListener('keydown',function(e){if(e.key==='Enter')apply();});});
 function apply(){var jobs=[];
@@ -488,7 +488,6 @@ if(dirty.rg)jobs.push(post('/range',$('rg').value).then(function(x){return 'rang
 if(dirty.s0||dirty.s1)jobs.push(post('/sector',$('s0').value+' '+$('s1').value)
 .then(function(x){return 'sector: '+x;}));
 if(dirty.th)jobs.push(post('/threshold',$('th').value).then(function(x){return 'threshold: '+x;}));
-if(dirty.fc)jobs.push(post('/floorcut',$('fc').value).then(function(x){return 'floor cut: '+x;}));
 dirty={};
 if(!jobs.length){$('msg').textContent='nothing changed';return;}
 Promise.all(jobs).then(function(m){$('msg').textContent=m.join('   ');});}
@@ -589,7 +588,7 @@ ctx.closePath();ctx.fill();}}
 (function poll(){fetch('/mapdata').then(function(r){return r.json();}).then(function(d){
 D=d;fill('rg',d.range);
 if(d.sector){fill('s0',Math.round(d.sector[0]));fill('s1',Math.round(d.sector[1]));}
-fill('th',d.threshold);if(d.floorCut!=null)fill('fc',d.floorCut);
+fill('th',d.threshold);
 if(document.activeElement!==$('fd')&&d.fade!=null)$('fd').checked=!!d.fade;
 if(document.activeElement!==$('hbo'))$('hbo').checked=!!d.band;
 if(d.band){if(document.activeElement!==$('hb0'))$('hb0').value=d.band[0];

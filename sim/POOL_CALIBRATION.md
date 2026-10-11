@@ -11,8 +11,8 @@ settings and the Ping360's own settings (`api/sonar/recorder.py`). Press **Mark*
 (with a note) at moments worth finding later, e.g. "turned 90 deg now". The sim
 can then replay the exact same path and the two maps can be compared ping by ping.
 
-**Floor cut 0** for all of them (Map page, or `--floor-cut 0`): the test pipe may be
-lying on the pool floor, and the cut would hide it.
+**Floor cut off** for all of them - the default since Oct 10 (the Map page no longer
+has it): the test pipe may be lying on the pool floor, and the cut would hide it.
 
 Put in the note, with a tape measure, where the pipe is from the sub (distance, which
 side, which way it points).

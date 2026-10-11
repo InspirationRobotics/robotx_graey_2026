@@ -36,6 +36,10 @@ The DVL measures how high it is above the bottom, so along each ping the map
 knows how high above the floor each range is (along the beam's steeper edge,
 which reaches the floor first); echoes less than floor_cut_m above it make no
 crumbs. The handbook puts the pipeline 1-2 m up, so 0.5 m keeps it.
+Off by default since Oct 10: in the pool it hid the pipe or did nothing, and
+Ruth found the box confusing, so the Map page no longer has it; the height
+band does that job by hand. pipeline_mission still sets it for its harbor
+scans, looking down at a seafloor from a few metres up.
 This takes the floor as flat out to the echo. With no altitude (no bottom lock,
 or the DVL not heard lately) nothing is cut. floor_cut_m = 0 turns it off.
 
@@ -79,7 +83,7 @@ MAX_PER_PING = 5
 FADE_SWEEPS = 2         # newer sweeps that must look at a crumb to wipe it out
 FADE_DEG = S.BEAM_FORE_AFT_DEG / 2.0    # ... anywhere in the beam, fore-aft
 MAX_TURN_DPS = 10.0     # turning faster than this, deg/s: ping ignored
-FLOOR_CUT_M = 0.5       # echoes less than this above the floor make no crumbs
+FLOOR_CUT_M = 0.0       # echoes less than this above the floor make no crumbs; 0 = off (missions set it)
 
 _FIELDS = ("x", "y", "up", "brightness", "range_m", "sweep", "seen", "faded_by")
 
