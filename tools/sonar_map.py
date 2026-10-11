@@ -250,7 +250,7 @@ def main():
         if now is not None and (not track or math.hypot(now.x - track[-1][0],
                                                         now.y - track[-1][1]) >= TRACK_STEP_M):
             track.append((now.x, now.y))
-        crumbs, faint, c = cmap.for_page()
+        crumbs, c = cmap.for_page()
         webview.set_map({
             "state": run["state"],
             "dvl": "no data" if now is None else ("ok" if now.valid else "lost"),
@@ -258,10 +258,10 @@ def main():
                                               round(now.heading_deg, 1)],
             "sonar": None if now is None else [round(v, 3) for v in cmap.sonar_xy(now)],
             "track": [[round(x, 2), round(y, 2)] for x, y in track[-5000:]],
-            "crumbs": crumbs, "oneLook": faint, "sweep": run["sweeps"], "count": len(crumbs),
+            "crumbs": crumbs, "sweep": run["sweeps"], "count": len(crumbs),
             "outlines": outliner.update(c, time.monotonic()),
             "range": cur["range"], "sector": list(cur["sector"]),
-            "threshold": cmap.threshold, "floorCut": cmap.floor_cut_m, "looks": cmap.combine,
+            "threshold": cmap.threshold, "floorCut": cmap.floor_cut_m,
             "fade": cmap.fade,
             "band": list(cmap.band) if cmap.band else None,
             "turning": cmap.turning and run["state"] == "running",
@@ -291,7 +291,6 @@ def main():
             raise _Restart
         cmap.threshold = webview.threshold()
         cmap.floor_cut_m = webview.floor_cut()
-        cmap.combine = webview.looks()
         cmap.fade = webview.fade()
         cmap.band = webview.band()
         take(partial)
@@ -312,7 +311,6 @@ def main():
                                       for q in cur["poses"]], float),
             pose_alt=np.array([q.alt_m if q else -1.0 for q in cur["poses"]], float),
             vn_pitch_unflipped=S.VN_PITCH_BACKWARDS,    # pose_roll_pitch already turned round
-            combine_looks=cmap.combine,
             fade=cmap.fade,
             band_m=np.array(cmap.band if cmap.band else (np.nan, np.nan), float),
             floor_cut_m=cmap.floor_cut_m,
@@ -337,7 +335,6 @@ def main():
                    range=webview.range_m(), sector=webview.sector())
         cmap.threshold = webview.threshold()
         cmap.floor_cut_m = webview.floor_cut()
-        cmap.combine = webview.looks()
         cmap.fade = webview.fade()
         cmap.band = webview.band()
         cmap.new_sweep()

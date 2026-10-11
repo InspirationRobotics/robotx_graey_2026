@@ -63,7 +63,6 @@ _sector = None                      # (start, end) degrees, swept counterclockwi
 _sector_editable = True
 _threshold = None                   # crumb threshold, 0-255
 _floor_cut = 0.0                     # m above the floor with no crumbs; 0 = off
-_looks = False                       # combine looks (looks.py); False = classic map
 _fade = True                         # newer sweeps wipe crumbs they don't see again
 _band = None                         # (lo, hi) m from the sonar's height that make crumbs; None = all
 _radar_geom = None                   # {size, range} of the radar picture, for the band's lines
@@ -228,17 +227,6 @@ def set_threshold(value):
 def threshold():
     with _lock:
         return _threshold
-
-
-def set_looks(flag):
-    global _looks
-    with _lock:
-        _looks = bool(flag)
-
-
-def looks():
-    with _lock:
-        return _looks
 
 
 def set_fade(flag):
@@ -454,7 +442,7 @@ button{background:#3a3632;color:#eee;border:1px solid #555;border-radius:3px;pad
 font:inherit;cursor:pointer}
 a{color:#8bd}
 #wrap{flex:1;min-height:0;position:relative}
-canvas{position:absolute;left:0;top:0;width:100%;height:100%}
+canvas{position:absolute;left:0;top:0;width:100%;height:100%;cursor:grab;touch-action:none}
 #banner{position:absolute;left:50%;top:12px;transform:translateX(-50%);padding:6px 14px;
 border-radius:4px;color:#fff;display:none}
 </style></head><body>
@@ -472,21 +460,20 @@ border-radius:4px;color:#fff;display:none}
 <span>map area <input id="ar" type="number" step="1" min="1" max="200" value="10"> m</span>
 <label style="white-space:nowrap"><input id="fo" type="checkbox" checked style="width:auto"> follow sub</label>
 <label style="white-space:nowrap"><input id="ol" type="checkbox" checked style="width:auto"> outlines</label>
-<label style="white-space:nowrap" title="off (classic, as on Oct 4): every echo is a crumb. On: crumbs only where 3+ looks agree - best while moving past things; hovering makes blobs"><input id="cl" type="checkbox" style="width:auto"> combine looks</label>
+<label style="white-space:nowrap"><input id="tk" type="checkbox" checked style="width:auto"> sub's track</label>
 <label style="white-space:nowrap" title="on: a crumb is wiped when 2 newer sweeps look at that spot and don't hear it again. Off: crumbs stay until Reset, so a faint pipe builds up (so does noise)"><input id="fd" type="checkbox" checked style="width:auto"> fade old crumbs</label>
 <span style="white-space:nowrap" title="only echoes this high from the sonar (m, up is +) make crumbs. Drag its lines on the Radar tab"><label><input id="hbo" type="checkbox" style="width:auto"> height band</label>
 <input id="hb0" type="number" step="0.05" min="-20" max="20"> to <input id="hb1" type="number" step="0.05" min="-20" max="20"> m</span>
-<label style="white-space:nowrap" title="with combine looks: grey = every echo, put in the middle of the 25 deg beam"><input id="ok1" type="checkbox" checked style="width:auto"> one-look dots</label>
 <span id="msg" style="color:#8ea"></span></div>
 <div class="bar" style="padding-top:0"><span id="st" style="color:#bbb"></span></div>
 <div id="wrap"><canvas id="cv"></canvas><div id="banner"></div></div>
 <div class="bar" style="color:#bbb">
-<span>agreed crumb: 3 looks <span style="display:inline-block;width:90px;height:10px;vertical-align:middle;
-background:linear-gradient(90deg,hsl(210,95%,58%),hsl(105,95%,58%),hsl(0,95%,58%))"></span> 10+ looks</span>
-<span><span style="color:#999">&#9679;</span> one look (middle of the 25&deg; beam)</span>
+<span>crumb: echo at the threshold <span style="display:inline-block;width:90px;height:10px;vertical-align:middle;
+background:linear-gradient(90deg,hsl(210,95%,58%),hsl(105,95%,58%),hsl(0,95%,58%))"></span> strongest (dim = fading)</span>
 <span style="color:#3cb4e6">&#9473; sub's track</span><span>&#9650; sub</span>
 <span style="color:#78dca0">&#9473; sonar slice</span><span>&#9675; start (0,0)</span>
 <span>grid <span id="gl"></span></span>
+<span style="color:#888">scroll or pinch: zoom where the mouse is; drag: move the map; follow sub: back to the sub</span>
 <span style="color:#888">sector: counterclockwise, 0 right 90 up 180 left 270 down, same = full circle</span></div>
 <script>
 var $=function(i){return document.getElementById(i);};
@@ -512,9 +499,7 @@ $('rs').onclick=function(){post('/mapcmd','reset');};
 $('rec').onclick=function(){post('/record',D&&D.recording?'stop':'start '+$('rn').value)
 .then(function(x){$('msg').textContent='record: '+x;});};
 $('mk').onclick=function(){post('/mark',$('rn').value).then(function(x){$('msg').textContent='mark: '+x;});};
-$('ar').addEventListener('input',draw);$('fo').addEventListener('change',draw);$('ol').addEventListener('change',draw);$('ok1').addEventListener('change',draw);
-$('cl').addEventListener('change',function(){post('/looks',$('cl').checked?'on':'off')
-.then(function(x){$('msg').textContent='combine looks: '+x;});});
+$('ar').addEventListener('input',draw);$('fo').addEventListener('change',draw);$('ol').addEventListener('change',draw);$('tk').addEventListener('change',draw);
 $('fd').addEventListener('change',function(){post('/fade',$('fd').checked?'on':'off')
 .then(function(x){$('msg').textContent='fade: '+x;});});
 function sendBand(){post('/band',$('hbo').checked?($('hb0').value+' '+$('hb1').value):'off')
@@ -522,6 +507,26 @@ function sendBand(){post('/band',$('hbo').checked?($('hb0').value+' '+$('hb1').v
 $('hbo').addEventListener('change',function(){if($('hbo').checked&&($('hb0').value===''||$('hb1').value==='')){
 $('hb0').value=-0.3;$('hb1').value=0.2;}sendBand();});
 ['hb0','hb1'].forEach(function(i){$(i).addEventListener('change',function(){if($('hbo').checked)sendBand();});});
+// the view: VIEW is the map point in the middle; map area is how many metres fit
+var VIEW=[0,0],PAN=null,G0=null;
+function zoomAt(cx,cy,area){var r=cv.getBoundingClientRect(),old=Math.max(0.5,parseFloat($('ar').value)||10),
+mx=cx-r.left-r.width/2,my=cy-r.top-r.height/2,p0=Math.min(r.width,r.height)/old,wx=VIEW[0]+mx/p0,wy=VIEW[1]-my/p0;
+area=Math.max(0.5,Math.min(200,area));$('ar').value=area<10?area.toFixed(2):area.toFixed(1);
+var p1=Math.min(r.width,r.height)/parseFloat($('ar').value);
+$('fo').checked=false;VIEW=[wx-mx/p1,wy+my/p1];draw();}
+cv.addEventListener('wheel',function(e){e.preventDefault();var a=parseFloat($('ar').value)||10;
+zoomAt(e.clientX,e.clientY,a*Math.exp(e.deltaY*(e.ctrlKey?0.01:0.0015)));},{passive:false});
+cv.addEventListener('gesturestart',function(e){e.preventDefault();G0=parseFloat($('ar').value)||10;});
+cv.addEventListener('gesturechange',function(e){e.preventDefault();if(G0)zoomAt(e.clientX,e.clientY,G0/e.scale);});
+cv.addEventListener('gestureend',function(e){e.preventDefault();G0=null;});
+cv.addEventListener('pointerdown',function(e){PAN={x:e.clientX,y:e.clientY,c:VIEW.slice()};
+cv.setPointerCapture(e.pointerId);cv.style.cursor='grabbing';});
+cv.addEventListener('pointermove',function(e){if(!PAN)return;var dx=e.clientX-PAN.x,dy=e.clientY-PAN.y;
+if(Math.abs(dx)+Math.abs(dy)<3)return;var r=cv.getBoundingClientRect(),
+px=Math.min(r.width,r.height)/(parseFloat($('ar').value)||10);
+$('fo').checked=false;VIEW=[PAN.c[0]-dx/px,PAN.c[1]+dy/px];draw();});
+function endPan(){PAN=null;cv.style.cursor='grab';}
+cv.addEventListener('pointerup',endPan);cv.addEventListener('pointercancel',endPan);
 window.addEventListener('resize',draw);
 function fill(i,v){var e=$(i);
 if(!dirty[i]&&document.activeElement!==e&&v!==null&&v!==undefined)e.value=v;}
@@ -535,7 +540,8 @@ cv.width=Math.round(r.width*k);cv.height=Math.round(r.height*k);ctx.setTransform
 var W=r.width,H=r.height;ctx.fillStyle='#161412';ctx.fillRect(0,0,W,H);
 if(!D)return;
 var area=Math.max(1,parseFloat($('ar').value)||10),px=Math.min(W,H)/area;
-var c=($('fo').checked&&D.pose)?D.pose:[0,0];
+if($('fo').checked&&D.pose)VIEW=[D.pose[0],D.pose[1]];
+var c=VIEW;
 var X=function(x){return W/2+(x-c[0])*px;},Y=function(y){return H/2-(y-c[1])*px;};
 var g=nice(area),xa=c[0]-W/2/px,xb=c[0]+W/2/px,ya=c[1]-H/2/px,yb=c[1]+H/2/px,v;
 ctx.lineWidth=1;
@@ -546,8 +552,6 @@ ctx.beginPath();ctx.moveTo(0,Y(v));ctx.lineTo(W,Y(v));ctx.stroke();}
 $('gl').textContent=g+' m';
 ctx.strokeStyle='#ddd';ctx.beginPath();ctx.arc(X(0),Y(0),6,0,7);ctx.stroke();
 var th=D.threshold||100,R=Math.max(2.5,Math.min(5,px*0.05));
-if(D.oneLook&&$('ok1').checked){ctx.fillStyle='rgba(150,150,150,0.45)';
-D.oneLook.forEach(function(q){ctx.beginPath();ctx.arc(X(q[0]),Y(q[1]),Math.max(1.5,R*0.55),0,7);ctx.fill();});}
 [1,0].forEach(function(faded){ctx.globalAlpha=faded?0.3:1;
 D.crumbs.forEach(function(q){if((q[3]>0?1:0)!==faded)return;
 ctx.fillStyle=hue(q[2],th);ctx.beginPath();ctx.arc(X(q[0]),Y(q[1]),R,0,7);ctx.fill();});});
@@ -571,7 +575,7 @@ if(best){ctx.strokeStyle='rgba(255,220,80,0.5)';ctx.lineWidth=4;ctx.beginPath();
 g.spine.forEach(function(p,k){if(k)ctx.lineTo(X(p[0]),Y(p[1]));else ctx.moveTo(X(p[0]),Y(p[1]));});ctx.stroke();}
 if(g.score>=0.2){var m=g.spine[Math.floor(g.spine.length/2)];ctx.fillStyle=best?'#ffdc50':'#ddd';
 ctx.fillText('pipe '+Math.round(g.score*100)+'%',X(m[0])+8,Y(m[1])-8);}});}
-if(D.track.length>1){ctx.strokeStyle='#3cb4e6';ctx.lineWidth=2;ctx.beginPath();
+if($('tk').checked&&D.track.length>1){ctx.strokeStyle='#3cb4e6';ctx.lineWidth=2;ctx.beginPath();
 D.track.forEach(function(p,i){if(i)ctx.lineTo(X(p[0]),Y(p[1]));else ctx.moveTo(X(p[0]),Y(p[1]));});
 ctx.stroke();}
 if(D.pose&&D.sonar){var h=D.pose[2]*Math.PI/180,rx=Math.cos(h),ry=-Math.sin(h),s=D.sonar;
@@ -586,7 +590,6 @@ ctx.closePath();ctx.fill();}}
 D=d;fill('rg',d.range);
 if(d.sector){fill('s0',Math.round(d.sector[0]));fill('s1',Math.round(d.sector[1]));}
 fill('th',d.threshold);if(d.floorCut!=null)fill('fc',d.floorCut);
-if(document.activeElement!==$('cl'))$('cl').checked=!!d.looks;
 if(document.activeElement!==$('fd')&&d.fade!=null)$('fd').checked=!!d.fade;
 if(document.activeElement!==$('hbo'))$('hbo').checked=!!d.band;
 if(d.band){if(document.activeElement!==$('hb0'))$('hb0').value=d.band[0];
@@ -645,7 +648,7 @@ class _Handler(BaseHTTPRequestHandler):
         """
         global _target, _range, _sector, _threshold
         if self.path in ('/sector', '/threshold', '/floorcut', '/mapcmd', '/record', '/mark',
-                         '/missionpoint', '/looks', '/fade', '/band'):
+                         '/missionpoint', '/fade', '/band'):
             self._map_post()
             return
         if self.path == '/view':
@@ -702,7 +705,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(b'ok', 'text/plain')
 
     def _map_post(self):
-        global _sector, _threshold, _floor_cut, _mission_point, _looks, _fade, _band
+        global _sector, _threshold, _floor_cut, _mission_point, _fade, _band
         with _lock:
             on = _map_on
         if not on:
@@ -726,15 +729,12 @@ class _Handler(BaseHTTPRequestHandler):
                 _band = band
             self._send(b'ok', 'text/plain')
             return
-        if self.path in ('/looks', '/fade'):
+        if self.path == '/fade':
             if text not in ('on', 'off'):
                 self._send(b'say on or off', 'text/plain')
                 return
             with _lock:
-                if self.path == '/looks':
-                    _looks = text == 'on'
-                else:
-                    _fade = text == 'on'
+                _fade = text == 'on'
             self._send(b'ok', 'text/plain')
             return
         if self.path == '/missionpoint':

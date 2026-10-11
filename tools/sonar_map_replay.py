@@ -98,7 +98,6 @@ def main():
     webview.set_threshold(args.threshold if args.threshold is not None else int(first["threshold"]))
     webview.set_floor_cut(args.floor_cut if args.floor_cut is not None
                           else float(first.get("floor_cut_m", 0.0)))
-    webview.set_looks(bool(first.get("combine_looks", False)))
     webview.set_fade(bool(first.get("fade", True)))           # not saved before Oct 10 pm
     saved = first.get("band_m")                                # nor this
     webview.set_band(tuple(saved) if saved is not None and np.isfinite(saved).all() else None)
@@ -118,7 +117,7 @@ def main():
             elif cmd == "reset":
                 return True
         return (webview.threshold() != cmap.threshold or webview.floor_cut() != cmap.floor_cut_m
-                or webview.looks() != cmap.combine or webview.fade() != cmap.fade
+                or webview.fade() != cmap.fade
                 or webview.band() != cmap.band)
 
     outliner = Outliner()
@@ -140,7 +139,7 @@ def main():
         last_radar[0] = time.monotonic()
 
     def snapshot(cmap, track, here, n, s):
-        crumbs, faint, c = cmap.for_page()
+        crumbs, c = cmap.for_page()
         webview.set_map({
             "state": "paused" if play["done"] else play["state"],
             "dvl": "no data" if here is None else ("ok" if here.valid else "lost"),
@@ -148,12 +147,12 @@ def main():
                                                round(here.heading_deg, 1)],
             "sonar": None if here is None else [round(v, 3) for v in cmap.sonar_xy(here)],
             "track": [[round(x, 2), round(y, 2)] for x, y in track[-5000:]],
-            "crumbs": crumbs, "oneLook": faint,
+            "crumbs": crumbs,
             "sweep": f"{n}/{len(sweeps)}" + (" (end)" if play["done"] else ""),
             "count": len(crumbs), "range": float(s["range_m"]),
             "outlines": outliner.update(c, time.monotonic(), force=play["done"]),
             "sector": [float(v) for v in s["sector"]], "threshold": cmap.threshold,
-            "floorCut": cmap.floor_cut_m, "looks": cmap.combine, "fade": cmap.fade,
+            "floorCut": cmap.floor_cut_m, "fade": cmap.fade,
             "band": list(cmap.band) if cmap.band else None,
             "turning": cmap.turning, "skippedTurning": cmap.skipped_turning,
             "slice": reach(*sector_arc(*s["sector"]), float(s["range_m"]))})
@@ -162,7 +161,7 @@ def main():
         play["done"] = False
         play["state"] = "running"
         cmap = CrumbMap(threshold=webview.threshold(), max_turn_dps=args.max_turn,
-                        floor_cut_m=webview.floor_cut(), combine=webview.looks(), fade=webview.fade(),
+                        floor_cut_m=webview.floor_cut(), fade=webview.fade(),
                         band=webview.band(),
                         sonar_fwd_m=float(first["sonar_fwd_m"]),
                         sonar_right_m=float(first["sonar_right_m"]))
