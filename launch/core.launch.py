@@ -30,6 +30,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('continuous_fusion', default_value='false',
             description='Pressure-gated external odometry; disabled pending commissioning'),
+        DeclareLaunchArgument('surface_pressure_hpa', default_value='0.0',
+            description='Measured confirmed-surface pressure for experimental bridge; zero disables depth'),
         Node(package=PKG, executable='led_node', name='led_node', output='screen', **RESPAWN),
         Node(package=PKG, executable='pixhawk_led_node', name='pixhawk_led_node', output='screen', **RESPAWN),
         # Belongs in the CORE stack, not the mission: SA must kill whether or not a
@@ -45,7 +47,8 @@ def generate_launch_description():
              output='screen', respawn=False),
         Node(package=PKG, executable='fused_nav_bridge', name='nav_ekf_bridge',
              condition=IfCondition(LaunchConfiguration('continuous_fusion')),
-             parameters=[{'enabled': False}], output='screen', respawn=False),
+             parameters=[{'enabled': False, 'surface_pressure_hpa': ParameterValue(
+                 LaunchConfiguration('surface_pressure_hpa'), value_type=float)}], output='screen', respawn=False),
         Node(package=PKG, executable='navigation_supervisor', name='navigation_supervisor',
              parameters=[{'active': False, 'continuous_fusion': ParameterValue(
                  LaunchConfiguration('continuous_fusion'), value_type=bool)}], output='screen', **RESPAWN),
