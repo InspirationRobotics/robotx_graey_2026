@@ -623,3 +623,8 @@ Supervisor remains Observation; no automatic round-trip test or mission enabled.
 flip_180true unchanged. Core restarted disarmed; prior depth baseline restored.
 Bridge frame reset, mission continuity unverified. VN/Cube still differedabout20deg
 on final sample; do not equate applied offset with commissioned heading accuracy.
+
+2026-10-10 subsequent check: restarted VN/DVL drivers while disarmed (bridge and
+Cube kept running).45 fresh paired samples: VN/Cubeabout196.3deg; median wrapped
+absolute error0.0251deg. Retained yaw180. Previous20deg disagreement cleared;
+no independent physical heading validation and no causal claim restart vs settling.

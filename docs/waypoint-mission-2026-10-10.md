@@ -249,3 +249,15 @@ RF/STARTUP, disarmed/ESCoff after reload. Bridge restarted: integrated frame res
 mission/reference continuity is NOT verified. Final VN196.3deg vs Cube216.3deg,
 about20deg disagreement; offset applied but Cube heading not declared settled or
 correct. Automatic missions remain uncommissioned/disabled. No arm or thrust command.
+
+### Sensor restart / heading comparison (2026-10-10)
+
+Verified fresh disarmed MANUAL/ESCoff. SIGINT restarted only VN and DVL ROS sensor
+drivers, not hardware power, Cube or navigation bridge. Collected45 fresh paired
+heading samples overabout26seconds after drivers resumed. VNabout196.3deg,
+Cubeabout196.3deg; median absolute wrapped difference0.02510deg. Final difference
+-0.03256deg. Retained operator-requested180deg yaw correction: no evidence from
+this comparison that removing it is warranted. Earlier20deg difference cleared;
+restart vs estimator settling cannot be distinguished from this sampling alone.
+Agreement is not independent geographic-heading or physical-axis validation.
+Evidence on Jetson: /home/graey/robotx_ws/logs/heading-restart-20261010.json.
