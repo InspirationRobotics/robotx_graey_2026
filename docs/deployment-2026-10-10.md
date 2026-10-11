@@ -126,3 +126,20 @@ source transition test completed, no active supervisor or waypoint enablement.
 Still need disarmed transition/continuity test, heading/frame commissioning and
 supervisor mission intent. Do not mark vehicle_validation_complete from parameter
 match alone. User must keep disarmed through the test. Evidence logs on Jetson.
+
+### Disarmed Surface selection test passed (2026-10-10)
+
+User requested continuation. Fresh MANUAL/disarmed state verified; ESC power was
+on. Removed unnecessary ESC-off prerequisite for this non-actuating source-only
+test, retained disarmed/no-mission checks. DVL initially invalid; bounded30s wait
+obtained ten consecutive healthy snapshots at0.5s intervals before command.
+Sent42007 target2 via diagnostic component199. ACK result0 and50 NAV_SRC=2
+samples over10s confirmed actual Surface selection. Maximum horizontal estimated
+position displacement from pre-command local pose was2.4341m. This is NOT a
+validated smooth transition or proof of physical accuracy; physical movement was
+not independently measured. Do not automatically switch back to unaligned external
+position. Evidence: logs/source-commissioning-20261010/surface-test.json on Jetson.
+Final GUI supervisor confirmed Surface GPS / Surfaced with fresh healthy EKF flags,
+valid DVL and qualified GPS. Observation remains; mission intent unavailable,
+heading reference validation and vehicle commissioning flags remain incomplete.
+No arming/thrust/mode commands sent. Automatic round-trip transitions remain untested.

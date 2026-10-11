@@ -613,3 +613,8 @@ reporter installed/readback verified. All persisted after disarmed Cube reboot;
 guarded test aborted before command when vehicle was armed again. Supervisor stays
 Observation, commissioning validation incomplete. Detailed evidence/failures in
 docs/deployment-2026-10-10.md. Calibration restored after core restarted on reboot.
+
+2026-10-10 later: disarmed Surface-source command test succeeded (ACK0,50 actual
+NAV_SRC=2 reports/10s); GUI confirmed Surface GPS. Estimated local position moved
+up to2.4341m relative to pre-command value; continuity/accuracy not commissioned.
+Supervisor remains Observation; no automatic round-trip test or mission enabled.
