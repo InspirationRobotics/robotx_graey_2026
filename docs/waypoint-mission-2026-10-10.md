@@ -239,3 +239,13 @@ upside-down mounting transform, not the temporary yaw correction. Prepared core
 launch VN yaw_offset_deg180 (bridge unchanged). NOT deployed: vehicle armed with
 ESC power on; requires disarmed sensor reload and subsequent frame revalidation.
 Physical correctness is operator-directed, not independently measured.
+
+2026-10-10 heading deployment: after verified disarmed MANUAL, deployed core VN
+startup yaw_offset_deg180 and built. Scoped core reload briefly stopped at sudo
+credential-cache failure; recovered with one sudo invocation, core running.
+Verified live VN yaw_offset_deg180/flip_180true. Restored prior pressure baseline
+without re-zeroing: depthabout-0.03m, Surfaced, Surface GPS selected. Controller
+RF/STARTUP, disarmed/ESCoff after reload. Bridge restarted: integrated frame reset;
+mission/reference continuity is NOT verified. Final VN196.3deg vs Cube216.3deg,
+about20deg disagreement; offset applied but Cube heading not declared settled or
+correct. Automatic missions remain uncommissioned/disabled. No arm or thrust command.

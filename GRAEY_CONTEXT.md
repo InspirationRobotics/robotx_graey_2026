@@ -618,3 +618,8 @@ docs/deployment-2026-10-10.md. Calibration restored after core restarted on rebo
 NAV_SRC=2 reports/10s); GUI confirmed Surface GPS. Estimated local position moved
 up to2.4341m relative to pre-command value; continuity/accuracy not commissioned.
 Supervisor remains Observation; no automatic round-trip test or mission enabled.
+
+2026-10-10: operator-requested VN yaw_offset_deg180 deployed and readback verified;
+flip_180true unchanged. Core restarted disarmed; prior depth baseline restored.
+Bridge frame reset, mission continuity unverified. VN/Cube still differedabout20deg
+on final sample; do not equate applied offset with commissioned heading accuracy.
