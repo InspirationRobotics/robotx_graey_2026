@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from rclpy.node import Node
+from robotx_graey_2026.api.steady_node import SteadyNode as Node
 from std_msgs.msg import String
 
 from robotx_graey_2026.api.node_util import run

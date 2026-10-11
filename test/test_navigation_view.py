@@ -15,6 +15,20 @@ class NavigationTests(unittest.TestCase):
         self.now = 10
         self.view = module.NavigationView(lambda: self.now)
 
+    def test_compact_supervisor_status_keeps_depth_and_freshness_without_tracks(self):
+        self.assertEqual(self.view.supervisor_snapshot(), {'streams': {}})
+        self.view.put('supervisor', {'depth_m': .5, 'confirmed_source': 'Underwater'})
+        result = self.view.supervisor_snapshot()
+        self.assertNotIn('trails', result)
+        sample = result['streams']['supervisor']
+        self.assertTrue(sample['fresh'])
+        self.assertEqual(sample['data']['depth_m'], .5)
+        sample['data']['depth_m'] = 99
+        self.now += 3
+        sample = self.view.supervisor_snapshot()['streams']['supervisor']
+        self.assertFalse(sample['fresh'])
+        self.assertEqual(sample['data']['depth_m'], .5)
+
     def message(self, kind, **fields):
         self.view.consume(kind, SimpleNamespace(get_srcSystem=lambda: 1,
             get_srcComponent=lambda: 1, **fields))

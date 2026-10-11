@@ -39,3 +39,107 @@ Depth reference, selected-source feedback, live source-set configuration and fra
 During publication, remote branch received the sonar team's merge. Preserved it with a normal merge (`7160cab`), then fast-forwarded Jetson. All incoming sonar files already present on Jetson were byte-identical to the remote versions; backed up/stashed overlaps before fast-forward. Final tracked Jetson diff was empty, navigation installed files matched source and installed GUI matched the merged GUI. Untracked backups/data remain preserved. This supersedes the earlier statement that the sonar additions remain only local.
 
 Sonar commit `2c007c8` records a team tilt test: nose-down produced positive VN pitch and negative Cube pitch, with roll agreeing. Its downstream sonar code compensates pitch via `VN_PITCH_BACKWARDS`. This is reported team evidence, not a test repeated in this session. A future upstream VN mounting-transform correction must coordinate removal of downstream compensation to avoid double correction. The yaw-offset consistency fix does not resolve this separate pitch issue.
+
+## Waypoint deployment — 2026-10-10
+
+User requested deployment and confirmed ready after the first live check found
+Graey armed with ESC power on. The second fresh controller check confirmed
+MANUAL, disarmed, ESC off, SA kill active, and no mission claim.
+
+- Jetson had five additional sonar commits through `3364bd6`. Preserved these,
+  backed up all Git history to
+  `/home/graey/deployment-backups/20261010-waypoint/before.bundle`, and merged
+  the remote navigation work (`6ef0647`) without conflicts as `b86add1`.
+- Built `robotx_graey_2026` with colcon/symlink-install in the existing container.
+  Build passed; only disabled byte-compilation warnings. All **130 tests passed**
+  on Jetson with ROS_LOCALHOST_ONLY=1 and isolated ROS_DOMAIN_ID=74.
+- Stopped the verified core launch with SIGINT using a temporary runtime systemd
+  ExecStop override, then removed the override and restarted core. Avoided the
+  installed broad pkill stop command. MAVProxy and sonar launcher stayed active.
+- HTTP `/waypoint` returned 200; `/api/waypoint` returned fresh Cube global
+  position/attitude, VN heading and DVL data. Exactly one GUI, bridge, supervisor,
+  VN and DVL process was present. No waypoint or SITL mission was running.
+- Live execution remains **disabled**, pool registration **approximate**.
+  Supervisor remains **Observation**, **Depth reference unavailable**, source
+  Unknown, configuration unverified, navigation not ready. This is deployment
+  verification, not physical autonomous-mission or positioning-accuracy approval.
+- Restart returned controller selection to **RF**, inhibit **STARTUP**, SA kill
+  active. Fresh telemetry confirmed MANUAL, disarmed, ESC off. No fault reset,
+  source-selection command, arming, Cube parameter change or mission was issued.
+- Core restart resets bridge integration; previous local-frame continuity must
+  not be assumed. Calibrate depth and validate frames/source settings before
+  later commissioning. No mapping accuracy was inferred from sensor agreement.
+- Pushed combined branch and fast-forwarded the Windows checkout. Existing
+  untracked Jetson backups, helper files and sonar data were preserved.
+
+### Session surface depth calibration (2026-10-10)
+
+User confirmed stationary floating surface, pressure sensor immersed, and requested
+calibration without disarming. Captured 57 advancing SCALED_PRESSURE2 samples over
+12 seconds via unused diagnostic endpoint14554: median997.4154663085938hPa,
+range997.38232421875–997.4569091796875hPa (0.000742m equivalent span at configured
+1025kg/m3). Applied only to current supervisor launch parameter file, preserving
+active=false, and SIGINT/reloaded observation supervisor only. Core, kill switch,
+bridge and GUI PIDs unchanged; controller remained armed MANUAL/TETHER, no mission.
+Three fresh readings verified Surfaced with depth0.00148–0.00166m. No Cube source
+or parameter command issued. Remaining status: Mission intent unavailable or
+stale, configuration unverified; heading references not validated. This session
+baseline is lost when the core launch is recreated/rebooted; do not reuse as an
+automatic zero at unknown depth. Pool water density setting remains1025kg/m3 and
+should be reviewed for quantitative depth commissioning. No persistent code change.
+
+## Actual Cube source readback — 2026-10-10, after surface calibration
+
+Read through diagnostic endpoint14554/component199; no source/parameter writes.
+All requested parameters returned. EKF3 enabled, AHRS_EKF_TYPE=3.
+Underwater set1 matches the proposed profile. Surface set2 has POSXY=0,
+VELXY=0, YAW=0 (expected3,6,6 respectively). EK3_SRC_OPTIONS=1 (expected0).
+SCR_ENABLE=0; zero NAV_SRC reports received during15seconds. Supervisor therefore
+cannot verify actual selected source. Vehicle was armed MANUAL/TETHER.
+Evidence saved on Jetson: /root/robotx_ws/logs/source-readback-20261010.json.
+
+Prepared changes, NOT applied: EK3_SRC2_POSXY=3, EK3_SRC2_VELXY=6,
+EK3_SRC2_YAW=6, EK3_SRC_OPTIONS=0; enable scripting and install the existing
+telemetry-only deploy/scripts/navigation_source_report.lua into Cube APM/scripts.
+Requires disarmed setup/reboot and readback, then actual NAV_SRC confirmation.
+Do not claim heading/frame commissioning from merely matching instantaneous yaw.
+Surface classification is now calibrated but is separate from EKF source selection.
+
+### Source configuration applied and feedback verified (2026-10-10)
+
+After user ready and fresh disarmed/ESC-off verification, backed up all976 Cube
+parameters under /root/robotx_ws/logs/source-commissioning-20261010/parameters-before.json.
+Uploaded navigation_source_report.lua to /APM/scripts and verified byte-for-byte
+readback. Installed pymavlink used older list_result API; first directory inspection
+failed with AttributeError, corrected. First parameter pass wrote only SRC2_POSXY
+then stopped on an unfiltered heartbeat assertion; corrected filtering to Cube1/1.
+Completed and read back SRC2_POSXY=3, SRC2_VELXY=6, SRC2_YAW=6,
+SRC_OPTIONS=0, SCR_ENABLE=1. Requested disarmed Cube reboot. All profile values
+persisted;75 NAV_SRC reports in15seconds confirmed source1/Underwater. Lua reports
+selection only, not actual GPS fusion. Reboot triggered core restart; restored the
+previous session pressure baseline to observation supervisor only. Surfaced seen
+at depth-0.033m; no fresh zero was taken. Controller rebooted RF/STARTUP.
+DVL initially invalid (user said expected), subsequently valid on a snapshot.
+Attempted a guarded disarmed surface-source test; preflight stopped BEFORE sending
+any source command when fresh controller state showed armed/ESC-on again. No live
+source transition test completed, no active supervisor or waypoint enablement.
+Still need disarmed transition/continuity test, heading/frame commissioning and
+supervisor mission intent. Do not mark vehicle_validation_complete from parameter
+match alone. User must keep disarmed through the test. Evidence logs on Jetson.
+
+### Disarmed Surface selection test passed (2026-10-10)
+
+User requested continuation. Fresh MANUAL/disarmed state verified; ESC power was
+on. Removed unnecessary ESC-off prerequisite for this non-actuating source-only
+test, retained disarmed/no-mission checks. DVL initially invalid; bounded30s wait
+obtained ten consecutive healthy snapshots at0.5s intervals before command.
+Sent42007 target2 via diagnostic component199. ACK result0 and50 NAV_SRC=2
+samples over10s confirmed actual Surface selection. Maximum horizontal estimated
+position displacement from pre-command local pose was2.4341m. This is NOT a
+validated smooth transition or proof of physical accuracy; physical movement was
+not independently measured. Do not automatically switch back to unaligned external
+position. Evidence: logs/source-commissioning-20261010/surface-test.json on Jetson.
+Final GUI supervisor confirmed Surface GPS / Surfaced with fresh healthy EKF flags,
+valid DVL and qualified GPS. Observation remains; mission intent unavailable,
+heading reference validation and vehicle commissioning flags remain incomplete.
+No arming/thrust/mode commands sent. Automatic round-trip transitions remain untested.

@@ -11,11 +11,11 @@ body.day{--bg:#f3f6fa;--panel:#fff;--text:#132333;--dim:#425369;--grid:#ccd5df;-
 </style></head><body>
 <header><strong>GRAEY / NAVIGATION</strong><a href="/" target="_top">Control GUI</a><span id="vehicle">Waiting for Cube</span><button id="theme">Day / night</button><button id="export">Export snapshot</button><button id="resetDisplay" title="Clear both displayed trails and use the next new valid GPS fix as the display origin. Applies to all open navigation pages; vehicle navigation is unchanged.">Reset origin &amp; track</button></header>
 <div id="resetStatus" role="status" class="note" style="padding:4px 18px">Display reset affects all open navigation pages. Vehicle navigation is unchanged.</div>
-<nav style="padding:8px 18px"><a href="/navigation-supervisor">Navigation supervisor</a> · <span id="diveReference">No dive-start reference</span></nav>
+<nav style="padding:8px 18px"><a href="/navigation-supervisor">Navigation supervisor</a> · <a href="/waypoint">Waypoint mission</a> · <span id="diveReference">No dive-start reference</span></nav>
 <div id="health" role="status">Waiting for telemetry…</div>
 <div id="mapnote" role="status">Grid works offline. Streets loads OpenStreetMap tiles over the browser's internet connection and shares the viewed map area with that provider. Background imagery is not a navigation chart.</div>
 <main><div id="map"><canvas id="plot" aria-label="Local geographic grid showing global position and raw GPS"></canvas>
-<iframe id="poolmap" title="Pool map using navigation telemetry" src="/pool-map" hidden style="position:absolute;inset:0;width:100%;height:100%;border:0"></iframe>
+<iframe id="poolmap" title="Pool waypoint mission" src="/pool-map" hidden style="position:absolute;top:90px;bottom:0;width:100%;height:calc(100% - 90px);border:0"></iframe>
 <div id="streetmap" hidden aria-label="Online OpenStreetMap streets"></div>
 <div id="controls"><button id="poolView">Pool</button><button id="gridView" class="active" aria-pressed="true">Grid</button><button id="streetsView" aria-pressed="false">Streets (online)</button><button id="follow" class="active">Follow</button><button id="center">Recenter</button><button id="bow">Bow-up</button><button id="in">+</button><button id="out">−</button><label><input id="gpsLayer" type="checkbox" checked>GPS</label><label><input id="trailLayer" type="checkbox" checked>Trails</label></div>
 <div id="legend">Blue: Cube global · Gold: raw GPS<br>Waiting for a geographic reference</div></div>
@@ -24,7 +24,7 @@ body.day{--bg:#f3f6fa;--panel:#fff;--text:#132333;--dim:#425369;--grid:#ccd5df;-
 <section><h2>Cube global position</h2><div id="global" class="value">—</div><div class="note">Reported global position does not prove GPS fusion or estimator validity.</div></section>
 <section><h2>Display coordinates / reference</h2><div id="coords" class="value">—</div><div id="origin" class="note">Origin not established.</div><div class="note">N/E/D in meters; display Down uses local MSL-height approximation. Never use this display reference for vehicle commands.</div></section>
 <section><h2>Navigation supervisor</h2><div id="navSummary" class="value">—</div></section><section><h2>Sensor health</h2><div id="sensors" class="value">—</div></section></aside></main>
-<footer>Offline grid · No vehicle commands · Fixed reference for this GUI process · Unavailable telemetry is shown as —</footer>
+<footer>Grid and Streets display telemetry. The Pool / Waypoint page includes mission controls. Unavailable telemetry is shown as —.</footer>
 <script>
 'use strict';
 const $=id=>document.getElementById(id), canvas=$('plot'), ctx=canvas.getContext('2d');

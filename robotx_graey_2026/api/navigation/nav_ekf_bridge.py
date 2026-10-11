@@ -20,7 +20,7 @@ import json
 import time
 import uuid
 
-from rclpy.node import Node
+from robotx_graey_2026.api.steady_node import SteadyNode as Node
 from rcl_interfaces.msg import ParameterDescriptor
 from std_msgs.msg import String
 from sensor_msgs.msg import Imu

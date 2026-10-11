@@ -26,6 +26,8 @@ class Observation:
     reference_saved: bool = False
     configuration_verified: bool = False
     continuity_ok: bool = True
+    heading_allowed: bool = False
+    heading_reason: str = 'Pre-dive heading check unavailable'
 
 
 class Supervisor:
@@ -60,6 +62,7 @@ class Supervisor:
         self.evidence_for = None
         self.switch_ack = ''
         self.switch_source_seen = False
+        self.dive_heading_approved = False
 
     def step(self, now, o):
         actions = []
@@ -74,6 +77,9 @@ class Supervisor:
         if o.run_id != self.run_id:
             self.run_id = o.run_id
             self.dive_since = None
+            self.dive_heading_approved = False
+        if o.intent == 'SURFACE':
+            self.dive_heading_approved = False
         if o.intent == 'DIVE' and self.dive_since is None:
             self.dive_since = now
         if o.intent != 'DIVE':
@@ -161,6 +167,17 @@ class Supervisor:
         self.desired = 1 if diving else 2 if qualified or (o.source == 2 and grace) else 1
         if diving:
             self.state = 'Preparing dive' if o.intent == 'DIVE' else 'Underwater'
+            # Once this dive has a saved reference and confirmed underwater
+            # aiding, the pre-dive check is complete. During depth hysteresis
+            # descent/ascent may still report surfaced while GPS/heading course
+            # is no longer applicable; do not revoke the completed gate then.
+            prepared = (self.dive_heading_approved and o.source == 1
+                        and o.reference_ready and o.reference_saved)
+            if self.surface and not prepared:
+                if not o.heading_allowed:
+                    self.state, self.reason = 'Checking dive heading', o.heading_reason
+                    return actions
+                self.dive_heading_approved = True
             if o.intent == 'DIVE' and not o.reference_ready:
                 self.reason = 'Waiting for a new qualified GPS fix and saved dive reference'
                 if (self.surface and qualified and o.source == 2 and
@@ -209,10 +226,12 @@ class Supervisor:
         self.reason = 'Navigation inputs healthy'
         if self.state == 'Surface GPS degraded':
             self.reason = 'GPS unavailable; bounded DVL continuation'
-        permitted = (diving and o.reference_ready and o.reference_saved) or (
+        permitted = (diving and self.dive_heading_approved and o.reference_ready and o.reference_saved) or (
             not diving and o.source == 2 and (qualified or grace))
         if not permitted:
             self.reason = 'Waiting for dive reference' if diving else 'Waiting for reliable GPS'
+            if diving and not self.dive_heading_approved:
+                self.reason = 'Pre-dive heading check was not completed'
         self.allowed = bool(self.active and o.configuration_verified and permitted)
         return actions
 

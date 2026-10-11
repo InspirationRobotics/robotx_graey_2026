@@ -515,3 +515,121 @@ October 10 repository GUI fix: existing HTTP navigation start/stop rejection sup
 October 10 authorized Wi-Fi deployment: Jetson fast-forwarded to navigation executable revision87e8788, colcon built and core restarted while freshly disarmed/ESCoff/no mission. GUI/core duplicates removed; deployed HTTP navigation start/stop now409, exactly one VN/DVL/bridge/supervisor verified. Local sonar GUI changes reapplied and unrelated untracked sonar files preserved, so whole checkout is not clean/identical. Runtime VN offset0/fliptrue and bridge offset0 verified after cleanup. Fixed cached-frame parameter writes by making settings startup-only; separate descriptors corrected a metadata alias found live. Final97 Jetson tests passed. Supervisor now Observation/Waiting for healthy navigation due Depth reference unavailable, sourceUnknown/config unverified; restart is not validated frame recovery. No Cube parameters or arming changes. Details: docs/deployment-2026-10-10.md in repo.
 
 October 10 final sync reconciliation: concurrent sonar merge preserved via7160cab; Jetson fast-forwarded with empty tracked diff, matching installed navigation code and GUI; unrelated untracked backups/data remain. Sonar commit2c007c8 reports physically measured inverted VN pitch and downstream VN_PITCH_BACKWARDS compensation. That test was not repeated here; coordinate any upstream pitch fix with downstream compensation removal. This is distinct from yaw offset.
+
+## Pre-dive heading consistency gate — October 10, 2026
+
+The user approved a GPS-course/VN-100/Cube heading consistency gate before
+switching from a surfaced state to the underwater source profile. This is a
+supervisor check, not a GPS yaw correction: GPS course-over-ground is compared
+with the two heading estimates only during valid, sustained, straight forward
+DVL motion. Stationary, reverse, strafe, vertical, turning, stale or poorly
+qualified motion skips the course comparison and may rely on attitude only if
+the heading north references and forward axes have been commissioned. Sustained
+disagreement blocks dive preparation until sustained agreement returns. The
+default heading-reference validation remains false; offsets and thresholds are
+read-only startup parameters. No Cube yaw, EKF, arm, kill, or ESC command is
+changed by this feature.
+
+Correction during October 10 waypoint work: the prior assertion that VNYBA gyro
+fields are degrees/second was wrong. Manufacturer UM005 section 9.2.9 specifies
+radians/second, consistent with the existing ROS driver. The supervisor now
+converts radians to degrees for its turn threshold, with a regression test. No
+driver/bridge units or vehicle parameters were changed. The DVL check assumes
+its configured body-forward axis is +x, as used by the existing bridge and
+simulator; verify that during commissioning.
+
+This feature is local source work only. No vehicle access, parameter write,
+deployment, or in-water check was performed. The pre-dive gate and source
+transition require software tests and isolated simulation; physical heading
+north calibration and surface-to-underwater behavior remain unverified.
+
+## Click-to-waypoint implementation — October 10, 2026
+
+User authorized implementing/verifying a map-click mission: mark surface start,
+dive to 0.5 m, travel underwater, surface at the clicked waypoint, and display
+Cube location/heading throughout. Implemented locally on tether_toggle_beichen:
+main GUI Waypoint mission tab /waypoint, shared /pool-map page, reviewed single-use
+plans, owned waypoint_mission controller, explicit live commissioning gate.
+GUI starts one mission process; supervisor owns EKF source selection/reference;
+bridge remains core-owned; Cube estimates and controls. No EKF origin reset.
+Cube global/ATTITUDE telemetry supplies the marker on surface and underwater;
+raw GPS stays separate. Pressure-to-local-down offset is frozen before descent.
+Underwater aiding is retained through ascent; surface GPS recovery follows disarm.
+
+SITL exposed and corrected the pre-dive heading gate expiring during depth
+hysteresis. It now remains approved for a prepared current dive with confirmed
+Underwater source and saved reference, and resets on new run/SURFACE intent.
+SITL timing investigation measured WSL wall-clock rollback (-2.260 s) without a
+monotonic scheduling gap. Bridge/supervisor/GUI/waypoint/SITL timers now use a
+steady clock; synthetic sensor timestamps use steady ordering. ROS wall clock
+and physical VN/DVL timestamp conventions are unchanged. Live clock-sync/restart
+behavior remains to be checked; no sensor freshness limits were relaxed.
+
+Validation: 130 tests passed with ROS loaded/no skips. Three complete isolated
+waypoint missions passed after the clock fix, including GPS absence underwater,
+Cube heading/location display, surface arrival/disarm/GPS recovery. Two operator
+abort runs and missing-ACK/missing-source-report injections passed. Earlier
+failed runs are retained and explained in docs/waypoint-mission-2026-10-10.md.
+No QGC forwarding, vehicle access, deployment, physical arming, live parameter
+writes, or main changes occurred. This is simulation validation, not wet readiness.
+
+Mapping remains approximate (existing screenshot reference/scale/north-up).
+Live pool-image mission starts are blocked pending a measured survey and boundary
+validation; the software does not yet ingest a survey. Proposed solution:
+multiple measured pool control points plus independent hold-out check, then
+independent vehicle position/heading and underwater endpoint measurements.
+IMU/DVL cannot identify a constant absolute GPS/map bias. Live waypoint execution
+defaults disabled; GRAEY_WAYPOINT_ENABLED is only a commissioning opt-in, not a
+replacement for source/depth/heading/control checks. No collision avoidance or
+validated pool geofence has been added.
+
+### Verified waypoint deployment (2026-10-10)
+
+On explicit deployment request, fresh disarmed/ESC-off/no-mission state was
+verified before restarting core. Jetson-only sonar commits through 3364bd6 were
+preserved by merge b86add1 with navigation update 6ef0647; combined branch pushed
+and Windows checkout synchronized. Colcon build and all 130 isolated mocked
+regressions passed on Jetson. /waypoint HTTP 200 and live Cube position/heading
+API verified, with one instance each of bridge/supervisor/VN/DVL/GUI. MAVProxy and
+sonar launcher stayed active. No vehicle mission, arming or Cube parameter writes.
+Live waypoint execution remains disabled; screenshot registration approximate.
+Supervisor observed Depth reference unavailable, Observation, source Unknown,
+configuration unverified. Restart reset control selection to RF/STARTUP inhibit;
+vehicle remained disarmed with ESC off and SA kill active. Bridge frame continuity
+must be revalidated after restart. See docs/deployment-2026-10-10.md for evidence;
+these are dated observations, not permanent live status.
+
+2026-10-10 follow-up: user-confirmed water-surface calibration set the current
+observation supervisor session baseline to997.4154663085938hPa (57 samples).
+Verified Surfaced, depthabout0.0015m. Only observation supervisor reloaded;
+bridge/control processes unchanged. No source switching performed. Baseline is
+session-only and must be re-established after core restart at confirmed surface.
+See deployment-2026-10-10.md for remaining commissioning blockers and evidence.
+
+2026-10-10 commissioning follow-up: Cube surface source profile now matches code
+(SRC2 POSXY3 VELXY6 YAW6, SRC_OPTIONS0); SCR_ENABLE1 and telemetry-only Lua source
+reporter installed/readback verified. All persisted after disarmed Cube reboot;
+75 NAV_SRC reports/15s confirmed Underwater selected. No transition test completed:
+guarded test aborted before command when vehicle was armed again. Supervisor stays
+Observation, commissioning validation incomplete. Detailed evidence/failures in
+docs/deployment-2026-10-10.md. Calibration restored after core restarted on reboot.
+
+2026-10-10 later: disarmed Surface-source command test succeeded (ACK0,50 actual
+NAV_SRC=2 reports/10s); GUI confirmed Surface GPS. Estimated local position moved
+up to2.4341m relative to pre-command value; continuity/accuracy not commissioned.
+Supervisor remains Observation; no automatic round-trip test or mission enabled.
+
+2026-10-10: operator-requested VN yaw_offset_deg180 deployed and readback verified;
+flip_180true unchanged. Core restarted disarmed; prior depth baseline restored.
+Bridge frame reset, mission continuity unverified. VN/Cube still differedabout20deg
+on final sample; do not equate applied offset with commissioned heading accuracy.
+
+2026-10-10 subsequent check: restarted VN/DVL drivers while disarmed (bridge and
+Cube kept running).45 fresh paired samples: VN/Cubeabout196.3deg; median wrapped
+absolute error0.0251deg. Retained yaw180. Previous20deg disagreement cleared;
+no independent physical heading validation and no causal claim restart vs settling.
+
+2026-10-10 latest: user requested net VN yaw offset90deg CCW; deployed/readback
+verified. Surface pressure baseline restored. After reload VN~15.6deg, Cube~358deg;
+20 paired samples median error15.87deg. Heading still uncommissioned. Details in
+waypoint-mission-2026-10-10.md.

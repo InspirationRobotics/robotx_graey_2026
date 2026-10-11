@@ -100,6 +100,7 @@ cd "$ROOT"
 colcon build --symlink-install --packages-select robotx_graey_2026
 source install/setup.bash
 ros2 launch robotx_graey_2026 sitl.launch.py \
+  interactive_waypoint:="${WAYPOINT_INTERACTIVE:-false}" \
   supervisor_mavlink:="${SUPERVISOR_MAVLINK:-udpout:127.0.0.1:14557}" \
   result_file:="$LOG_DIR/scenario-result.json" \
   home_lat:="${HOME_LAT:-32.9240586}" home_lon:="${HOME_LON:--117.0385389}" \
