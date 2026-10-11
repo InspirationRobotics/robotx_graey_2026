@@ -263,6 +263,7 @@ def main():
             "range": cur["range"], "sector": list(cur["sector"]),
             "threshold": cmap.threshold, "floorCut": cmap.floor_cut_m, "looks": cmap.combine,
             "fade": cmap.fade,
+            "band": list(cmap.band) if cmap.band else None,
             "turning": cmap.turning and run["state"] == "running",
             "skippedTurning": cmap.skipped_turning,
             "slice": reach(*sector_arc(*cur["sector"]), cur["range"]),
@@ -275,6 +276,7 @@ def main():
             last["snap"] = t
         if force or t - last["radar"] >= RADAR_S:
             radar.update(sweep)
+            webview.set_radar_geom(args.size, radar.max_range_m)
             per = perceive(sweep, target=None, tuning={"threshold": S.DETECT["threshold"]},
                            floor=None, require_floor=False)
             webview.publish(render(per, None, radar=radar, size=args.size,
@@ -291,6 +293,7 @@ def main():
         cmap.floor_cut_m = webview.floor_cut()
         cmap.combine = webview.looks()
         cmap.fade = webview.fade()
+        cmap.band = webview.band()
         take(partial)
         show(partial)
 
@@ -311,6 +314,7 @@ def main():
             vn_pitch_unflipped=S.VN_PITCH_BACKWARDS,    # pose_roll_pitch already turned round
             combine_looks=cmap.combine,
             fade=cmap.fade,
+            band_m=np.array(cmap.band if cmap.band else (np.nan, np.nan), float),
             floor_cut_m=cmap.floor_cut_m,
             range_m=cur["range"], sector=np.array(cur["sector"]),
             threshold=cmap.threshold, state=run["state"], map_epoch=cur["epoch"],
@@ -335,6 +339,7 @@ def main():
         cmap.floor_cut_m = webview.floor_cut()
         cmap.combine = webview.looks()
         cmap.fade = webview.fade()
+        cmap.band = webview.band()
         cmap.new_sweep()
         run["sweeps"] += 1
         start, end = sector_arc(*cur["sector"])
