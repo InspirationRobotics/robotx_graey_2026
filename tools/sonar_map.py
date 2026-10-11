@@ -118,7 +118,7 @@ def main():
     p.add_argument("--step", type=float, default=2.0, help="degrees between pings")
     p.add_argument("--threshold", type=int, default=THRESHOLD, help="crumb threshold, 1-255")
     p.add_argument("--floor-cut", type=float, default=FLOOR_CUT_M,
-                   help="m: no crumbs from echoes this close above the floor (DVL altitude); 0 = off")
+                   help="m: no crumbs from echoes this close above the floor (DVL altitude); 0 = off, the default. Missions set it themselves")
     p.add_argument("--max-turn", type=float, default=MAX_TURN_DPS,
                    help="deg/s; pings while turning faster than this are ignored")
     p.add_argument("--down-gradian", type=int, default=S.DOWN_GRADIAN)

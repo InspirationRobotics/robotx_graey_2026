@@ -71,8 +71,9 @@ def main():
                    help="times real time; 0 = as fast as possible")
     p.add_argument("--threshold", type=int, default=None, help="default: what the run used")
     p.add_argument("--max-turn", type=float, default=MAX_TURN_DPS)
-    p.add_argument("--floor-cut", type=float, default=None,
-                   help="m above the floor (DVL altitude) with no crumbs; default: what the run used")
+    p.add_argument("--floor-cut", type=float, default=0.0,
+                   help="m above the floor (DVL altitude) with no crumbs; default 0 = off, as the Map "
+                        "page has no floor cut since Oct 10 (a mission run's own value is in its sweeps)")
     p.add_argument("--epoch", type=int, default=None,
                    help="which Start/Reset of the run to replay (default: the last)")
     args = p.parse_args()
@@ -96,8 +97,7 @@ def main():
     webview.set_range_editable(False)
     webview.set_sector(*first["sector"], editable=False)
     webview.set_threshold(args.threshold if args.threshold is not None else int(first["threshold"]))
-    webview.set_floor_cut(args.floor_cut if args.floor_cut is not None
-                          else float(first.get("floor_cut_m", 0.0)))
+    webview.set_floor_cut(args.floor_cut)
     webview.set_fade(bool(first.get("fade", True)))           # not saved before Oct 10 pm
     saved = first.get("band_m")                                # nor this
     webview.set_band(tuple(saved) if saved is not None and np.isfinite(saved).all() else None)
