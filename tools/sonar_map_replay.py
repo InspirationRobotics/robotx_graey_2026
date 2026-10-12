@@ -31,7 +31,7 @@ import numpy as np
 from robotx_graey_2026.api.sonar import settings as S
 from robotx_graey_2026.api.sonar import webview
 from robotx_graey_2026.api.sonar.outlines import Outliner
-from robotx_graey_2026.api.sonar.crumbs import MAX_TURN_DPS, CrumbMap
+from robotx_graey_2026.api.sonar.crumbs import LITTLE_DOTS_NOTE, MAX_TURN_DPS, CrumbMap
 from robotx_graey_2026.api.sonar.pose import Pose, wrap180
 from robotx_graey_2026.api.sonar.detect import perceive
 from robotx_graey_2026.api.sonar.sweep import Sweep
@@ -101,6 +101,7 @@ def main():
     webview.set_fade(bool(first.get("fade", True)))           # not saved before Oct 10 pm
     saved = first.get("band_m")                                # nor this
     webview.set_band(tuple(saved) if saved is not None and np.isfinite(saved).all() else None)
+    webview.set_compact(bool(first.get("compact", False)))            # not saved before Oct 11
     print(f"[INFO] replay: http://localhost:{args.port}/map")
 
     play = {"state": "running", "done": False}
@@ -118,7 +119,7 @@ def main():
                 return True
         return (webview.threshold() != cmap.threshold or webview.floor_cut() != cmap.floor_cut_m
                 or webview.fade() != cmap.fade
-                or webview.band() != cmap.band)
+                or webview.band() != cmap.band or webview.compact() != cmap.compact)
 
     outliner = Outliner()
     radar, last_radar = Radar(), [-1e9]
@@ -134,7 +135,8 @@ def main():
         per = perceive(sw, target=None, tuning={"threshold": S.DETECT["threshold"]},
                        floor=None, require_floor=False)
         webview.publish(render(per, None, radar=radar, size=SIZE,
-                               state=f"REPLAY  range={float(s['range_m']):g}m"))
+                               state=f"REPLAY  range={float(s['range_m']):g}m",
+                               note=LITTLE_DOTS_NOTE if webview.compact() else ""))
         webview.set_radar_geom(SIZE, radar.max_range_m)
         last_radar[0] = time.monotonic()
 
@@ -153,7 +155,7 @@ def main():
             "outlines": outliner.update(c, time.monotonic(), force=play["done"]),
             "sector": [float(v) for v in s["sector"]], "threshold": cmap.threshold,
             "floorCut": cmap.floor_cut_m, "fade": cmap.fade,
-            "band": list(cmap.band) if cmap.band else None,
+            "band": list(cmap.band) if cmap.band else None, "compact": cmap.compact,
             "turning": cmap.turning, "skippedTurning": cmap.skipped_turning,
             "slice": reach(*sector_arc(*s["sector"]), float(s["range_m"]))})
 
@@ -162,7 +164,7 @@ def main():
         play["state"] = "running"
         cmap = CrumbMap(threshold=webview.threshold(), max_turn_dps=args.max_turn,
                         floor_cut_m=webview.floor_cut(), fade=webview.fade(),
-                        band=webview.band(),
+                        band=webview.band(), compact=webview.compact(),
                         sonar_fwd_m=float(first["sonar_fwd_m"]),
                         sonar_right_m=float(first["sonar_right_m"]))
         track, recent, here = [], [], None
@@ -214,6 +216,7 @@ def main():
         if restart:
             continue
         play["done"] = True
+        cmap.end_sweep()                    # little dots only: the last sweep's crumbs
         snapshot(cmap, track, here, n, s)
         show_radar(s, force=True)
         print(f"[INFO] end of run: {len(cmap)} crumbs. Resume or Reset on the page plays it again.")

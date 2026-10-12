@@ -87,6 +87,52 @@ FLOOR_CUT_M = 0.0       # echoes less than this above the floor make no crumbs; 
 
 _FIELDS = ("x", "y", "up", "brightness", "range_m", "sweep", "seen", "faded_by")
 
+# LITTLE DOTS ONLY (Ruth, Oct 11). In the pool a wall is the brightest thing, and
+# it is tall: in one sweep (the scan plane is up-down) it is heard at the same
+# distance to the side from the floor to the surface, plus its reflections. The
+# pipe is a small dot, smeared over neighbouring angles at the same range. On
+# the Oct 11 run (sector 140-200) the echoes 2-2.5 m out (the wall) spanned
+# 2.3 m of height (median) and those 1-1.5 m out (the pipe) 1.0 m; calling
+# anything over TALL_M a wall dropped 90% of the wall's dots and kept 72% of
+# the pipe's. Needs a sector of ~60 deg or more so a wall can show its height.
+TALL_M = 1.5            # height an echo column must span to count as a wall
+TALL_BIN_M = 0.1        # columns: this wide in distance to the side, +-1 neighbour
+TALL_REL = 0.6          # ... counting echoes at least this share of the column's strongest
+TALL_MIN_RANGE_M = S.MIN_RANGE_M + 0.1      # the blind zone's ringing edge is not a wall
+LITTLE_DOTS_NOTE = "little dots only: long echoes are left off the map"
+
+
+def smooth(image):
+    """The 5-bin smoothing every crumb decision uses, for a whole sweep (pings x bins)."""
+    k = np.ones(SMOOTH_BINS) / SMOOTH_BINS
+    return np.array([np.convolve(np.asarray(r, float), k, "same") for r in image])
+
+
+def tall_mask(sm, angles_deg, metres_per_bin, threshold):
+    """Which samples of a smoothed sweep are part of a tall, wall-like column.
+
+    In the scan plane each sample sits at (distance to the side, height). Group
+    samples into TALL_BIN_M columns by distance to the side; a column is tall
+    when its echoes (at least threshold and TALL_REL of its strongest) span more
+    than TALL_M of height. Returns a bool array the shape of sm: the tall columns' echoes."""
+    sm = np.asarray(sm, float)
+    a = np.radians(np.asarray(angles_deg, float))[:, None]
+    r = (np.arange(sm.shape[1]) + 0.5) * metres_per_bin
+    side = -np.cos(a) * r                     # + left, - right, so walls either side stay apart
+    up = np.sin(a) * r
+    strong = (sm >= threshold) & (r[None, :] >= TALL_MIN_RANGE_M)
+    out = np.zeros(sm.shape, bool)
+    if not strong.any():
+        return out
+    col = np.round(side / TALL_BIN_M).astype(int)
+    for c in np.unique(col[strong]):
+        near = strong & (np.abs(col - c) <= 1)
+        top = sm[near].max()
+        lit = near & (sm >= TALL_REL * top)
+        if up[lit].max() - up[lit].min() > TALL_M:
+            out |= strong & (col == c)
+    return out
+
 
 def body_to_map(pose):
     """3x3 matrix turning a vector in the sub's frame (forward, right, down)
@@ -101,7 +147,8 @@ def body_to_map(pose):
 class CrumbMap:
     def __init__(self, threshold=THRESHOLD, max_per_ping=MAX_PER_PING,
                  sonar_fwd_m=S.SONAR_FWD_M, sonar_right_m=S.SONAR_RIGHT_M,
-                 max_turn_dps=MAX_TURN_DPS, floor_cut_m=FLOOR_CUT_M, fade=True, band=None):
+                 max_turn_dps=MAX_TURN_DPS, floor_cut_m=FLOOR_CUT_M, fade=True, band=None,
+                 compact=False):
         self.threshold = threshold
         self.floor_cut_m = floor_cut_m
         self.max_per_ping = max_per_ping
@@ -110,6 +157,7 @@ class CrumbMap:
         self.sonar_right_m = sonar_right_m
         self.fade = fade            # False: crumbs stay until Reset (a faint pipe builds up)
         self.band = band            # (lo, hi) m from the sonar's height, or None = every height
+        self.compact = compact      # True: little dots only - wall-like tall echoes make no crumbs
         self.clear()
 
     def clear(self):
@@ -117,10 +165,29 @@ class CrumbMap:
         self.sweep_id = 0
         self.turning = False        # was the last ping ignored for turning?
         self.skipped_turning = 0
+        self._pending = []          # little dots only: this sweep's pings, judged when it ends
 
     def new_sweep(self):
         """Call at the start of every sweep, including one cut short."""
+        self.end_sweep()
         self.sweep_id += 1
+
+    def end_sweep(self):
+        """Little dots only: a ping can't tell a wall from a dot by itself, so its
+        echoes wait until the sweep is over; then the tall ones are dropped and
+        the rest become crumbs. Called by new_sweep; call it after the last sweep
+        too (a replay's end). Returns the number of crumbs added."""
+        pend, self._pending = self._pending, []
+        if not pend:
+            return 0
+        n = len(pend[0][1])
+        pend = [p for p in pend if len(p[1]) == n and p[2] == pend[0][2]]   # one sweep's geometry
+        tall = tall_mask([p[1] for p in pend], [p[0] for p in pend], pend[0][2], self.threshold)
+        added = 0
+        for k, (a_deg, raw, mpb, pose, sm, peaks) in enumerate(pend):
+            keep = [b for b in peaks if not tall[k, b]][:self.max_per_ping]
+            added += self._place(a_deg, keep, sm, mpb, pose)
+        return added
 
     def add_ping(self, angle_deg, row, metres_per_bin, pose, step_deg, max_range_m,
                  turn_dps=None):
@@ -135,6 +202,10 @@ class CrumbMap:
             return 0
         if self.fade:
             self._fade(angle_deg, pose, step_deg, max_range_m)
+        if self.compact:
+            raw, sm, peaks = self._peaks(angle_deg, row, metres_per_bin, pose)
+            self._pending.append((angle_deg, raw, metres_per_bin, pose, sm, peaks))
+            return 0
         return self._add(angle_deg, row, metres_per_bin, pose)
 
     def add_sweep(self, sweep, pose_at, max_range_m, turn_rate=None):
@@ -206,7 +277,14 @@ class CrumbMap:
                 c[f] = c[f][keep]
 
     def _add(self, a_deg, row, metres_per_bin, pose):
-        sm = np.convolve(np.asarray(row, float), np.ones(SMOOTH_BINS) / SMOOTH_BINS, "same")
+        _, sm, peaks = self._peaks(a_deg, row, metres_per_bin, pose)
+        return self._place(a_deg, peaks[:self.max_per_ping], sm, metres_per_bin, pose)
+
+    def _peaks(self, a_deg, row, metres_per_bin, pose):
+        """The ping smoothed (raw, for the wall test), then with the blind zone,
+        floor cut and band applied (sm), and its echoes' bins, strongest first."""
+        raw = np.convolve(np.asarray(row, float), np.ones(SMOOTH_BINS) / SMOOTH_BINS, "same")
+        sm = raw.copy()
         sm[:int(math.ceil(S.MIN_RANGE_M / metres_per_bin))] = 0
         a = math.radians(a_deg)
         sx, sy, sup, m = self.sonar_at(pose)
@@ -225,14 +303,20 @@ class CrumbMap:
             sm[(h < self.band[0]) | (h > self.band[1])] = 0
         above = sm >= self.threshold
         if not above.any():
-            return 0
+            return raw, sm, []
         edges = np.flatnonzero(np.diff(np.r_[0, above.astype(np.int8), 0]))
         peaks = []
         for s, e in zip(edges[0::2], edges[1::2]):
             top = np.flatnonzero(sm[s:e] == sm[s:e].max())
             peaks.append(s + int(top[len(top) // 2]))     # middle of a flat top, not its near edge
-        peaks = sorted(peaks, key=lambda b: -sm[b])[:self.max_per_ping]
+        return raw, sm, sorted(peaks, key=lambda b: -sm[b])
 
+    def _place(self, a_deg, peaks, sm, metres_per_bin, pose):
+        """Crumbs at these bins of one ping."""
+        if not len(peaks):
+            return 0
+        a = math.radians(a_deg)
+        sx, sy, sup, m = self.sonar_at(pose)
         r = np.array(peaks) * metres_per_bin
         # the echo in the sub's frame: in the scan plane, so forward = 0
         n, e, d = m @ np.vstack([np.zeros_like(r), r * math.cos(a), -r * math.sin(a)])

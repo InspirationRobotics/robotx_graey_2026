@@ -66,6 +66,7 @@ _floor_cut = 0.0                     # m above the floor with no crumbs; 0 = off
                                      # it now (pipeline_mission's harbor scans); not on the Map page
 _fade = True                         # newer sweeps wipe crumbs they don't see again
 _band = None                         # (lo, hi) m from the sonar's height that make crumbs; None = all
+_compact = False                     # little dots only: wall-like tall echoes make no crumbs
 _radar_geom = None                   # {size, range} of the radar picture, for the band's lines
 _rows = []                          # one summary per detection, for the buttons
 _per_page = 10
@@ -251,6 +252,17 @@ def set_band(band):
 def band():
     with _lock:
         return _band
+
+
+def set_compact(flag):
+    global _compact
+    with _lock:
+        _compact = bool(flag)
+
+
+def compact():
+    with _lock:
+        return _compact
 
 
 def set_radar_geom(size, max_range_m):
@@ -462,6 +474,7 @@ border-radius:4px;color:#fff;display:none}
 <label style="white-space:nowrap"><input id="ol" type="checkbox" checked style="width:auto"> outlines</label>
 <label style="white-space:nowrap"><input id="tk" type="checkbox" checked style="width:auto"> sub's track</label>
 <label style="white-space:nowrap" title="on: a crumb is wiped when 2 newer sweeps look at that spot and don't hear it again. Off: crumbs stay until Reset, so a faint pipe builds up (so does noise)"><input id="fd" type="checkbox" checked style="width:auto"> fade old crumbs</label>
+<label style="white-space:nowrap" title="only small, compact echoes (like a pipe) make crumbs: tall wall-like (long) echoes are left off the map but still shown on the Radar tab. Needs a sector of about 60 deg or more (e.g. 140 to 200) so a wall can show its height. Crumbs appear when each sweep ends"><input id="ld" type="checkbox" style="width:auto"> little dots only</label>
 <span style="white-space:nowrap" title="only echoes this high from the sonar (m, up is +) make crumbs. Drag its lines on the Radar tab"><label><input id="hbo" type="checkbox" style="width:auto"> height band</label>
 <input id="hb0" type="number" step="0.05" min="-20" max="20"> to <input id="hb1" type="number" step="0.05" min="-20" max="20"> m</span>
 <span id="msg" style="color:#8ea"></span></div>
@@ -501,6 +514,8 @@ $('mk').onclick=function(){post('/mark',$('rn').value).then(function(x){$('msg')
 $('ar').addEventListener('input',draw);$('fo').addEventListener('change',draw);$('ol').addEventListener('change',draw);$('tk').addEventListener('change',draw);
 $('fd').addEventListener('change',function(){post('/fade',$('fd').checked?'on':'off')
 .then(function(x){$('msg').textContent='fade: '+x;});});
+$('ld').addEventListener('change',function(){post('/compact',$('ld').checked?'on':'off')
+.then(function(x){$('msg').textContent='little dots only: '+x;});});
 function sendBand(){post('/band',$('hbo').checked?($('hb0').value+' '+$('hb1').value):'off')
 .then(function(x){$('msg').textContent='height band: '+x;});}
 $('hbo').addEventListener('change',function(){if($('hbo').checked&&($('hb0').value===''||$('hb1').value==='')){
@@ -591,6 +606,7 @@ if(d.sector){fill('s0',Math.round(d.sector[0]));fill('s1',Math.round(d.sector[1]
 fill('th',d.threshold);
 if(document.activeElement!==$('fd')&&d.fade!=null)$('fd').checked=!!d.fade;
 if(document.activeElement!==$('hbo'))$('hbo').checked=!!d.band;
+if(document.activeElement!==$('ld')&&d.compact!=null)$('ld').checked=!!d.compact;
 if(d.band){if(document.activeElement!==$('hb0'))$('hb0').value=d.band[0];
 if(document.activeElement!==$('hb1'))$('hb1').value=d.band[1];}
 $('go').textContent={waiting:'Start',running:'Pause',paused:'Resume'}[d.state]||'Start';
@@ -647,7 +663,7 @@ class _Handler(BaseHTTPRequestHandler):
         """
         global _target, _range, _sector, _threshold
         if self.path in ('/sector', '/threshold', '/floorcut', '/mapcmd', '/record', '/mark',
-                         '/missionpoint', '/fade', '/band'):
+                         '/missionpoint', '/fade', '/band', '/compact'):
             self._map_post()
             return
         if self.path == '/view':
@@ -704,7 +720,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(b'ok', 'text/plain')
 
     def _map_post(self):
-        global _sector, _threshold, _floor_cut, _mission_point, _fade, _band
+        global _sector, _threshold, _floor_cut, _mission_point, _fade, _band, _compact
         with _lock:
             on = _map_on
         if not on:
@@ -728,12 +744,15 @@ class _Handler(BaseHTTPRequestHandler):
                 _band = band
             self._send(b'ok', 'text/plain')
             return
-        if self.path == '/fade':
+        if self.path in ('/fade', '/compact'):
             if text not in ('on', 'off'):
                 self._send(b'say on or off', 'text/plain')
                 return
             with _lock:
-                _fade = text == 'on'
+                if self.path == '/fade':
+                    _fade = text == 'on'
+                else:
+                    _compact = text == 'on'
             self._send(b'ok', 'text/plain')
             return
         if self.path == '/missionpoint':

@@ -164,7 +164,7 @@ class Radar:
 
 
 def render(perception, memory=None, state="", radar=None, size=SIZE,
-           panel_w=PANEL_W, target="", page=0, selected=()):
+           panel_w=PANEL_W, target="", page=0, selected=(), note=""):
     """Radar beside the numbers.
 
     Pass a Radar to keep the picture between calls. Without one, the radar shows
@@ -183,7 +183,7 @@ def render(perception, memory=None, state="", radar=None, size=SIZE,
     selected = set(selected or ())
     return np.hstack([_radar(perception, size, radar, selected),
                       _panel(perception, memory, state, panel_w, size, target,
-                             page, selected)])
+                             page, selected, note)])
 
 
 def confidence_colour(score):
@@ -398,7 +398,7 @@ def _dashed_circle(img, centre, radius, colour, dashes=40):
 
 
 def _panel(p, memory, state, width, height, target="", page=0,
-           selected=()):
+           selected=(), note=""):
     panel = np.full((height, width, 3), BG, np.uint8)
     L = 22
     y = 48
@@ -422,6 +422,9 @@ def _panel(p, memory, state, width, height, target="", page=0,
         f"floor: {p.floor.depth_m:.2f} m below   agreement {p.floor.confidence:.0%}")
     _text(panel, floor_txt, (L, y), 0.6, INK if p.floor else DIM)
     y += 40
+    if note:                        # e.g. what the map is leaving out
+        _text(panel, note, (L, y - 6), 0.6, (90, 200, 255))
+        y += 34
 
     # The one worth explaining: the best match, or whatever came closest if
     # nothing cleared the bar. The table shrinks to make room for the reasons,
