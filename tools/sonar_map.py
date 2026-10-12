@@ -39,7 +39,7 @@ from robotx_graey_2026.api.sonar import settings as S
 from robotx_graey_2026.api.sonar import webview
 from robotx_graey_2026.api.sonar.outlines import Outliner
 from robotx_graey_2026.api.sonar.recorder import Recorder
-from robotx_graey_2026.api.sonar.crumbs import FLOOR_CUT_M, MAX_TURN_DPS, THRESHOLD, CrumbMap
+from robotx_graey_2026.api.sonar.crumbs import FLOOR_CUT_M, LITTLE_DOTS_NOTE, MAX_TURN_DPS, THRESHOLD, CrumbMap
 from robotx_graey_2026.api.sonar.detect import perceive
 from robotx_graey_2026.api.sonar.pose import RELAY_PORT, UdpPose
 from robotx_graey_2026.api.sonar.sweep import Sonar
@@ -264,6 +264,7 @@ def main():
             "threshold": cmap.threshold, "floorCut": cmap.floor_cut_m,
             "fade": cmap.fade,
             "band": list(cmap.band) if cmap.band else None,
+            "compact": cmap.compact,
             "turning": cmap.turning and run["state"] == "running",
             "skippedTurning": cmap.skipped_turning,
             "slice": reach(*sector_arc(*cur["sector"]), cur["range"]),
@@ -280,7 +281,8 @@ def main():
             per = perceive(sweep, target=None, tuning={"threshold": S.DETECT["threshold"]},
                            floor=None, require_floor=False)
             webview.publish(render(per, None, radar=radar, size=args.size,
-                                   state=f"MAP {run['state'].upper()}  range={cur['range']:g}m"))
+                                   state=f"MAP {run['state'].upper()}  range={cur['range']:g}m",
+                                   note=LITTLE_DOTS_NOTE if cmap.compact else ""))
             last["radar"] = t
 
     def live(partial):
@@ -293,6 +295,7 @@ def main():
         cmap.floor_cut_m = webview.floor_cut()
         cmap.fade = webview.fade()
         cmap.band = webview.band()
+        cmap.compact = webview.compact()
         take(partial)
         show(partial)
 
@@ -313,6 +316,7 @@ def main():
             vn_pitch_unflipped=S.VN_PITCH_BACKWARDS,    # pose_roll_pitch already turned round
             fade=cmap.fade,
             band_m=np.array(cmap.band if cmap.band else (np.nan, np.nan), float),
+            compact=cmap.compact,
             floor_cut_m=cmap.floor_cut_m,
             range_m=cur["range"], sector=np.array(cur["sector"]),
             threshold=cmap.threshold, state=run["state"], map_epoch=cur["epoch"],
@@ -337,6 +341,7 @@ def main():
         cmap.floor_cut_m = webview.floor_cut()
         cmap.fade = webview.fade()
         cmap.band = webview.band()
+        cmap.compact = webview.compact()
         cmap.new_sweep()
         run["sweeps"] += 1
         start, end = sector_arc(*cur["sector"])
