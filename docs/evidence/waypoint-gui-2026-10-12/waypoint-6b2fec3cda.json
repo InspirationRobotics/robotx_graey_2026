@@ -1,0 +1,143 @@
+{
+  "passed": true,
+  "continuous": true,
+  "stages": [
+    "STARTING",
+    "WAIT_SURFACE",
+    "PREPARE",
+    "GUIDED",
+    "ARM",
+    "DIVE",
+    "TRANSIT",
+    "SURFACE",
+    "DISARM",
+    "RECOVER_GPS",
+    "COMPLETE"
+  ],
+  "gps_outage_seen": true,
+  "underwater_cube_seen": true,
+  "last_retry": "<urlopen error [Errno 111] Connection refused>",
+  "duplicate_idempotent": true,
+  "mission": {
+    "run_id": "29af5584f53747e8a5ed7314c6f39565",
+    "stage": "COMPLETE",
+    "reason": "Surfaced at waypoint and disarmed; GPS recovered",
+    "plan": {
+      "lat": 32.92362597472926,
+      "lon": -117.03851279807449,
+      "depth_m": 0.5,
+      "map": "geographic"
+    },
+    "surface_start": [
+      32.9236125,
+      -117.0385235
+    ],
+    "start_cube": [
+      -0.004520039074122906,
+      0.0048993914388120174,
+      -0.11382555961608887
+    ],
+    "target_cube": [
+      1.5000000003379315,
+      1.0000000003399643,
+      0.38617444038391113
+    ],
+    "surface_down": -0.11382555961608887,
+    "heading_rad": 0.0004775456618517638,
+    "complete": true,
+    "simulation": true,
+    "published_monotonic": 1242.29510229,
+    "telemetry_fresh": true,
+    "confirmed_source": "Continuous fusion"
+  },
+  "supervisor": {
+    "state": "GPS aiding admitted",
+    "reason": "GPS admitted",
+    "mode": "Active",
+    "requested_source": "Continuous fusion",
+    "confirmed_source": "Continuous fusion",
+    "navigation_ready": true,
+    "surfaced": true,
+    "surface_state": "Surfaced",
+    "run_id": "29af5584f53747e8a5ed7314c6f39565",
+    "fusion_policy": "continuous",
+    "reference": {
+      "schema": 1,
+      "reference_id": "cf27e5e2-4de1-4cf4-b385-454c32a31566",
+      "run_id": "29af5584f53747e8a5ed7314c6f39565",
+      "vehicle_epoch": "7e0f9320-4627-4045-895b-44663306ba40",
+      "gps_lat": 32.9236125,
+      "gps_lon": -117.0385235,
+      "gps_msl_alt": -0.16,
+      "gps_accuracy_m": 0.3,
+      "gps_time_us": 25020000,
+      "cube_ned": [
+        -0.004554186947643757,
+        0.00493433466181159,
+        -0.1128685474395752
+      ],
+      "captured_utc": "2026-10-12T14:52:31.201666+00:00"
+    },
+    "mission_ned": [
+      1.4206097470596433,
+      0.9218966723419726,
+      0.06068255752325058
+    ],
+    "reference_current": true,
+    "depth_m": 0.04999999701976776,
+    "gps_qualified_input": true,
+    "gps_quality_reason": "GPS admitted; Cube-fix timing approximation",
+    "configuration_verified": true,
+    "target_gps": {
+      "lat": 32.92362597472926,
+      "lon": -117.03851279807449,
+      "depth_m": 0.5,
+      "map": "geographic"
+    },
+    "source_transaction": null,
+    "gps_admission": {
+      "qualified": true,
+      "reason": "GPS admitted; Cube-fix timing approximation",
+      "cube_fix_age_upper_s": 0.17190607218092724,
+      "timing_basis": "Cube last-fix time; not receiver epoch",
+      "receiver_delay_bound_s": null,
+      "fault": "",
+      "fix": {
+        "cube_fix_time_us": 45820000,
+        "received": 1242.064495133,
+        "lat": 32.9236254,
+        "lon": -117.0385135,
+        "alt": -0.21,
+        "fix": 6,
+        "accuracy": 0.3,
+        "speed_mps": 0.04,
+        "course_deg": 204.43,
+        "speed_accuracy_mps": 0.04
+      },
+      "applied_recently": true
+    },
+    "dive_heading_check": {
+      "state": "Skipped",
+      "allowed": true,
+      "reason": "GPS course unreliable at this speed; using validated attitude",
+      "course_deg": null,
+      "vn_error_deg": null,
+      "cube_error_deg": null,
+      "correction_applied": false
+    },
+    "published_monotonic": 1242.255803981
+  },
+  "final_local": [
+    1.4160555601119995,
+    0.9268310070037842,
+    -0.052185989916324615
+  ],
+  "final_target_error_m": 0.11135695142502344,
+  "independent_clock_gaps": [],
+  "wall_clock_adjustments": [
+    {
+      "at": 1219.485349944,
+      "wall_step": -2.4849138869808485
+    }
+  ]
+}

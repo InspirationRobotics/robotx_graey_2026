@@ -1,0 +1,9 @@
+{
+  "passed": false,
+  "stages": [],
+  "gps_outage_seen": false,
+  "underwater_cube_seen": false,
+  "error": "RuntimeError('SITL exited')",
+  "independent_clock_gaps": [],
+  "wall_clock_adjustments": []
+}

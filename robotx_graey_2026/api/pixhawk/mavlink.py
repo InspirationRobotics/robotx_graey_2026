@@ -111,8 +111,11 @@ class Link:
         self.send('heartbeat_send', GCS_TYPE, GCS_AUTOPILOT, 0, 0, 0)
 
     def drain(self, handler):
-        """Consume every queued message. handler(msg_type, msg) per message."""
-        while True:
+        """Bound receive work so continuous telemetry cannot starve ROS timers."""
+        deadline = time.monotonic()+.02
+        for _ in range(256):
+            if time.monotonic() >= deadline:
+                return
             try:
                 m = self.mav.recv_match(blocking=False)
             except OSError as e:                    # ECONNREFUSED arrives on recv too

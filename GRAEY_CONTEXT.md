@@ -692,3 +692,25 @@ depthabout-0.005m; VN heading86.8deg not physically validated. Output disabled,
 mission observation-only, controller RF/MANUAL/disarmed/SA active/ESC off. Runtime
 override temporary until reboot. Cube fusion/moving waypoint validation remains;
 this is preparation, not waypoint readiness. No full Pixhawk reset or arming.
+
+## October 12 teammate context and waypoint audit
+User supplied Ruth's sonar reports dated Oct4, Oct10 and Oct11. Originals copied
+under docs/teammate-context; Oct11 explicitly supersedes misleading Oct10 pipe-band
+and ESC-noise conclusions. These are attributed teammate observations; recordings
+and camera attachments were not provided or independently inspected. Sonar map
+uses its own VN/DVL dead-reckoned Start frame, not Cube global navigation. Latest
+reported2b30056 sonar history was preserved in Oct11 deployment, not published as
+part of nav work. See docs/session-after-source-switching-2026-10-08.md for the
+consolidated history and correction provenance. Current live status not inferred.
+
+2026-10-12 local GUI audit:159 regressions pass; continuous production ROS bridge,
+supervisor, native ArduSub and GUI API now complete nominal dive/transit/surface
+missions with underwater GPS outage/recovery; operator Abort confirms MANUAL.
+Final deterministic fixture endpoint errorabout0.111m, not physical accuracy.
+Fixed TIMESYNC reply polling50ms vs50ms RTT gate (now10ms receive,20Hz output),
+bounded MAVLink drain, preserved callback error exits, monotonic independent-truth
+SITL fixtures. GUI map/status/zoom/track improved and browser inspected. No live
+deployment or mission enablement. Approximate pool-image live targets remain
+blocked; commissioned geographic route tested. See docs/waypoint-gui-audit-2026-10-12.md
+and committed failed/successful validation JSONs. Prior stationary-only limits
+are superseded for local runtime reachability, not live commissioning.

@@ -45,6 +45,19 @@ finally:
         s.close()
 PY
 cp "$ROOT/sitl/scripts/navigation_source_report.lua" "$RUN_DIR/scripts/"
+PARAM_FILE="$ROOT/params/sitl_graey.parm"
+CLOCK_ARGS=(--synthetic-clock)
+if [[ "${CONTINUOUS_FUSION:-false}" == true ]]; then
+  CLOCK_ARGS=()
+  PARAM_FILE="$RUN_DIR/continuous.parm"
+  python3 - "$PARAM_FILE" <<'PY'
+import sys
+from robotx_graey_2026.api.navigation.odometry_profile import PROFILE
+p=dict(PROFILE, SYSID_THISMAV=1, EK2_ENABLE=0, SCR_ENABLE=0, SIM_GPS_DISABLE=0, LOG_DISARMED=1,
+       SIM_BARO_RND=0, SIM_BARO_DRIFT=0)
+open(sys.argv[1],'w').write('\n'.join(f'{k} {v}' for k,v in p.items()))
+PY
+fi
 # Preserve prior evidence, but never mistake yesterday's result for this run.
 if [[ -f "$LOG_DIR/scenario-result.json" ]]; then
   mv "$LOG_DIR/scenario-result.json" "$LOG_DIR/scenario-result.previous.$(date +%s%N).json"
@@ -63,8 +76,8 @@ trap cleanup EXIT INT TERM
 
 (
   cd "$RUN_DIR"
-  "$SITL_BIN" -w --synthetic-clock --model vectored --sysid 1 --home "${HOME_LAT:-32.9240586},${HOME_LON:--117.0385389},0,0" \
-    --defaults "$ROOT/params/sitl_graey.parm" --serial0 tcp:5850
+  "$SITL_BIN" -w "${CLOCK_ARGS[@]}" --model vectored --sysid 1 --home "${HOME_LAT:-32.9236125},${HOME_LON:--117.0385235},0,0" \
+    --defaults "$PARAM_FILE" --serial0 tcp:5850
 ) >"$LOG_DIR/ardusub.log" 2>&1 &
 echo $! > "$RUN_DIR/sitl.pid"
 
@@ -101,9 +114,11 @@ colcon build --symlink-install --packages-select robotx_graey_2026
 source install/setup.bash
 ros2 launch robotx_graey_2026 sitl.launch.py \
   interactive_waypoint:="${WAYPOINT_INTERACTIVE:-false}" \
+  continuous_fusion:="${CONTINUOUS_FUSION:-false}" \
+  surface_pressure_hpa:="${SURFACE_PRESSURE_HPA:-1013.25}" \
   supervisor_mavlink:="${SUPERVISOR_MAVLINK:-udpout:127.0.0.1:14557}" \
   result_file:="$LOG_DIR/scenario-result.json" \
-  home_lat:="${HOME_LAT:-32.9240586}" home_lon:="${HOME_LON:--117.0385389}" \
+  home_lat:="${HOME_LAT:-32.9236125}" home_lon:="${HOME_LON:--117.0385235}" \
   waypoint_north_m:="${WAYPOINT_NORTH_M:-1.5}" waypoint_east_m:="${WAYPOINT_EAST_M:-1.0}" \
   >"$LOG_DIR/ros.log" 2>&1 &
 echo $! > "$RUN_DIR/ros.pid"

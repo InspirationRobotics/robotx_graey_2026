@@ -1,0 +1,26 @@
+{
+  "passed": false,
+  "stages": [],
+  "gps_outage_seen": false,
+  "underwater_cube_seen": false,
+  "last_retry": "<urlopen error [Errno 111] Connection refused>",
+  "independent_clock_gaps": [],
+  "wall_clock_adjustments": [
+    {
+      "at": 160.973121043,
+      "wall_step": -2.487631757171755
+    },
+    {
+      "at": 193.246729782,
+      "wall_step": -2.479000865677108
+    },
+    {
+      "at": 225.501292528,
+      "wall_step": -2.4818251546001022
+    },
+    {
+      "at": 257.771490985,
+      "wall_step": -2.479676237178751
+    }
+  ]
+}

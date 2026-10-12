@@ -7,7 +7,8 @@ import json
 import math
 import time
 import uuid
-from std_msgs.msg import String
+import os
+from std_msgs.msg import String, Float32
 from sensor_msgs.msg import Imu
 from rcl_interfaces.msg import ParameterDescriptor
 from robotx_graey_2026.api.steady_node import SteadyNode
@@ -22,10 +23,13 @@ class FusedNavBridge(SteadyNode):
         super().__init__('nav_ekf_bridge')
         defaults = dict(enabled=False, mavlink='udpout:127.0.0.1:14551',
                         surface_pressure_hpa=0., water_density=1000.,
+                        sitl_depth_topic='',
                         heading_reference_validated=False)
         for name, value in defaults.items():
             self.declare_parameter(name, value, ParameterDescriptor(read_only=True))
         self.settings = {k: self.get_parameter(k).value for k in defaults}
+        if self.settings['sitl_depth_topic'] and os.environ.get('GRAEY_RUNTIME_SCOPE') != 'sitl':
+            raise ValueError('Synthetic depth is restricted to isolated SITL')
         self.est = BridgeEstimator(self.settings['heading_reference_validated'])
         self.link = Link(self.settings['mavlink'], 197, self.get_logger())
         self.instance = str(uuid.uuid4())
@@ -36,7 +40,12 @@ class FusedNavBridge(SteadyNode):
         self.pub = self.create_publisher(String, '/graey/navigation/bridge_status', 10)
         self.create_subscription(Imu, '/graey/vn100/imu', self.imu, 20)
         self.create_subscription(String, '/graey/dvl/sample', self.dvl, 20)
-        self.create_timer(.05, self.tick)
+        if self.settings['sitl_depth_topic']:
+            self.create_subscription(Float32, self.settings['sitl_depth_topic'],
+                lambda m: self.est.pressure_depth(time.monotonic(), m.data), 20)
+        # Service TIMESYNC faster than its 50 ms RTT acceptance bound. Keep
+        # ODOMETRY/status at 20 Hz separately below.
+        self.create_timer(.01, self.tick)
         self.create_timer(1., self.request)
 
     def advancing(self, key, stamp):
@@ -47,7 +56,8 @@ class FusedNavBridge(SteadyNode):
 
     def imu(self, m):
         stamp = m.header.stamp.sec*10**9+m.header.stamp.nanosec
-        if not 0 <= self.get_clock().now().nanoseconds-stamp < 500000000:
+        clock = self.steady_clock if self.settings.get('sitl_depth_topic') else self.get_clock()
+        if not 0 <= clock.now().nanoseconds-stamp < 500000000:
             self.est.imu_at = None
             return
         if self.advancing('imu', stamp):
@@ -57,7 +67,8 @@ class FusedNavBridge(SteadyNode):
     def dvl(self, m):
         try:
             d = json.loads(m.data)
-            if not 0 <= self.get_clock().now().nanoseconds-d['stamp_ns'] < 500000000:
+            clock = self.steady_clock if self.settings.get('sitl_depth_topic') else self.get_clock()
+            if not 0 <= clock.now().nanoseconds-d['stamp_ns'] < 500000000:
                 self.est.dvl(time.monotonic(), (), False)
                 return
             if not self.advancing('dvl', d['stamp_ns']):
@@ -94,6 +105,8 @@ class FusedNavBridge(SteadyNode):
         elif kind == 'GPS_GLOBAL_ORIGIN':
             self.est.set_origin((m.latitude/1e7, m.longitude/1e7, m.altitude/1000))
         elif kind == 'SCALED_PRESSURE2':
+            if self.settings.get('sitl_depth_topic'):
+                return
             if self.boot_ms is not None and m.time_boot_ms+1000 < self.boot_ms:
                 self.est.fault = 'Cube restarted; revalidate navigation frame'
                 self.params.clear()
@@ -125,11 +138,13 @@ class FusedNavBridge(SteadyNode):
         now = time.monotonic()
         status = self.est.status(now)
         configured = self.configured(now)
-        if self.settings['enabled'] and configured and status['healthy']:
+        if self.settings['enabled'] and configured and status['healthy'] and (self.last_sent is None or now-self.last_sent >= .05):
             self.link.odometry(self.est.position, self.est.orientation(), self.est.velocity(),
                                self.est.rates, covariance=self.est.covariance(), quality=80)
             self.last_sent = now
         status.update(instance=self.instance, fusion_policy='bridge_odometry',
+                      clock_mapping=dict(offset=self.est.gps.clock.offset,
+                          uncertainty=self.est.gps.clock.uncertainty, updated=self.est.gps.clock.updated),
                       pressure_sample=getattr(self, 'pressure_sample', None),
                       profile_mismatches={k: dict(expected=v, actual=self.params.get(k, (None, None))[1])
                           for k, v in PROFILE.items() if k not in self.params or self.params[k][1] != v},
@@ -142,7 +157,9 @@ class FusedNavBridge(SteadyNode):
                                       rate=math.degrees(self.est.rates[2])),
                       heading_dvl=dict(received=self.est.motion_at, velocity=self.est.velocity(),
                                        valid=self.est.motion_valid))
-        self.pub.publish(String(data=json.dumps(status, allow_nan=False)))
+        if now-getattr(self, 'last_published', -math.inf) >= .05:
+            self.pub.publish(String(data=json.dumps(status, allow_nan=False)))
+            self.last_published = now
 
 
 def main():

@@ -72,3 +72,14 @@ class TransportTests(unittest.TestCase):
         for slot in (1, 2, 3):
             for axis in ('POSXY', 'VELXY', 'POSZ', 'YAW'):
                 self.assertEqual(PROFILE[f'EK3_SRC{slot}_{axis}'], 6)
+
+    def test_fast_receive_polling_does_not_flood_odometry(self):
+        self.b.params = {k: (10., v) for k, v in PROFILE.items()}
+        self.b.est.status = lambda now: dict(healthy=True)
+        self.b.tick()
+        self.clock.now = 10.01
+        self.b.tick()
+        self.assertEqual(self.b.link.odometry.call_count, 1)
+        self.clock.now = 10.06
+        self.b.tick()
+        self.assertEqual(self.b.link.odometry.call_count, 2)

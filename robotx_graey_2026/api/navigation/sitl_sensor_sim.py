@@ -30,6 +30,8 @@ class SitlSensorSim(Node):
     def __init__(self):
         super().__init__('sitl_sensor_sim')
         self.declare_parameter('mavlink', 'udpout:127.0.0.1:14558')
+        self.declare_parameter('truth_only', False)
+        self.truth_only = self.get_parameter('truth_only').value
         self.link = Link(self.get_parameter('mavlink').value, 201, self.get_logger())
         self.imu_pub = self.create_publisher(Imu, '/graey/vn100/imu', 20)
         self.dvl_pub = self.create_publisher(String, '/graey/dvl/sample', 20)
@@ -38,6 +40,7 @@ class SitlSensorSim(Node):
         self.depth_pub = self.create_publisher(Float32, '/graey/sitl/depth_m', 10)
         self.latest = {}
         self.truth_previous = None
+        self.truth_surface_alt = None
         self.truth_velocity = (0.0, 0.0, 0.0)
         self.last_ground_depth = None
         self.last_publish = 0.0
@@ -47,7 +50,7 @@ class SitlSensorSim(Node):
     def tick(self):
         now = time.monotonic()
         if now-self.last_request > 2:
-            for msg_id in (32, 33, 164):
+            for msg_id in (32, 33, 164, 108):
                 self.link.command(511, msg_id, 50000)
             self.last_request = now
         self.link.drain(self.consume)
@@ -60,7 +63,7 @@ class SitlSensorSim(Node):
         self.last_publish = now
         q = attitude['q']
         world_velocity = self.truth_velocity
-        if local:
+        if local and not self.truth_only:
             depth_velocity = local['velocity'][2]
             world_velocity = (world_velocity[0], world_velocity[1], depth_velocity)
         body_velocity = qrotate((q[0], -q[1], -q[2], -q[3]), world_velocity)
@@ -85,13 +88,22 @@ class SitlSensorSim(Node):
         self.vel_pub.publish(twist)
         # Local NED Z is the SITL water-depth proxy; production still uses the
         # Cube's configured calibrated pressure message.
-        if local:
+        if local and not self.truth_only:
             self.depth_pub.publish(Float32(data=local['position'][2]))
 
     def consume(self, kind, msg):
         if msg.get_srcSystem() != 1 or msg.get_srcComponent() != 1:
             return
-        if kind == 'SIMSTATE':
+        if kind == 'SIM_STATE' and self.truth_only:
+            q = (msg.q1, msg.q2, msg.q3, msg.q4)
+            self.latest['attitude'] = dict(q=q, rates=(msg.xgyro, msg.ygyro, msg.zgyro), received=time.monotonic())
+            self.truth_velocity = (msg.vn, msg.ve, msg.vd)
+            # Owned simulation starts disarmed at the surface. Its absolute
+            # altitude datum is not water depth; emulate surface calibration.
+            if self.truth_surface_alt is None:
+                self.truth_surface_alt = msg.alt
+            self.depth_pub.publish(Float32(data=max(0., self.truth_surface_alt-msg.alt)))
+        elif kind == 'SIMSTATE' and not self.truth_only:
             q = self.euler_to_quat(msg.roll, msg.pitch, msg.yaw)
             if all(math.isfinite(x) for x in q):
                 self.latest['attitude'] = dict(q=q, rates=(0.0, 0.0, 0.0), received=time.monotonic())
