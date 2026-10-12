@@ -471,7 +471,6 @@ border-radius:4px;color:#fff;display:none}
 <button id="set">set</button>
 <span>map area <input id="ar" type="number" step="1" min="1" max="200" value="10"> m</span>
 <label style="white-space:nowrap"><input id="fo" type="checkbox" checked style="width:auto"> follow sub</label>
-<label style="white-space:nowrap"><input id="ol" type="checkbox" checked style="width:auto"> outlines</label>
 <label style="white-space:nowrap"><input id="tk" type="checkbox" checked style="width:auto"> sub's track</label>
 <label style="white-space:nowrap" title="on: a crumb is wiped when 2 newer sweeps look at that spot and don't hear it again. Off: crumbs stay until Reset, so a faint pipe builds up (so does noise)"><input id="fd" type="checkbox" checked style="width:auto"> fade old crumbs</label>
 <label style="white-space:nowrap" title="only small, compact echoes (like a pipe) make crumbs: tall wall-like (long) echoes are left off the map but still shown on the Radar tab. Needs a sector of about 60 deg or more (e.g. 140 to 200) so a wall can show its height. Crumbs appear when each sweep ends"><input id="ld" type="checkbox" style="width:auto"> little dots only</label>
@@ -491,6 +490,9 @@ background:linear-gradient(90deg,hsl(210,95%,58%),hsl(105,95%,58%),hsl(0,95%,58%
 <script>
 var $=function(i){return document.getElementById(i);};
 var cv=$('cv'),ctx=cv.getContext('2d'),D=null,dirty={};
+var msgT=null;
+function say(t){var m=$('msg');m.textContent=t;m.style.transition='none';m.style.opacity=1;clearTimeout(msgT);
+msgT=setTimeout(function(){m.style.transition='opacity 2s';m.style.opacity=0;},10000);}
 function post(path,body){return fetch(path,{method:'POST',body:body})
 .then(function(r){return r.text();});}
 ['rg','s0','s1','th'].forEach(function(i){
@@ -502,22 +504,24 @@ if(dirty.s0||dirty.s1)jobs.push(post('/sector',$('s0').value+' '+$('s1').value)
 .then(function(x){return 'sector: '+x;}));
 if(dirty.th)jobs.push(post('/threshold',$('th').value).then(function(x){return 'threshold: '+x;}));
 dirty={};
-if(!jobs.length){$('msg').textContent='nothing changed';return;}
-Promise.all(jobs).then(function(m){$('msg').textContent=m.join('   ');});}
+if(!jobs.length){say('nothing changed');return;}
+Promise.all(jobs).then(function(m){say(m.join('   '));});}
 $('set').onclick=apply;
 $('go').onclick=function(){var c={waiting:'start',running:'pause',paused:'resume'}[D&&D.state];
 if(c)post('/mapcmd',c);};
 $('rs').onclick=function(){post('/mapcmd','reset');};
 $('rec').onclick=function(){post('/record',D&&D.recording?'stop':'start '+$('rn').value)
-.then(function(x){$('msg').textContent='record: '+x;});};
-$('mk').onclick=function(){post('/mark',$('rn').value).then(function(x){$('msg').textContent='mark: '+x;});};
-$('ar').addEventListener('input',draw);$('fo').addEventListener('change',draw);$('ol').addEventListener('change',draw);$('tk').addEventListener('change',draw);
+.then(function(x){say('record: '+x);});};
+$('mk').onclick=function(){var n=$('rn').value,t=new Date().toTimeString().slice(0,8);
+if(!(D&&D.recording)){say('mark NOT saved ('+t+'): not recording');return;}
+post('/mark',n).then(function(x){say(x==='ok'?'mark saved at '+t+(n?': '+n:''):'mark: '+x);});};
+$('ar').addEventListener('input',draw);$('fo').addEventListener('change',draw);$('tk').addEventListener('change',draw);
 $('fd').addEventListener('change',function(){post('/fade',$('fd').checked?'on':'off')
-.then(function(x){$('msg').textContent='fade: '+x;});});
+.then(function(x){say('fade: '+x);});});
 $('ld').addEventListener('change',function(){post('/compact',$('ld').checked?'on':'off')
-.then(function(x){$('msg').textContent='little dots only: '+x;});});
+.then(function(x){say('little dots only: '+x);});});
 function sendBand(){post('/band',$('hbo').checked?($('hb0').value+' '+$('hb1').value):'off')
-.then(function(x){$('msg').textContent='height band: '+x;});}
+.then(function(x){say('height band: '+x);});}
 $('hbo').addEventListener('change',function(){if($('hbo').checked&&($('hb0').value===''||$('hb1').value==='')){
 $('hb0').value=-0.3;$('hb1').value=0.2;}sendBand();});
 ['hb0','hb1'].forEach(function(i){$(i).addEventListener('change',function(){if($('hbo').checked)sendBand();});});
@@ -581,14 +585,6 @@ D.truth.boxes.forEach(function(b){ctx.strokeRect(X(b[0])-5,Y(b[1])-5,10,10);});
 if(D.truth.walls&&D.truth.walls.length){ctx.save();ctx.setLineDash([3,6]);ctx.strokeStyle='rgba(170,170,170,0.6)';
 ctx.lineWidth=1.5;ctx.beginPath();D.truth.walls.forEach(function(p,i){if(i)ctx.lineTo(X(p[0]),Y(p[1]));
 else ctx.moveTo(X(p[0]),Y(p[1]));});ctx.stroke();ctx.restore();}}
-if($('ol').checked&&D.outlines){ctx.font='12px sans-serif';
-D.outlines.forEach(function(g,i){var best=i===0&&g.score>=0.5;
-ctx.strokeStyle=best?'rgba(255,220,80,0.9)':'rgba(255,255,255,0.45)';ctx.lineWidth=1;ctx.beginPath();
-g.lines.forEach(function(l){ctx.moveTo(X(l[0]),Y(l[1]));ctx.lineTo(X(l[2]),Y(l[3]));});ctx.stroke();
-if(best){ctx.strokeStyle='rgba(255,220,80,0.5)';ctx.lineWidth=4;ctx.beginPath();
-g.spine.forEach(function(p,k){if(k)ctx.lineTo(X(p[0]),Y(p[1]));else ctx.moveTo(X(p[0]),Y(p[1]));});ctx.stroke();}
-if(g.score>=0.2){var m=g.spine[Math.floor(g.spine.length/2)];ctx.fillStyle=best?'#ffdc50':'#ddd';
-ctx.fillText('pipe '+Math.round(g.score*100)+'%',X(m[0])+8,Y(m[1])-8);}});}
 if($('tk').checked&&D.track.length>1){ctx.strokeStyle='#3cb4e6';ctx.lineWidth=2;ctx.beginPath();
 D.track.forEach(function(p,i){if(i)ctx.lineTo(X(p[0]),Y(p[1]));else ctx.moveTo(X(p[0]),Y(p[1]));});
 ctx.stroke();}
