@@ -38,10 +38,10 @@ def generate_launch_description():
         # mission happens to be loaded.
         Node(package=PKG, executable='kill_switch', name='kill_switch', output='screen', **RESPAWN),
         Node(package=PKG, executable='dvl_node', name='dvl_node', output='screen', **RESPAWN),
-        # Operator-requested 90-degree CCW net heading offset, 2026-10-10. Keep the sensor's
-        # separate roll mounting transform; do not add this again in the bridge.
+        # Operator removed the temporary yaw correction on 2026-10-11.
+        # Retain the separate physical roll mounting transform.
         Node(package=PKG, executable='vn100_node', name='vn100_node',
-             parameters=[{'yaw_offset_deg': 90.0}], output='screen', **RESPAWN),
+             parameters=[{'yaw_offset_deg': 0.0}], output='screen', **RESPAWN),
         Node(package=PKG, executable='nav_ekf_bridge', name='nav_ekf_bridge',
              condition=UnlessCondition(LaunchConfiguration('continuous_fusion')),
              output='screen', respawn=False),
