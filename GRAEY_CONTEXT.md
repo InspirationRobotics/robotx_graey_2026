@@ -669,3 +669,13 @@ origin-startup runs retained; altitude-only origin metadata is independent of
 pressure depth, horizontal origin changes still fault. No vehicle deployment.
 See docs/bridge-odometry-2026-10-11.md for conditions, evidence and outstanding
 full ROS/native integration, moving mission and commissioning.
+
+2026-10-11 deployment: authorized tether SSH at192.168.2.2. Navigation code through
+121a25a installed/built/tested on Jetson, preserving thirteen local sonar commits
+(final observed merge e04b831). New bridge running observation-only, output disabled;
+no Cube parameter writes. Confirmed-surface baseline1013.745361328125hPa gives
+Surfaced/depthabout-0.006m. DVL validity false, old Cube profile and unvalidated
+heading block waypoint readiness. Scoped temporary runtime override expires at
+reboot. Controller ended disarmed MANUAL/RF, SA active, ESC off. Online branch and
+Jetson include the same navigation changes but Jetson-only sonar history remains.
+See docs/deployment-2026-10-11.md; this is dated evidence, not future live status.
