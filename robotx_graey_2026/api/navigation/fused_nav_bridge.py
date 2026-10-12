@@ -32,6 +32,7 @@ class FusedNavBridge(SteadyNode):
         self.stamps, self.params = {}, {}
         self.last_sent = None
         self.boot_ms = None
+        self.pressure_sample = None
         self.pub = self.create_publisher(String, '/graey/navigation/bridge_status', 10)
         self.create_subscription(Imu, '/graey/vn100/imu', self.imu, 20)
         self.create_subscription(String, '/graey/dvl/sample', self.dvl, 20)
@@ -103,6 +104,7 @@ class FusedNavBridge(SteadyNode):
             if age is None or age > .35:
                 self.est.pressure_depth(now, math.nan)
                 return
+            self.pressure_sample = dict(hpa=m.press_abs, received=now, cube_boot_ms=m.time_boot_ms)
             base, rho = self.settings['surface_pressure_hpa'], self.settings['water_density']
             depth = (m.press_abs-base)*100/(rho*9.80665) if base > 0 and rho > 0 else math.nan
             self.est.pressure_depth(now, depth)
@@ -128,6 +130,9 @@ class FusedNavBridge(SteadyNode):
                                self.est.rates, covariance=self.est.covariance(), quality=80)
             self.last_sent = now
         status.update(instance=self.instance, fusion_policy='bridge_odometry',
+                      pressure_sample=getattr(self, 'pressure_sample', None),
+                      profile_mismatches={k: dict(expected=v, actual=self.params.get(k, (None, None))[1])
+                          for k, v in PROFILE.items() if k not in self.params or self.params[k][1] != v},
                       configuration_verified=configured, enabled=self.settings['enabled'],
                       transmitting=self.last_sent is not None and 0 <= now-self.last_sent < .15,
                       published_monotonic=now, reset_counter=0,
