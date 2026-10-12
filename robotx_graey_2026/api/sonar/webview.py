@@ -68,6 +68,7 @@ _fade = True                         # newer sweeps wipe crumbs they don't see a
 _band = None                         # (lo, hi) m from the sonar's height that make crumbs; None = all
 _compact = False                     # little dots only: wall-like tall echoes make no crumbs
 _radar_geom = None                   # {size, range} of the radar picture, for the band's lines
+_radar_dots = []                     # the newest sweep's crumbs [right, up, brightness], to circle
 _rows = []                          # one summary per detection, for the buttons
 _per_page = 10
 _view = {"page": 0, "selected": []}
@@ -274,6 +275,13 @@ def set_radar_geom(size, max_range_m):
         _radar_geom = {"size": int(size), "range": float(max_range_m)}
 
 
+def set_radar_dots(dots):
+    """The crumbs the Radar tab circles: CrumbMap.radar_dots()."""
+    global _radar_dots
+    with _lock:
+        _radar_dots = list(dots)
+
+
 def set_floor_cut(value):
     global _floor_cut
     with _lock:
@@ -290,7 +298,7 @@ def floor_cut():
 # stretch of a small image.
 PAGE = b"""<html><head><meta charset="utf-8"><title>Graey sonar</title></head>
 <body style="margin:0;background:#161412;height:100vh;display:flex;flex-direction:column">
-<div style="display:flex;gap:10px;align-items:center;padding:7px 12px;background:#221f1c;
+<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:7px 12px;background:#221f1c;
 font:13px/1.4 ui-monospace,Menlo,monospace;color:#ddd">
 <span id="tabs" style="display:none;white-space:nowrap"><b style="color:#fff">Radar</b>
 <a href="/map" style="color:#8bd">Map</a></span>
@@ -317,6 +325,14 @@ padding:5px 10px;font:13px ui-monospace,Menlo,monospace;cursor:pointer">set</but
 <span id="sgn" style="color:#8ea"></span></span>
 <span id="hbw" style="display:none;white-space:nowrap" title="only echoes between the two lines (height from the sonar) become map crumbs. Drag the lines on the picture"><label><input id="hbon" type="checkbox" style="vertical-align:middle"> height band</label>
 <span id="hbt" style="color:#ffb84d"></span></span>
+<span id="thw" style="display:none;white-space:nowrap" title="echoes at least this strong (0-255) can become map crumbs - the same box as on the Map tab">threshold
+<input id="th" type="number" step="5" min="1" max="255" style="width:58px;background:#0e0c0b;
+color:#eee;border:1px solid #444;border-radius:3px;padding:5px;font:13px ui-monospace,Menlo,monospace">
+<button id="thgo" style="background:#3a3632;color:#eee;border:1px solid #555;border-radius:3px;
+padding:5px 10px;font:13px ui-monospace,Menlo,monospace;cursor:pointer">set</button>
+<span id="thn" style="color:#8ea"></span></span>
+<label id="ldw" style="display:none;white-space:nowrap" title="only small, compact echoes make crumbs: tall wall-like echoes are left off the map - the same switch as on the Map tab"><input id="ld" type="checkbox" style="vertical-align:middle"> little dots only</label>
+<label id="cdw" style="display:none;white-space:nowrap" title="circle every echo of the newest sweep that became a crumb on the map"><input id="cd" type="checkbox" style="vertical-align:middle"> circle map dots</label>
 <span id="note" style="color:#8ea;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 max-width:45vw"></span></div>
 <div style="flex:1;min-height:0;position:relative">
@@ -363,16 +379,31 @@ function toggle(i){var k=sel.indexOf(i);if(k<0)sel.push(i);else sel.splice(k,1);
 push();paint();}
 var im=document.getElementById('im'),hc=document.getElementById('hb'),hx=hc.getContext('2d'),
 hbon=document.getElementById('hbon'),hbw=document.getElementById('hbw'),hbt=document.getElementById('hbt'),
-BAND=null,GEOM=null,drag=null,LAST=[-0.3,0.2];
+BAND=null,GEOM=null,drag=null,LAST=[-0.3,0.2],DOTS=[],
+thw=document.getElementById('thw'),th=document.getElementById('th'),thn=document.getElementById('thn'),
+ldw=document.getElementById('ldw'),ld=document.getElementById('ld'),
+cdw=document.getElementById('cdw'),cd=document.getElementById('cd');
+function sendTh(){fetch('/threshold',{method:'POST',body:th.value})
+.then(function(r){return r.text();}).then(function(x){thn.textContent=x==='ok'?'':x;});}
+document.getElementById('thgo').onclick=sendTh;
+th.addEventListener('keydown',function(e){if(e.key==='Enter')sendTh();});
+ld.onchange=function(){fetch('/compact',{method:'POST',body:ld.checked?'on':'off'});};
+try{cd.checked=localStorage.getItem('graeyCircleDots')!=='off';}catch(e){cd.checked=true;}
+cd.onchange=function(){try{localStorage.setItem('graeyCircleDots',cd.checked?'on':'off');}catch(e){}drawBand();};
 function fmt(b){function f(v){return(v>=0?'+':'')+v.toFixed(2);}return f(b[0])+' to '+f(b[1])+' m';}
 function geom(){if(!GEOM||!im.naturalWidth)return null;
 var W=hc.clientWidth,H=hc.clientHeight,nw=im.naturalWidth,nh=im.naturalHeight,
 s=Math.min(W/nw,H/nh),x0=(W-nw*s)/2,y0=(H-nh*s)/2,c=Math.floor(nh/2),m=Math.floor(nh*0.065);
 return{left:x0,right:x0+nh*s,top:y0,bottom:y0+nh*s,cy:y0+c*s,ppm:(c-m)/GEOM.range*s};}
+function drawDots(g){if(!cd.checked||!DOTS.length)return;var cx=(g.left+g.right)/2;
+DOTS.forEach(function(d){var x=cx+d[0]*g.ppm,y=g.cy-d[1]*g.ppm;
+if(x<g.left||x>g.right||y<g.top||y>g.bottom)return;
+hx.lineWidth=4;hx.strokeStyle='rgba(0,0,0,0.75)';hx.beginPath();hx.arc(x,y,7,0,7);hx.stroke();
+hx.lineWidth=1.8;hx.strokeStyle='#fff';hx.beginPath();hx.arc(x,y,7,0,7);hx.stroke();});}
 function drawBand(){var W=hc.clientWidth,H=hc.clientHeight;
 if(hc.width!==W||hc.height!==H){hc.width=W;hc.height=H;}
 hx.clearRect(0,0,W,H);var b=drag?drag.b:BAND,g=geom();
-hc.style.pointerEvents=(b&&g)?'auto':'none';if(!b||!g)return;
+hc.style.pointerEvents=(b&&g)?'auto':'none';if(g)drawDots(g);if(!b||!g)return;
 var yh=g.cy-b[1]*g.ppm,yl=g.cy-b[0]*g.ppm,w=g.right-g.left;
 hx.fillStyle='rgba(0,0,0,0.4)';
 hx.fillRect(g.left,g.top,w,Math.max(0,Math.min(yh,g.bottom)-g.top));
@@ -436,6 +467,10 @@ s0.disabled=s1.disabled=sgo.disabled=!s.sectorEditable;
 rg.disabled=rgo.disabled=!s.rangeEditable;
 rows=s.rows||[];per=s.perPage||10;paint();
 hbw.style.display=(s.map&&s.radar)?'inline':'none';GEOM=s.radar;
+thw.style.display=(s.map&&s.threshold!==null&&s.threshold!==undefined)?'inline':'none';
+if(s.threshold!==null&&s.threshold!==undefined&&document.activeElement!==th)th.value=s.threshold;
+ldw.style.display=s.map?'inline':'none';if(document.activeElement!==ld)ld.checked=!!s.compact;
+cdw.style.display=(s.map&&s.radar)?'inline':'none';DOTS=s.dots||[];
 if(!drag){BAND=s.band;if(s.band)LAST=s.band;if(document.activeElement!==hbon)hbon.checked=!!s.band;
 if(hbt.textContent.indexOf('need')<0&&hbt.textContent.indexOf('say')<0)hbt.textContent=s.band?fmt(s.band):'';}
 drawBand();})
@@ -845,6 +880,7 @@ class _Handler(BaseHTTPRequestHandler):
                          'sector': list(_sector) if _sector else None,
                          'sectorEditable': _sector_editable,
                          'band': list(_band) if _band else None, 'radar': _radar_geom,
+                         'threshold': _threshold, 'compact': _compact, 'dots': _radar_dots,
                          'rows': _rows, 'perPage': _per_page,
                          'page': _view["page"], 'selected': _view["selected"]}
             self._send(json.dumps(state).encode(), 'application/json')
