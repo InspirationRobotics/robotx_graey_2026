@@ -29,7 +29,7 @@ $('ready').textContent=s?(s.navigation_ready?'Ready':'Waiting / blocked'):'Unava
 $('reason').textContent=s?.reason??'No current supervisor decision. Previous permissions have expired.';
 $('gpsQuality').textContent='GPS: '+(s?.gps_quality_reason??'Qualification unavailable');
 const g=s?.gps_admission;
-$('gpsTiming').textContent=g?`${g.enabled?'Gate enabled':'Observation only'} · ${g.timing_basis} · fix age bound ${Number.isFinite(g.cube_fix_age_upper_s)?(1000*g.cube_fix_age_upper_s).toFixed(0)+' ms':'unknown'} · receiver delay unknown · forwarding is not proof of fusion`:'GPS timing unavailable / legacy source switching';
+$('gpsTiming').textContent=g?`${g.applied_recently?'Bridge GPS correction recent':'GPS correction withheld'} · ${g.timing_basis} · fix age bound ${Number.isFinite(g.cube_fix_age_upper_s)?(1000*g.cube_fix_age_upper_s).toFixed(0)+' ms':'unknown'} · receiver delay unknown · odometry transmission is not proof of Cube fusion`:'GPS timing unavailable / legacy source switching';
 $('headingCheck').textContent='Pre-dive heading: '+(s?.dive_heading_check?.state??'Unavailable')+' — '+(s?.dive_heading_check?.reason??'No current assessment');
 $('depth').textContent=Number.isFinite(s?.depth_m)?s.depth_m.toFixed(2)+' m · pressure sensor':(live?'Surface pressure calibration or pressure samples unavailable':'Waiting for supervisor connection');
 $('surfaceState').textContent=depthKnown?(s?.surface_state??(s?.surfaced===true?'Surfaced':s?.surfaced===false?'Submerged':'Unknown')):'Unknown';

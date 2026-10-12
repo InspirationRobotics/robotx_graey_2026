@@ -7,14 +7,6 @@ after a Cube reboot; backwards fix timestamps latch a fault until restart.
 from .gps_quality import GPSQuality
 
 
-def gps_input_args(m, valid=True):
-    """Preserve measured position/DOP; explicitly omit unknown velocity and UTC."""
-    flags = 184 | (2 if m.eph == 65535 else 0) | (4 if m.epv == 65535 else 0)
-    return (m.time_usec, 1, flags, 0, 0, m.fix_type if valid else 1,
-            m.lat, m.lon, m.alt/1000, m.eph/100, m.epv/100, 0., 0., 0.,
-            0., m.h_acc/1000, 0., m.satellites_visible, 0)
-
-
 class CubeClock:
     def __init__(self):
         self.pending = None
@@ -64,7 +56,11 @@ class GPSAdmission:
         self.reason = 'Waiting for qualified GPS'
         self.age_bound = None
 
-    def check(self, now, fix, imu_fresh):
+    def invalidate(self, reason):
+        self.good_since = self.last_good = self.last_accepted = None
+        self.reason = reason
+
+    def check(self, now, fix, imu_fresh, eligible=True, eligibility_reason='GPS ineligible'):
         stamp = fix['cube_fix_time_us']
         self.age_bound = self.clock.age(stamp, now)
         reason = ''
@@ -72,6 +68,8 @@ class GPSAdmission:
             self.fault = 'Cube GPS clock regressed; restart and revalidate'
         if self.fault:
             reason = self.fault
+        elif not eligible:
+            reason = eligibility_reason
         elif fix['fix'] < 3:
             reason = 'GPS has no 3D fix'
         elif self.last_fix is not None and stamp == self.last_fix:

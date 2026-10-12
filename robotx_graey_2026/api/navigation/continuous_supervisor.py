@@ -13,7 +13,9 @@ class ContinuousSupervisor(Supervisor):
             self.run_id = o.run_id
             self.dive_heading_approved = False
         depth_known = o.depth_valid and math.isfinite(o.depth)
-        if depth_known:
+        if o.surface_authoritative:
+            self.surface = o.surface_observed if depth_known else None
+        elif depth_known:
             self.shallow_since = (now if self.shallow_since is None else self.shallow_since) if o.depth <= self.enter else None
             self.deep_since = (now if self.deep_since is None else self.deep_since) if o.depth >= self.exit else None
             if self.shallow_since is not None and now-self.shallow_since >= self.dwell:

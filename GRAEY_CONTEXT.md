@@ -656,3 +656,16 @@ but GPS loss produces EKF flags39 (no horizontal position validity), including a
 confirmed-armed simulator run. Full underwater replacement is NOT complete; no
 health-check bypass, vehicle deployment, parameter changes or main changes.
 See docs/single-ekf-redesign-2026-10-11.md and its committed JSON evidence.
+
+2026-10-11 subsequent user revision: external navigation sensors now enter an
+experimental fused_nav_bridge. Pressure gates GPS; admitted GPS corrects bridge
+position and conditional forward-motion heading/speed, then one ODOMETRY stream
+feeds external-only Cube source settings. Virtual GPS prototype removed. Supervisor
+retained as mission/reference guard, using authoritative bridge sensor assessment;
+no continuous-mode source selection. Opt-in and output disabled by default.
+156 regressions, ROS build and GUI rendering pass. Isolated native stationary
+fixture passes GPS jump/outage/recovery with horizontal validity retained. Failed
+origin-startup runs retained; altitude-only origin metadata is independent of
+pressure depth, horizontal origin changes still fault. No vehicle deployment.
+See docs/bridge-odometry-2026-10-11.md for conditions, evidence and outstanding
+full ROS/native integration, moving mission and commissioning.

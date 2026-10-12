@@ -79,7 +79,7 @@ class DiveHeadingCheck:
             return skip('GPS and DVL speeds disagree')
         if max(x['received'] for x in (gps, vn, cube, dvl))-min(x['received'] for x in (gps, vn, cube, dvl)) > .25:
             return skip('Heading and motion samples are not time-aligned')
-        fix = gps.get('receiver_time_us')
+        fix = gps.get('cube_fix_time_us', gps.get('receiver_time_us'))
         if not isinstance(fix, (int, float)) or not math.isfinite(fix) or fix <= 0:
             return skip('GPS measurement timestamp unavailable')
         result.update(course_deg=course, vn_error_deg=angle_error(vyaw, course),

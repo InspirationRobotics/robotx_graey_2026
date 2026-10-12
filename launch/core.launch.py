@@ -18,7 +18,7 @@ That is how pixhawk_led_node stayed down after QGC had already recovered on
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
-from launch.conditions import IfCondition
+from launch.conditions import IfCondition, UnlessCondition
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -29,7 +29,7 @@ RESPAWN = {'respawn': True, 'respawn_delay': 2.0}
 def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('continuous_fusion', default_value='false',
-            description='Experimental GPS admission path; disabled pending commissioning'),
+            description='Pressure-gated external odometry; disabled pending commissioning'),
         Node(package=PKG, executable='led_node', name='led_node', output='screen', **RESPAWN),
         Node(package=PKG, executable='pixhawk_led_node', name='pixhawk_led_node', output='screen', **RESPAWN),
         # Belongs in the CORE stack, not the mission: SA must kill whether or not a
@@ -40,8 +40,10 @@ def generate_launch_description():
         # separate roll mounting transform; do not add this again in the bridge.
         Node(package=PKG, executable='vn100_node', name='vn100_node',
              parameters=[{'yaw_offset_deg': 90.0}], output='screen', **RESPAWN),
-        Node(package=PKG, executable='nav_ekf_bridge', name='nav_ekf_bridge', output='screen', respawn=False),
-        Node(package=PKG, executable='gps_gate', name='gps_gate',
+        Node(package=PKG, executable='nav_ekf_bridge', name='nav_ekf_bridge',
+             condition=UnlessCondition(LaunchConfiguration('continuous_fusion')),
+             output='screen', respawn=False),
+        Node(package=PKG, executable='fused_nav_bridge', name='nav_ekf_bridge',
              condition=IfCondition(LaunchConfiguration('continuous_fusion')),
              parameters=[{'enabled': False}], output='screen', respawn=False),
         Node(package=PKG, executable='navigation_supervisor', name='navigation_supervisor',

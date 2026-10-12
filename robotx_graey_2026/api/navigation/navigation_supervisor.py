@@ -18,7 +18,7 @@ from robotx_graey_2026.api.navigation.mission_reference import MissionReference
 from robotx_graey_2026.api.navigation.gps_quality import GPSQuality
 from robotx_graey_2026.api.navigation.supervisor_logic import Observation, Supervisor
 from robotx_graey_2026.api.navigation.continuous_supervisor import ContinuousSupervisor
-from robotx_graey_2026.api.navigation.continuous_profile import PROFILE as CONTINUOUS_PROFILE
+from robotx_graey_2026.api.navigation.odometry_profile import PROFILE as CONTINUOUS_PROFILE
 from robotx_graey_2026.api.navigation.bridge_identity import BridgeIdentity
 from robotx_graey_2026.api.navigation.dive_heading import DiveHeadingCheck
 
@@ -89,36 +89,18 @@ class NavigationSupervisor(Node):
         self.pub = self.create_publisher(String, '/graey/navigation/status', 10)
         self.align_pub = self.create_publisher(String, '/graey/navigation/bridge_request', 10)
         self.create_subscription(String, '/graey/navigation/intent', self.intent, 10)
-        self.create_subscription(String, '/graey/navigation/gps_admission', self.gps_admission, 10)
         self.create_subscription(String, '/graey/navigation/bridge_status', self.bridge_status, 10)
-        self.create_subscription(Bool, '/graey/dvl/valid', lambda m: self.put('dvl_valid', m.data), 10)
-        self.create_subscription(TwistWithCovarianceStamped, '/graey/dvl/velocity', self.dvl, 20)
-        self.create_subscription(String, '/graey/dvl/sample', self.dvl_sample, 20)
-        self.create_subscription(Imu, '/graey/vn100/imu', self.vn, 20)
-        if self.settings['depth_topic']:
-            self.create_subscription(Float32, self.settings['depth_topic'], self.sim_depth, 10)
+        if not self.settings['continuous_fusion']:
+            self.create_subscription(Bool, '/graey/dvl/valid', lambda m: self.put('dvl_valid', m.data), 10)
+            self.create_subscription(TwistWithCovarianceStamped, '/graey/dvl/velocity', self.dvl, 20)
+            self.create_subscription(String, '/graey/dvl/sample', self.dvl_sample, 20)
+            self.create_subscription(Imu, '/graey/vn100/imu', self.vn, 20)
+            if self.settings['depth_topic']:
+                self.create_subscription(Float32, self.settings['depth_topic'], self.sim_depth, 10)
         self.create_timer(.1, self.tick)
         self.create_timer(1., self.link.heartbeat)
         self.create_timer(5., self.request_telemetry)
         self.request_telemetry()
-
-    def gps_admission(self, msg):
-        if not self.settings.get('continuous_fusion'):
-            return
-        try:
-            d = json.loads(msg.data)
-            now = time.monotonic()
-            if not 0 <= now-d['published_monotonic'] < .5:
-                return
-            good = (d.get('qualified') is True and d.get('enabled') is True
-                    and d.get('configuration_verified') is True and d.get('forwarded_recently') is True)
-            self.put('gps_admission', d)
-            self.put('gps_good', good)
-            self.put('gps_reason', d.get('reason', 'GPS gate unavailable'))
-            if good and isinstance(d.get('fix'), dict):
-                self.put('gps', d['fix'])
-        except (ValueError, TypeError, KeyError):
-            self.put('gps_good', False)
 
     def put(self, key, value):
         self.samples[key] = (time.monotonic(), value)
@@ -205,6 +187,26 @@ class NavigationSupervisor(Node):
                 self.logic.fault = reason
             self.bridge_instance = d.get('instance')
             self.put('bridge', d)
+            if self.settings.get('continuous_fusion'):
+                if d.get('fusion_policy') != 'bridge_odometry' or not 0 <= time.monotonic()-d.get('published_monotonic', -math.inf) < .5:
+                    self.samples.pop('bridge', None)
+                    return
+                inputs = d.get('inputs') or {}
+                self.put('vn', inputs.get('vn') is True)
+                self.put('dvl', inputs.get('dvl') is True)
+                self.put('dvl_valid', inputs.get('dvl') is True)
+                self.put('depth', d.get('depth_m'))
+                self.put('heading_vn', d.get('heading_vn'))
+                self.put('heading_dvl', d.get('heading_dvl'))
+                gps = d.get('gps_admission') or {}
+                good = bool(gps.get('qualified') and gps.get('applied_recently') and d.get('transmitting'))
+                self.put('gps_good', good)
+                self.put('gps_reason', gps.get('reason', 'Bridge GPS unavailable'))
+                self.put('gps_admission', gps)
+                if good:
+                    self.put('gps', gps.get('fix'))
+                if d.get('fault'):
+                    self.logic.fault = d['fault']
             if d.get('aligned'):
                 self.alignment_id = d.get('request_id', '')
         except (ValueError, TypeError):
@@ -230,7 +232,10 @@ class NavigationSupervisor(Node):
                     rate=math.degrees(m.yawspeed)))
         elif kind == 'GPS_GLOBAL_ORIGIN':
             origin = (m.latitude, m.longitude, m.altitude)
-            if self.cube_origin is not None and origin != self.cube_origin:
+            changed = self.cube_origin is not None and origin != self.cube_origin
+            if self.settings.get('continuous_fusion') and self.cube_origin is not None:
+                changed = origin[:2] != self.cube_origin[:2]
+            if changed:
                 self.epoch = str(uuid.uuid4())
                 self.logic.fault = 'Cube origin changed; mission reference invalidated'
             self.cube_origin = origin
@@ -279,6 +284,8 @@ class NavigationSupervisor(Node):
             self.put('gps_reason', reason)
             self.put('gps', d); self.put('gps_good', good)
         elif kind == self.settings['pressure_message']:
+            if self.settings.get('continuous_fusion'):
+                return  # Bridge is the sole pressure/depth authority.
             if not self.settings.get('depth_topic') and self.advancing('pressure', m.time_boot_ms):
                 base = self.settings['surface_pressure_hpa']
                 rho = self.settings['water_density']
@@ -330,6 +337,9 @@ class NavigationSupervisor(Node):
                   ('Cube position', pose), ('DVL velocity', self.fresh('dvl', .5)),
                   ('DVL validity', self.fresh('dvl_valid', .5)), ('VN-100', self.fresh('vn', .5))]
         checks.append(('Navigation bridge', (self.fresh('bridge', .5) or {}).get('healthy')))
+        if self.settings.get('continuous_fusion'):
+            checks.append(('Odometry output', (self.fresh('bridge', .5) or {}).get('transmitting')))
+            checks.append(('Bridge position uncertainty', (self.fresh('bridge', .5) or {}).get('navigation_valid')))
         failed = [name for name, ok in checks if not ok]
         ref_ready = bool(self.reference and self.reference.vehicle_epoch == self.epoch
                          and self.reference.run_id == intent.get('run_id'))
@@ -340,6 +350,8 @@ class NavigationSupervisor(Node):
             vn=self.fresh('heading_vn', .5), cube=self.fresh('heading_cube', .5),
             dvl=self.fresh('heading_dvl', .5))
         o = Observation(healthy=not failed, reason='Unavailable: '+', '.join(failed),
+            surface_authoritative=self.settings.get('continuous_fusion', False),
+            surface_observed=(self.fresh('bridge', .5) or {}).get('surfaced'),
             heading_allowed=heading['allowed'], heading_reason=heading['reason'],
             depth=depth if depth is not None else float('nan'),
             depth_valid=depth is not None and math.isfinite(depth),
@@ -352,7 +364,7 @@ class NavigationSupervisor(Node):
             alignment_id=self.alignment_id, reference_ready=ref_ready, reference_saved=ref_ready,
             configuration_verified=bool(self.settings['vehicle_validation_complete']
                 and (not self.settings.get('continuous_fusion') or
-                     (self.fresh('gps_admission', .5) or {}).get('configuration_verified') is True)
+                     (self.fresh('bridge', .5) or {}).get('configuration_verified') is True)
                 and all(self.params.get(k) == v for k, v in getattr(self, 'profile', PROFILE).items())))
         if self.baseline and pose and self.logic.pending:
             elapsed = now-self.baseline[0]
