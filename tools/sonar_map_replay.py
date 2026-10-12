@@ -138,6 +138,7 @@ def main():
                                state=f"REPLAY  range={float(s['range_m']):g}m",
                                note=LITTLE_DOTS_NOTE if webview.compact() else ""))
         webview.set_radar_geom(SIZE, radar.max_range_m)
+        webview.set_radar_dots(cmap.radar_dots())
         last_radar[0] = time.monotonic()
 
     def snapshot(cmap, track, here, n, s):
@@ -212,7 +213,8 @@ def main():
                     last_snap = time.monotonic()
             if restart:
                 break
-            show_radar(s)
+            cmap.end_sweep()        # little dots only: place this sweep's crumbs now, so
+            show_radar(s)           # the radar circles the sweep it is showing
         if restart:
             continue
         play["done"] = True

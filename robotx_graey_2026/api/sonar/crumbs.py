@@ -85,7 +85,7 @@ FADE_DEG = S.BEAM_FORE_AFT_DEG / 2.0    # ... anywhere in the beam, fore-aft
 MAX_TURN_DPS = 10.0     # turning faster than this, deg/s: ping ignored
 FLOOR_CUT_M = 0.0       # echoes less than this above the floor make no crumbs; 0 = off (missions set it)
 
-_FIELDS = ("x", "y", "up", "brightness", "range_m", "sweep", "seen", "faded_by")
+_FIELDS = ("x", "y", "up", "brightness", "range_m", "angle", "sweep", "seen", "faded_by")
 
 # LITTLE DOTS ONLY (Ruth, Oct 11). In the pool a wall is the brightest thing, and
 # it is tall: in one sweep (the scan plane is up-down) it is heard at the same
@@ -231,6 +231,18 @@ class CrumbMap:
                                   c["seen"], np.round(c["up"], 2)]).tolist()
         return crumbs, dict(c, raw=(c["x"], c["y"], c["up"]))
 
+    def radar_dots(self):
+        """The newest sweep's crumbs as the Radar tab draws them, so it can circle
+        what went on the map: [[right, up, brightness], ...], m from the sonar in
+        its own scan plane (angle 0 right, 90 up), not turned for roll or pitch."""
+        c = self._c
+        if not len(c["x"]):
+            return []
+        new = c["sweep"] == c["sweep"].max()
+        a, r = np.radians(c["angle"][new]), c["range_m"][new]
+        return np.column_stack([np.round(r * np.cos(a), 3), np.round(r * np.sin(a), 3),
+                                np.round(c["brightness"][new])]).tolist()
+
     def __len__(self):
         return len(self._c["x"])
 
@@ -325,6 +337,7 @@ class CrumbMap:
                "up": sup - d,
                "brightness": sm[peaks],
                "range_m": r,
+               "angle": np.full(len(r), float(a_deg)),
                "sweep": np.full(len(r), self.sweep_id),
                "seen": np.zeros(len(r)),
                "faded_by": np.zeros(len(r))}

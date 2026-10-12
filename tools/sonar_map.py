@@ -278,6 +278,7 @@ def main():
         if force or t - last["radar"] >= RADAR_S:
             radar.update(sweep)
             webview.set_radar_geom(args.size, radar.max_range_m)
+            webview.set_radar_dots(cmap.radar_dots())
             per = perceive(sweep, target=None, tuning={"threshold": S.DETECT["threshold"]},
                            floor=None, require_floor=False)
             webview.publish(render(per, None, radar=radar, size=args.size,
