@@ -17,6 +17,8 @@ from robotx_graey_2026.api.pixhawk.mavlink import Link
 from robotx_graey_2026.api.navigation.mission_reference import MissionReference
 from robotx_graey_2026.api.navigation.gps_quality import GPSQuality
 from robotx_graey_2026.api.navigation.supervisor_logic import Observation, Supervisor
+from robotx_graey_2026.api.navigation.continuous_supervisor import ContinuousSupervisor
+from robotx_graey_2026.api.navigation.continuous_profile import PROFILE as CONTINUOUS_PROFILE
 from robotx_graey_2026.api.navigation.bridge_identity import BridgeIdentity
 from robotx_graey_2026.api.navigation.dive_heading import DiveHeadingCheck
 
@@ -30,7 +32,7 @@ class NavigationSupervisor(Node):
     def __init__(self):
         super().__init__('navigation_supervisor')
         defaults = dict(mavlink='udpout:127.0.0.1:14557', active=False,
-                        vehicle_validation_complete=False, surface_pressure_hpa=0.,
+                        vehicle_validation_complete=False, continuous_fusion=False, surface_pressure_hpa=0.,
                         pressure_message='SCALED_PRESSURE2', water_density=1025.,
                         depth_topic='',
                         reference_file='~/robotx_ws/logs/navigation_reference.json',
@@ -45,13 +47,15 @@ class NavigationSupervisor(Node):
             'cube_heading_to_true_deg', 'heading_min_speed_mps',
             'heading_tolerance_deg', 'heading_dwell_s'}
         for k, v in defaults.items():
-            if k in heading_settings:
+            if k in heading_settings or k == 'continuous_fusion':
                 self.declare_parameter(k, v, ParameterDescriptor(read_only=True,
                     description='Startup-only heading check setting; restart to change.'))
             else:
                 self.declare_parameter(k, v)
         self.settings = {k: self.get_parameter(k).value for k in defaults}
-        self.logic = Supervisor(active=self.settings['active'],
+        self.profile = CONTINUOUS_PROFILE if self.settings['continuous_fusion'] else PROFILE
+        logic_type = ContinuousSupervisor if self.settings['continuous_fusion'] else Supervisor
+        self.logic = logic_type(active=self.settings['active'],
             surface_enter=self.settings['surface_enter_m'], surface_exit=self.settings['surface_exit_m'],
             depth_dwell=self.settings['depth_dwell_s'], gps_dwell=self.settings['gps_dwell_s'],
             dropout_grace=self.settings['dropout_grace_s'])
@@ -85,6 +89,7 @@ class NavigationSupervisor(Node):
         self.pub = self.create_publisher(String, '/graey/navigation/status', 10)
         self.align_pub = self.create_publisher(String, '/graey/navigation/bridge_request', 10)
         self.create_subscription(String, '/graey/navigation/intent', self.intent, 10)
+        self.create_subscription(String, '/graey/navigation/gps_admission', self.gps_admission, 10)
         self.create_subscription(String, '/graey/navigation/bridge_status', self.bridge_status, 10)
         self.create_subscription(Bool, '/graey/dvl/valid', lambda m: self.put('dvl_valid', m.data), 10)
         self.create_subscription(TwistWithCovarianceStamped, '/graey/dvl/velocity', self.dvl, 20)
@@ -96,6 +101,24 @@ class NavigationSupervisor(Node):
         self.create_timer(1., self.link.heartbeat)
         self.create_timer(5., self.request_telemetry)
         self.request_telemetry()
+
+    def gps_admission(self, msg):
+        if not self.settings.get('continuous_fusion'):
+            return
+        try:
+            d = json.loads(msg.data)
+            now = time.monotonic()
+            if not 0 <= now-d['published_monotonic'] < .5:
+                return
+            good = (d.get('qualified') is True and d.get('enabled') is True
+                    and d.get('configuration_verified') is True and d.get('forwarded_recently') is True)
+            self.put('gps_admission', d)
+            self.put('gps_good', good)
+            self.put('gps_reason', d.get('reason', 'GPS gate unavailable'))
+            if good and isinstance(d.get('fix'), dict):
+                self.put('gps', d['fix'])
+        except (ValueError, TypeError, KeyError):
+            self.put('gps_good', False)
 
     def put(self, key, value):
         self.samples[key] = (time.monotonic(), value)
@@ -192,7 +215,7 @@ class NavigationSupervisor(Node):
         # not a stream the Cube can enable with SET_MESSAGE_INTERVAL.
         for mid in (24, 30, 32, 49, 193, 137):
             self.link.command(511, mid, 200000)
-        for name in PROFILE:
+        for name in getattr(self, 'profile', PROFILE):
             self.link.send('param_request_read_send', 1, 1, name.encode(), -1)
 
     def consume(self, kind, m):
@@ -229,6 +252,8 @@ class NavigationSupervisor(Node):
                                       (m.velocity_variance, m.pos_horiz_variance, m.pos_vert_variance))
             self.put('ekf', bool(healthy))
         elif kind == 'GPS_RAW_INT':
+            if self.settings.get('continuous_fusion'):
+                return
             if m.time_usec < self.stamps.get('gps', -1):
                 self.stamps['gps'] = m.time_usec
                 self.put('gps_good', False)
@@ -326,7 +351,9 @@ class NavigationSupervisor(Node):
             ack=self.fresh('ack', 5) or '', ack_updated=self.samples.get('ack', (-math.inf,))[0],
             alignment_id=self.alignment_id, reference_ready=ref_ready, reference_saved=ref_ready,
             configuration_verified=bool(self.settings['vehicle_validation_complete']
-                and all(self.params.get(k) == v for k, v in PROFILE.items())))
+                and (not self.settings.get('continuous_fusion') or
+                     (self.fresh('gps_admission', .5) or {}).get('configuration_verified') is True)
+                and all(self.params.get(k) == v for k, v in getattr(self, 'profile', PROFILE).items())))
         if self.baseline and pose and self.logic.pending:
             elapsed = now-self.baseline[0]
             o.continuity_ok = math.dist(pose['ned'][:2], self.baseline[1][:2]) <= .5+2*elapsed
@@ -369,6 +396,7 @@ class NavigationSupervisor(Node):
         status['configuration_verified'] = o.configuration_verified
         status['target_gps'] = intent.get('target_gps')
         status['source_transaction'] = self.switch_trace
+        status['gps_admission'] = self.fresh('gps_admission', .5) if self.settings.get('continuous_fusion') else None
         status['dive_heading_check'] = heading
         status['published_monotonic'] = time.monotonic()
         self.pub.publish(String(data=json.dumps(status, allow_nan=False)))

@@ -1,8 +1,11 @@
 # Continuous EKF / Jetson GPS admission redesign — 2026-10-11
 
-Status: design checkpoint, **not implemented or deployed**. The user authorized
+Status: experimental implementation added after the user accepted approximate
+timing. **Not commissioned or deployed; underwater validity test fails.** See the
+implementation follow-up below. The original design checkpoint follows for provenance.
+The user authorized
 development on `tether_toggle_beichen`, and instructed us to stop at unresolved
-uncertainties rather than guess. Existing runtime behavior is unchanged.
+uncertainties rather than guess. Default launch retains legacy observation mode.
 
 ## What changes conceptually
 
@@ -125,3 +128,89 @@ on October 11 (5.464 seconds). This is a baseline check only; no new fusion code
 or single-configuration SITL run was completed. Remote tether branch was fetched
 and matched local HEAD before adding this document. An initial unprivileged Git
 lookup failed DNS resolution; the approved network fetch succeeded.
+
+## Follow-up: approximate timing approved and implemented
+
+The user's subsequent reply, “approximation is fine,” removes the receiver-epoch
+blocker. Added `gps_admission.py`, `gps_gate.py`, `continuous_profile.py` and
+`continuous_supervisor.py`; adapted the supervisor transport, waypoint policy and
+GUI. The candidate supervisor never requests source selection or bridge realignment.
+Legacy behavior is retained behind the default launch; `continuous_fusion:=true`
+selects the experimental observation path. Its GPS gate remains disabled. No
+vehicle parameters are automatically written and no migration is auto-enabled.
+
+Timing contract: match TIMESYNC replies to this gate's request; accept round trips
+up to 50 ms, expire synchronization after 3 s, allow fixes up to 350 ms old including
+half-RTT and a small clock-drift allowance. These are provisional admission limits,
+not measured hardware guarantees. They bound Cube-fix transport timing under the
+clock model, not M9N processing delay. GPS week remains unknown/zero; do not invent
+GPS time from the computer's wall clock. ArduPilot's configured GPS delay still
+requires measurement before deployment. Approximate timing is visible in the GUI.
+
+Admission requires 3 seconds of consecutive qualified fixes, valid fresh VN
+orientation and DVL motion, and horizontal accuracy at most 3 m. The current
+cross-check compares GPS displacement against DVL path length with a 2 m margin;
+it is orientation-independent. VN is a freshness/validity prerequisite, **not yet
+a time-aligned directional innovation test**. This is conservative admission, not
+fusion/weight tuning, and cannot identify constant geographic bias.
+
+The gate forwards original coordinates, altitude, horizontal accuracy and DOP to
+virtual GPS instance 1. It omits unknown velocity, yaw and GPS epoch. GPS_INPUT must
+preserve DOP: the first probe omitted it and never established horizontal position.
+Physical instance-0 raw telemetry is the only accepted input; virtual GPS2_RAW and
+Cube global estimates cannot loop back. Fixed primary=1, auto-switch=0 and matching
+source profiles are read back before forwarding. On rejection/expiry the node
+withdraws its last fix with NO_FIX and the original timestamp; it does not refresh
+an old valid position. If the gate dies, backend timeout is still the fallback.
+
+Fixed a demonstrated existing GPS-quality bug: the last trusted DVL/GPS anchor
+could expire during a prolonged stationary jump, allowing the bad point to
+requalify. The last anchor now persists until continuous DVL history is lost.
+
+## Native simulation outcome: admission works, underwater readiness does not
+
+Evidence: `docs/evidence/continuous-gps-2026-10-11/disarmed.json` and `armed.json`.
+Both used an owned ArduSub process, sysid 42, TCP 5864, no QGC forwarding, no real
+vehicle access. Synthetic stationary external odometry; this was not a dive or
+waypoint dynamics test. Only the second run armed the simulator, confirmed by its
+heartbeat; no force-arm command was used.
+
+- Acquisition established LOCAL_POSITION_NED and EKF flags 831 after preserving DOP.
+- Injected approximately 50 m of GPS error while DVL stayed stationary. The gate
+  rejected it and virtual GPS lost fix; the global estimate did not jump to raw GPS.
+- Restoring GPS requalified and restored flags 831.
+- During the 20-second rejection, flags became **39**, with neither horizontal
+  position-valid bit (8 or 16), even in the confirmed-armed run. Local coordinates
+  were still emitted; their presence is NOT proof of usable waypoint navigation.
+- The first disarmed result's `passed:true` refers to the earlier admission-only
+  assertion. The test was strengthened afterward. The armed result explicitly has
+  `admission_passed:true`, `underwater_position_status_passed:false`, `passed:false`.
+
+An earlier exploratory run used /tmp evidence, which was not available after WSL
+exited. It failed; its observed startup lacked horizontal position and omitted DOP.
+Subsequent runs persist evidence under the workspace. Do not claim its full logs
+were retained. The first injected glitch also used the wrong units (degrees instead
+of metres); corrected to 0.00045 degrees for the retained runs.
+
+Final software regression: 145 Python tests passed, including duplicate/stale GPS,
+clock mismatch, long stationary jump, configuration mismatch, no-feedback-loop,
+one-shot fix withdrawal and supervisor actions. The existing browser rendering
+test passed with the timing display. These do not replace firmware integration
+testing; the armed native SITL test is intentionally failing on underwater readiness.
+ROS colcon package build also passed. WSL printed a systemd-user-session startup
+warning; regression tests and the package build nevertheless completed successfully.
+SITL executable SHA-256 at completion:
+`f272e76ef10b8e9314f3efa4c8fa0ec30bcf2731280e85a73ef61edaeab7a971`.
+
+## Remaining blocker / next work
+
+Investigate EKF3 external-velocity aiding and position-validity behavior on the
+specific ArduSub firmware before enabling this fixed-source policy. Do not weaken
+the supervisor or waypoint checks to accept flags 39. A firmware-supported method
+of maintaining usable relative position without GPS must be demonstrated, or the
+architecture must change (for example, a separately designed Jetson navigation
+estimator). No fabricated GPS points and no silently restoring source switching.
+Also outstanding: actual directional VN/DVL consistency, measured receiver delay,
+ROS end-to-end simulation, moving/dive/waypoint tests, physical heading and frame
+commissioning, and controlled vehicle deployment. No claim that the full requested
+replacement is complete.

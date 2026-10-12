@@ -645,3 +645,14 @@ old fixes. Runtime replacement paused at this uncertainty per user's instruction
 existing source-switching code is unchanged. 134 baseline regressions passed.
 See docs/single-ekf-redesign-2026-10-11.md for pipeline, migration, and saved questions.
 No vehicle access or parameter changes. This is a proposal, not deployed behavior.
+
+2026-10-11 follow-up: user accepted timing approximation. Experimental GPS gate
+and continuous supervisor implemented on tether_toggle_beichen, opt-in only;
+GPS forwarding disabled by default, legacy observation default retained. Matched
+TIMESYNC estimates Cube-fix transport age; receiver delay remains unknown. Fixed
+GPS history expiry allowing prolonged stationary jumps to requalify. 145 Python
+regressions and browser test pass. Native isolated SITL admission/recovery passes,
+but GPS loss produces EKF flags39 (no horizontal position validity), including a
+confirmed-armed simulator run. Full underwater replacement is NOT complete; no
+health-check bypass, vehicle deployment, parameter changes or main changes.
+See docs/single-ekf-redesign-2026-10-11.md and its committed JSON evidence.
