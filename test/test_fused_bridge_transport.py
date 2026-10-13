@@ -54,6 +54,20 @@ class TransportTests(unittest.TestCase):
                                           velocity=[0, 0, 0], sensor_time=1))))
         self.assertFalse(self.b.est.motion_valid)
 
+    def test_nonfinite_pressure_blocks_output_without_crashing_status(self):
+        for pressure in (math.nan, math.inf):
+            self.clock.now += .1
+            stamp = round(self.clock.now*1000)
+            m = NS(time_boot_ms=stamp, press_abs=pressure,
+                   get_srcSystem=lambda: 1, get_srcComponent=lambda: 1)
+            self.b.consume('SCALED_PRESSURE2', m)
+            self.b.tick()
+            status = json.loads(self.b.pub.publish.call_args.args[0].data)
+            self.assertIsNone(status['pressure_sample']['hpa'])
+            self.assertIsNone(status['depth_m'])
+            self.assertFalse(status['healthy'])
+            self.b.link.odometry.assert_not_called()
+
     def test_profile_readback_expires_and_inhibits_output(self):
         self.b.params = {k: (10., v) for k, v in PROFILE.items()}
         self.assertTrue(self.b.configured(10.))

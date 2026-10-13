@@ -714,3 +714,14 @@ deployment or mission enablement. Approximate pool-image live targets remain
 blocked; commissioned geographic route tested. See docs/waypoint-gui-audit-2026-10-12.md
 and committed failed/successful validation JSONs. Prior stationary-only limits
 are superseded for local runtime reachability, not live commissioning.
+
+2026-10-12 second architecture review: fixed receipt-only GPS qualification expiry
+(now checks current Cube-fix age and requalifies), waypoint pilot-mode takeover
+handling in ARM/DISARM, altitude-only origin metadata false aborts, and nonfinite
+pressure crashing bridge diagnostic JSON. 165 regressions and both GUI script
+checks pass; continuous GUI/API native SITL nominal and Abort runs pass. No live
+deployment. Identified remaining mission-process-death gap: kill watchdog treats
+GUIDED as autonomous; expiring mission Bool does not itself guarantee MANUAL.
+Independent run-scoped mission-liveness policy needs design and fault injection
+before unattended operation. See docs/architecture-review-2026-10-12.md. This is
+not a declaration of live readiness; existing untracked nav_lgoic.md preserved.

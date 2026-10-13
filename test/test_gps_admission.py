@@ -37,6 +37,26 @@ class AdmissionTests(unittest.TestCase):
         self.assertFalse(self.feed(g, 11.3))
         self.assertFalse(g.status(11.3)['qualified'])
 
+    def test_delayed_fix_expires_by_measurement_age(self):
+        g = self.make()
+        for i in range(5):
+            t = 10.1+i*.1
+            self.feed(g, t, stamp=round((t-5-.25)*1e6))
+        self.assertTrue(g.status(10.5)['qualified'])
+        status = g.status(10.61)
+        self.assertFalse(status['qualified'])
+        self.assertGreater(status['cube_fix_age_upper_s'], .35)
+        self.assertIn('stale', status['reason'])
+        self.assertFalse(self.feed(g, 10.62))
+        self.assertFalse(g.status(10.62)['qualified'])
+
+    def test_lost_clock_mapping_revokes_admission(self):
+        g = self.make()
+        for i in range(5): self.feed(g, 10.1+i*.1)
+        self.assertTrue(g.status(10.5)['qualified'])
+        g.clock.offset = None
+        self.assertFalse(g.status(10.51)['qualified'])
+
     def test_timing_requires_current_matched_low_latency_reply(self):
         c = CubeClock()
         self.assertIsNone(c.age(100, 10.))

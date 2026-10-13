@@ -105,6 +105,28 @@ class WaypointTests(unittest.TestCase):
         self.o['mode'] = 4
         self.assertEqual(self.step(), [])
 
+    def test_pilot_mode_change_before_final_disarm_is_respected(self):
+        self.dive()
+        self.run.enter('DISARM', self.now, 'Surface reached')
+        self.o['mode'] = 19
+        self.assertEqual(self.step(), [])
+        self.assertEqual(self.run.stage, 'ABORTED')
+        self.assertTrue(self.run.pilot_takeover)
+
+    def test_pilot_mode_change_during_arm_confirmation(self):
+        self.dive()
+        self.run.enter('ARM', self.now, 'Waiting for arm confirmation')
+        self.o['mode'] = 19
+        self.assertEqual(self.step(), [])
+        self.assertEqual(self.run.stage, 'ABORTED')
+
+    def test_altitude_metadata_update_preserves_pressure_reference(self):
+        self.dive()
+        self.o['origin'] = (*self.origin[:2], 15.)
+        self.step()
+        self.assertEqual(self.run.stage, 'DIVE')
+        self.assertEqual(self.run.surface_down, 0.)
+
     def test_lost_heartbeat_is_not_pilot_takeover(self):
         self.dive();self.o.update(fresh=False, armed=None, mode=None)
         self.assertEqual(self.step()[0][0], 'manual')
@@ -140,6 +162,12 @@ class WaypointTests(unittest.TestCase):
         p = api.preview(self.plan,nav)
         item, duplicate = api.consume(p['plan_id'],nav)
         self.assertFalse(duplicate)
+        altitude_update = copy.deepcopy(nav)
+        altitude_update['streams']['cube_origin']['data']['alt'] = 15.
+        self.assertFalse(api.consume(p['plan_id'], altitude_update)[1])
+        horizontal_update = copy.deepcopy(nav)
+        horizontal_update['streams']['cube_origin']['data']['lat'] += .000001
+        with self.assertRaises(ValueError): api.consume(p['plan_id'], horizontal_update)
         self.now=31.
         with self.assertRaises(ValueError): api.consume(p['plan_id'],nav)
         self.now=0.; changed=copy.deepcopy(nav);changed['session']=2

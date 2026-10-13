@@ -117,7 +117,8 @@ class FusedNavBridge(SteadyNode):
             if age is None or age > .35:
                 self.est.pressure_depth(now, math.nan)
                 return
-            self.pressure_sample = dict(hpa=m.press_abs, received=now, cube_boot_ms=m.time_boot_ms)
+            self.pressure_sample = dict(hpa=m.press_abs if math.isfinite(m.press_abs) else None,
+                                        received=now, cube_boot_ms=m.time_boot_ms)
             base, rho = self.settings['surface_pressure_hpa'], self.settings['water_density']
             depth = (m.press_abs-base)*100/(rho*9.80665) if base > 0 and rho > 0 else math.nan
             self.est.pressure_depth(now, depth)
