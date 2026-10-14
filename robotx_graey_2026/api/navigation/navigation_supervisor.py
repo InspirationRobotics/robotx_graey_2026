@@ -266,6 +266,7 @@ class NavigationSupervisor(Node):
         status['gps_admission'] = self.fresh('gps_admission', 0.5)
         status['dive_heading_check'] = heading
         status['north_alignment'] = bridge.get('north_alignment')
+        status['dvl_continuity'] = bridge.get('dvl_continuity')
         status['published_monotonic'] = time.monotonic()
         self.pub.publish(String(data=json.dumps(status, allow_nan=False)))
 

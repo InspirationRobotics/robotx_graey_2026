@@ -80,10 +80,57 @@ class EstimatorTests(unittest.TestCase):
     def test_dvl_loss_latches_without_zero_velocity(self):
         self.acquire()
         self.e.dvl(self.t+.05, (), False)
+        self.e.status(self.t+.6)
+        self.t += .6
         for _ in range(50):
             self.step()
         self.assertTrue(self.e.fault)
         self.assertFalse(self.e.status(self.t)['healthy'])
+
+    def test_brief_invalid_dvl_withholds_then_recovers_without_inventing_motion(self):
+        self.acquire()
+        e=self.e
+        position=list(e.position)
+        variance=e.horizontal_variance
+        self.t+=.05
+        e.imu(self.t,(1.,0.,0.,0.),(0.,0.,0.))
+        e.pressure_depth(self.t,0.)
+        e.dvl(self.t,(),False)
+        self.assertFalse(e.status(self.t)['healthy'])
+        self.assertFalse(e.fault)
+        self.step(gps=False,speed=0.)
+        self.assertFalse(e.status(self.t)['healthy'])
+        self.assertEqual(e.position,position)
+        self.step(gps=False,speed=0.)
+        self.assertTrue(e.status(self.t)['healthy'])
+        self.assertFalse(e.fault)
+        self.assertGreater(e.horizontal_variance,variance)
+        self.assertEqual(e.dvl_dropouts,1)
+
+    def test_dvl_absent_without_invalid_packet_still_latches(self):
+        self.acquire()
+        self.e.imu(self.t+.51,(1.,0.,0.,0.),(0.,0.,0.))
+        self.e.pressure_depth(self.t+.51,0.)
+        self.assertIn('DVL continuity',self.e.status(self.t+.51)['fault'])
+
+    def test_inconsistent_recovery_velocities_cannot_reenable_output(self):
+        self.acquire()
+        e=self.e
+        e.dvl(self.t+.05,(),False)
+        for i in range(1,5):
+            now=self.t+.05+i*.05
+            e.imu(now,(1.,0.,0.,0.),(0.,0.,0.))
+            e.pressure_depth(now,0.)
+            e.dvl(now,((1. if i%2 else -1.),0.,0.),True)
+            self.assertFalse(e.status(now)['healthy'])
+
+    def test_vn_failure_during_dvl_recovery_is_not_cleared(self):
+        self.acquire()
+        self.e.dvl(self.t+.05,(),False)
+        self.e.status(self.t+.51)
+        self.t+=.51
+        for _ in range(10):self.step(gps=False)
+        self.assertTrue(self.e.fault)
 
     def test_no_heading_correction_at_rest(self):
         self.acquire()

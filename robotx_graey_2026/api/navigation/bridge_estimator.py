@@ -53,6 +53,10 @@ class BridgeEstimator:
         self.heading_bias = 0.
         self.imu_at = self.motion_at = self.depth_at = None
         self.motion_valid = False
+        self.dvl_good_at = None
+        self.dvl_gap_start = None
+        self.dvl_recovery_count = 0
+        self.dvl_dropouts = 0
         self.depth = None
         self.surface = None
         self.shallow_since = self.deep_since = None
@@ -125,12 +129,35 @@ class BridgeEstimator:
         if not valid or (dt is not None and not 0 < dt < .5):
             self.gps.invalidate('DVL continuity lost; GPS must requalify')
             self.history.clear()
-            if self.initialized:
+            if self.initialized and self.dvl_gap_start is None:
+                self.dvl_gap_start = self.dvl_good_at if self.dvl_good_at is not None else self.motion_at
+                self.dvl_dropouts += 1
+                self.dvl_recovery_count = 0
+            if self.initialized and (self.dvl_gap_start is None or now-self.dvl_gap_start >= .5):
                 self.fault = 'DVL continuity lost; position uncertainty requires revalidation'
         self.motion_valid = bool(valid)
         self.motion_at = now
         if not valid:
+            self.pending_gps = None
+            self.dvl_recovery_count = 0
             return
+        recovering = self.dvl_gap_start is not None
+        if recovering:
+            gap = now-self.dvl_gap_start
+            if gap >= .5:
+                self.fault = 'DVL continuity lost; position uncertainty requires revalidation'
+            elif not self.fault:
+                if self.dvl_recovery_count and max(abs(a-b) for a,b in zip(velocity,self.raw_velocity))>.2:
+                    self.dvl_recovery_count=0
+                if self.dvl_recovery_count == 0:
+                    # No invented velocity or catch-up translation for the gap.
+                    # Conservative 5m/s displacement budget, not measured error.
+                    self.horizontal_variance = min(10000.,self.horizontal_variance+(5.*gap)**2)
+                    dt = None
+                self.dvl_recovery_count += 1
+                if self.dvl_recovery_count >= 2:
+                    self.dvl_gap_start = None
+        self.dvl_good_at = now
         self.raw_velocity = tuple(velocity)
         if self.initialized and not self.fresh(self.imu_at, now):
             self.fault = 'VN stale; position propagation stopped'
@@ -336,9 +363,12 @@ class BridgeEstimator:
         if not self.gps_eligible(now):
             self.gps.invalidate('Pressure surface eligibility unavailable')
             self.heading_since, self.heading_count = None, 0
-        if self.initialized and (not self.fresh(self.motion_at, now) or not self.fresh(self.imu_at, now)):
-            self.fault = self.fault or 'DVL/VN freshness lost; revalidate navigation'
+        if self.initialized and not self.fresh(self.imu_at, now):
+            self.fault = self.fault or 'VN freshness lost; revalidate navigation'
+        if self.initialized and self.dvl_good_at is not None and now-self.dvl_good_at >= .5:
+            self.fault = self.fault or 'DVL continuity lost; position uncertainty requires revalidation'
         healthy = (self.initialized and not self.fault and self.motion_valid
+                   and self.dvl_gap_start is None
                    and self.fresh(self.motion_at, now) and self.fresh(self.imu_at, now)
                    and self.fresh(self.depth_at, now))
         gps = self.gps.status(now)
@@ -348,6 +378,9 @@ class BridgeEstimator:
             healthy = False
         return dict(healthy=bool(healthy), navigation_valid=bool(healthy and self.horizontal_variance <= 25.),
                     fault=self.fault, initialized=self.initialized,
+                    dvl_continuity=dict(recovering=self.dvl_gap_start is not None,
+                        dropouts=self.dvl_dropouts,valid_recovery_samples=self.dvl_recovery_count,
+                        maximum_gap_s=.5, missing_displacement_budget_mps=5.),
                     depth_m=self.depth if self.fresh(self.depth_at, now) else None,
                     surfaced=self.surface if self.fresh(self.depth_at, now) else None,
                     gps_eligible=self.gps_eligible(now), gps_admission=gps,
