@@ -45,3 +45,10 @@ Old colcon launcher archived to /root/robotx_ws/logs/retired-nav_ekf_bridge-2026
 ros2 executable list now contains fused_nav_bridge and no legacy bridge launcher.
 
 Stationary physical34deg follow-up: fresh VN261.746deg, Cube22.106deg. Requested controlled90deg clockwise rotation to distinguish mounting offset from response failure. No offset applied.
+
+October 13 rotation check: user ready at requested approximately124deg after
+stationary34deg reference. Fresh VN334.090deg and Cube98.422deg; previous
+VN261.746deg/Cube22.106deg. Observed clockwise changes72.344deg/76.316deg,
+versus requested approximately90deg. Both respond in the same direction, but
+absolute heading remains unvalidated. Approximate physical endpoints do not
+establish sensor scale or justify a fixed yaw offset. No parameter writes.

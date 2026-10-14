@@ -749,3 +749,10 @@ VN263deg and Cube12deg disagree. VN yaw offset readback0.0, roll flipTrue. Headi
 NOT commissioned; no arbitrary correction, arming or mission performed. Persistent
 startup stays continuous observation; surface baseline is session-only. See
  docs/continuous-only-2026-10-13.md. These are dated observations, not live status.
+
+October 13 rotation check: user ready at requested approximately124deg after
+stationary34deg reference. Fresh VN334.090deg and Cube98.422deg; previous
+VN261.746deg/Cube22.106deg. Observed clockwise changes72.344deg/76.316deg,
+versus requested approximately90deg. Both respond in the same direction, but
+absolute heading remains unvalidated. Approximate physical endpoints do not
+establish sensor scale or justify a fixed yaw offset. No parameter writes.
