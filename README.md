@@ -105,7 +105,7 @@ tools/                     bench and diagnostic scripts; GUI and planner pages
 robotx_graey_2026/api/
   gui/                     gui_node
   led/                     led_node, pixhawk_led_node
-  navigation/              dvl_node, vn100_node, nav_ekf_bridge, pos_server,
+  navigation/              dvl_node, vn100_node, fused_nav_bridge, pos_server,
                            mission_base, frames, missions
   pixhawk/                 mavlink.py (the Link class), kill_switch
   vision/                  camera.py, pole_tracker
@@ -117,7 +117,7 @@ robotx_graey_2026/api/
 |------|------|
 | `dvl_node` | DVL A50 → velocity / altitude topics |
 | `vn100_node` | VN-100 IMU → attitude / heading topics |
-| `nav_ekf_bridge` | DVL velocity + VN-100 attitude → Cube EKF (MAVLink ODOMETRY) |
+| `fused_nav_bridge` | DVL/VN motion with pressure-gated GPS corrections → Cube EKF (MAVLink ODOMETRY) |
 | `kill_switch` | RC kill / arm / mode switches; commands the hardware kill relay |
 | `led_node` | status colour → Arduino strip |
 | `pixhawk_led_node` | derives status (disarmed=red, manual=yellow, auto=green) |
@@ -149,3 +149,4 @@ start spinning again when power is restored.
 Rebuild the container from `docker/Dockerfile`; host-level setup is in
 `docs/host-setup.md` and the units in `deploy/`. See the full documentation for
 everything else.
+

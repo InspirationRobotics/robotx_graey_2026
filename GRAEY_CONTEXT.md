@@ -735,3 +735,17 @@ DVL invalid and depth/GPS/heading readiness unconfirmed on land. User requested
 waiting until floating with bottom lock. No parameter writes, output enablement,
 arming or mission. See docs/deployment-2026-10-13.md; current physical status must
 be checked again, and mission-process-death safeguard remains outstanding.
+
+2026-10-13 continuous-only deployment: navigation commit81fd138 merged on Jetson
+as35eaec8, preserving sonar history.117 current regressions passed locally and
+on Jetson; native GUI/API nominal and Abort simulations passed with underwater
+GPS outage. Legacy switching runtime and executable registration removed; stale
+installed launcher archived outside executable directory. User confirmed floating,
+killed/disarmed. Session pressure baseline997.84228515625hPa applied. Initial DVL
+continuity fault required controlled core restart; subsequent passive check passed
+bridge health, DVL/VN, surface depthabout0.032m, GPS admission and Cube profile.
+Output and supervisor remain disabled. Physical heading reported68deg; observed
+VN263deg and Cube12deg disagree. VN yaw offset readback0.0, roll flipTrue. Heading
+NOT commissioned; no arbitrary correction, arming or mission performed. Persistent
+startup stays continuous observation; surface baseline is session-only. See
+ docs/continuous-only-2026-10-13.md. These are dated observations, not live status.
