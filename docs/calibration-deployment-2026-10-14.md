@@ -152,3 +152,22 @@ known-heading request rejected409 with no job/reference change. Fresh controller
 killed/disarmed MANUAL/ESC-off. Core observation output off, no heading captured;
 operator must supply actual independent true bearing. Backup at
 /home/graey/deployment-backups/20261014-known-heading-234523. Main untouched.
+
+## Controlled Pixhawk recovery after DVL fault
+
+Live Cube heartbeat/attitude stayed fresh, but LOCAL_POSITION_NED went stale after
+bridge latched DVL continuity loss and withheld odometry. DVL later returned valid.
+No evidence yet distinguishes one invalid report from a longer interruption.
+User confirmed kill/disarm. First stationary recovery aborted before mutation due
+to heading movement. A later attempt reset bridge/captured retained-frame heading
+but GUI failed on supervisor's old real DVL latch. Fixed Prepare ordering: after
+bridge reset ACK, require fresh clean bridge status, wait old publications beyond
+0.5s freshness gate, and explicitly suspend supervisor again while maintained.
+Only explicit killed/disarmed Prepare does this; no automatic airborne/underwater
+fault clearing, synthetic velocity or degraded odometry publication is introduced.
+
+The recaptured heading in this recovery is derived from the existing validated
+north offset plus uninterrupted live VN orientation, NOT a new independent
+compass observation. Recovery JSONs under deployment-backups preserve provenance;
+GUI's generic Operator measured label alone is not sufficient provenance here.
+Automatic bounded DVL-dropout recovery remains separate and is not implemented.
