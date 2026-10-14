@@ -725,3 +725,13 @@ GUIDED as autonomous; expiring mission Bool does not itself guarantee MANUAL.
 Independent run-scoped mission-liveness policy needs design and fault injection
 before unattended operation. See docs/architecture-review-2026-10-12.md. This is
 not a declaration of live readiness; existing untracked nav_lgoic.md preserved.
+
+2026-10-13 authorized Wi-Fi land deployment: Jetson merged navigation through
+6843f9d preserving local sonar history (merge d0ca60c); build and165 tests passed.
+Persistent /etc systemd override now launches continuous observation with depth
+baseline0, output disabled and supervisor observation. Fresh passive preflight
+confirmed Cube profile matches, VN fresh, disarmed MANUAL/SA active/ESC off.
+DVL invalid and depth/GPS/heading readiness unconfirmed on land. User requested
+waiting until floating with bottom lock. No parameter writes, output enablement,
+arming or mission. See docs/deployment-2026-10-13.md; current physical status must
+be checked again, and mission-process-death safeguard remains outstanding.
