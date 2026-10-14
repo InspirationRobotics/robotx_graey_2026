@@ -55,10 +55,12 @@ class GPSAdmission:
         self.fault = ''
         self.reason = 'Waiting for qualified GPS'
         self.age_bound = None
+        self.last_rejection = None
 
     def invalidate(self, reason):
         self.good_since = self.last_good = self.last_accepted = None
         self.reason = reason
+        self.last_rejection = reason
 
     def check(self, now, fix, imu_fresh, eligible=True, eligibility_reason='GPS ineligible'):
         stamp = fix['cube_fix_time_us']
@@ -88,6 +90,7 @@ class GPSAdmission:
             self.good_since = self.last_good = None
             self.last_accepted = None
             self.reason = reason
+            self.last_rejection = reason
             return False
         if self.last_good is None or now-self.last_good > self.max_age:
             self.good_since = now
@@ -109,8 +112,16 @@ class GPSAdmission:
         reason = self.reason
         if self.last_accepted is not None and not accepted:
             reason = 'Cube fix timing unavailable or stale'
-            self.invalidate(reason)
+            # Withhold an ageing measurement immediately, but don't erase the
+            # good-sample dwell just because it expires between normal packets.
+            # The next NEW fix still passes every check. Receipt gaps and clock
+            # loss require requalification as before.
+            if (self.age_bound is None or self.last_good is None
+                    or not 0 <= now-self.last_good <= self.max_age):
+                self.invalidate(reason)
         return dict(qualified=bool(accepted), reason=self.fault or reason,
+                    qualifying_s=max(0.,now-self.good_since) if self.good_since is not None else 0.,
+                    required_dwell_s=self.dwell, last_rejection=self.last_rejection,
                     cube_fix_age_upper_s=self.age_bound,
                     timing_basis='Cube last-fix time; not receiver epoch',
                     receiver_delay_bound_s=None, fault=self.fault)

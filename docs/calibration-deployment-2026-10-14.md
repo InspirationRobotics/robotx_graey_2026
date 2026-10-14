@@ -61,3 +61,32 @@ callback to treat exactly this maintenance sentinel as non-latching only while
 inactive and bridge output disabled. Existing faults are never cleared by this
 exception; other faults and maintenance while active still latch. Added callback
 regressions for pause/reset, preservation of a real fault and active-mode pause.
+
+2026-10-14 repeated Prepare failure resolved: supervisor latched the intentional
+bridge maintenance sentinel. d664f93 skips only that sentinel when supervisor
+inactive AND bridge output disabled; real/active faults remain latched. Source
+merge/restart alone did not update the installed Python copy on this Jetson.
+Rebuilt package, verified installed supervisor maintenance_pause and GUI
+prepared_at code using inspect from /tmp, then restarted supervisor/GUI only.
+147 tests passed on Jetson. Live API Prepare remained busy/preparing after5s,
+GPS qualifying, supervisor no longer Fault. Bridge instance and collected VN
+calibration preserved. No arming/movement/mission; manual north alignment pending.
+Future deployments must rebuild and verify installed imports, not assume symlinks.
+
+## GPS qualification cycling
+
+Passive100-snapshot capture during the reported cycle:57 qualifying,26 GPS/DVL
+displacement disagreements,12 excessive/unavailable horizontal accuracy,3 admitted,
+one DVL continuity loss and one invalid DVL-motion observation. This capture did
+not establish stale timing as the live cause; actual GPS/DVL quality issues exist.
+Separately reproduced a software defect: status polling erased the qualification
+dwell when a delayed but initially-fresh fix expired between normal5Hz packets.
+Fix retains dwell only within the existing receipt-continuity bound; expired fixes
+remain unqualified and never forwarded. New packets still pass all checks. Real
+quality errors, receipt gaps, clock loss, VN/DVL/depth failures still requalify.
+Added end-to-end estimator regression:5Hz fixes delayed250ms with20Hz status polling
+now complete north alignment. No freshness, accuracy, angular or movement threshold
+was relaxed. Added qualification progress/last-reset cause and observed GPS accuracy,
+velocity uncertainty and speed to calibration diagnostics.150 Python tests and
+Windows Node calibration-page check passed; WSL lacks Node (not a browser-test pass).
+Physical moving alignment remains unverified and may remain blocked by poor GPS.

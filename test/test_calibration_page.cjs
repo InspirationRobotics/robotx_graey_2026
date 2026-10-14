@@ -22,6 +22,8 @@ async function render(state){
  assert.match(page.elements.status.textContent,/disarm/);
  page=await render({controller:safe,job:{busy:true,phase:'collecting'},navigation:{streams:{vn_calibration:{fresh:true,data:{phase:'collecting',remaining_s:60,faces:[5,5,0,2,0,1],reason:'Rotate all faces'}}}}});
  assert.equal(page.elements.progress.value,60);assert.match(page.elements.coverage.textContent,/5 \/ 5 \/ 0/);
+ page=await render({controller:safe,job:{phase:'preparing'},navigation:{streams:{bridge:{fresh:true,data:{gps_admission:{qualified:false,reason:'GPS qualifying',last_rejection:'GPS displacement disagrees with DVL motion'},gps_observation:{accuracy:3.5,speed_accuracy_mps:.3,speed_mps:.1}}}}}});
+ assert.match(page.elements.gpsQuality.textContent,/3.50 m/);assert.match(page.elements.gpsQuality.textContent,/displacement/);
  assert(html.includes('not an independent compass reference'));assert(html.includes('not save flash'));
  console.log('Calibration page confirmations, stale/armed controls, progress and instructions pass');
 })().catch(error=>{console.error(error);process.exit(1)});
