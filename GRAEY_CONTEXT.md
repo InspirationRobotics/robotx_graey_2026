@@ -908,3 +908,10 @@ Actual user's QGC feed/version was not inspected. Observed Cube global vs local 
 about[-0.323,-1.055]m vs[-0.324,-1.057]m using Cube origin at one snapshot, consistent
 within centimetres. Pool image displacement mismatch is suspected map registration/
 scale, not a demonstrated EKF scale defect; physical/QGC movement comparison remains.
+
+2026-10-14 added georeferenced online satellite background for live pool waypoint
+selection. Esri World_Imagery tiles use EPSG3857; clicked points become geographic
+plans, separate from old approximate screenshot view. Shows Cube/GPS/track/route,
+loading/errors and provider attribution; offline grid retained. No fusion or live
+mission permission gates bypassed. Browser internet required. Node tests cover
+projection inversion, tile readiness and geographic target submission. See sessiondoc.
