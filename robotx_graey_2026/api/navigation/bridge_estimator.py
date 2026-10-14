@@ -61,6 +61,7 @@ class BridgeEstimator:
         self.distance_travelled = 0.
         self.last_fix = None
         self.last_observed_gps = None
+        self.pending_gps = None
         self.last_correction = None
         self.heading_since = None
         self.heading_count = 0
@@ -142,6 +143,15 @@ class BridgeEstimator:
                 self.horizontal_variance = min(10000., self.horizontal_variance+.02*dt+.01*dt*dt)
         self.history.append(dict(t=now, position=tuple(self.position), q=self.orientation(),
                                  raw_velocity=self.raw_velocity, rates=self.rates))
+        if self.pending_gps is not None:
+            received, fix = self.pending_gps
+            age = self.gps.clock.age(fix['cube_fix_time_us'],now)
+            if (now-received > .15 or age is None or age > self.gps.max_age
+                    or not self.gps_eligible(now) or self.fault
+                    or not self.fresh(self.imu_at,now)):
+                self.pending_gps = None
+            else:
+                self.apply_gps(now,fix)
 
     def orientation(self):
         return yaw_rotate(self.raw_q, self.north_offset+self.heading_bias)
@@ -173,17 +183,36 @@ class BridgeEstimator:
                           cube_fix_time_us=fix['cube_fix_time_us'], raw_lat=fix['lat'], raw_lon=fix['lon'],
                           age_upper_s=self.gps.age_bound, depth_m=self.depth)
         if not good:
+            if not duplicate:
+                self.pending_gps = None
             if self.north_alignment and not self.heading_validated and not duplicate:
                 self.north_alignment.reject(self.gps.reason)
             if not duplicate:
                 self.heading_since, self.heading_count = None, 0
             return False
+        self.pending_gps = None
+        return self.apply_gps(now,fix)
+
+    def apply_gps(self, now, fix):
         if self.origin is None:
             return self.reject('Cube geographic origin unavailable')
         sample_time = fix['cube_fix_time_us']/1e6+self.gps.clock.offset
         sample = self.at(sample_time)
         if sample is None:
-            return self.reject('GPS cannot be aligned to DVL/VN history')
+            # A fix may precede the next ~9Hz DVL publication. Wait for a
+            # bracketing sample instead of extrapolating or resetting GPS dwell.
+            if self.history and self.history[-1]['t'] < sample_time <= now:
+                if self.pending_gps is None:
+                    self.pending_gps = (now,dict(fix))
+                reason='Waiting for next DVL sample to time-align GPS'
+            else:
+                self.pending_gps = None
+                reason='GPS cannot be aligned to DVL/VN history'
+            self.event.update(decision='deferred',reason=reason)
+            if self.north_alignment and not self.heading_validated:
+                self.north_alignment.reason=reason
+            return False
+        self.pending_gps = None
         if self.north_alignment and not self.heading_validated:
             aligned = self.north_alignment.observe(now, fix,
                 rotate(sample['q'], sample['raw_velocity']), sample['rates'], sample['q'])
