@@ -38,9 +38,13 @@ class NorthAlignment:
         if any(v is None or not math.isfinite(v) for v in values):
             return self.reject('Velocity or uncertainty unavailable for north alignment')
         horizontal = math.hypot(*world_velocity[:2])
+        # Do not prompt the pilot to accelerate when velocity precision itself
+        # is inadequate regardless of speed.
+        if not 0 < sigma <= .2:
+            return self.reject('GPS velocity uncertainty too large for north alignment')
         if not 0 <= course < 360 or min(speed, horizontal) < .5:
             return self.reject('North alignment needs at least 0.5 m/s surface motion')
-        if not 0 < sigma <= .2 or math.degrees(math.atan2(sigma, speed)) > 10:
+        if math.degrees(math.atan2(sigma, speed)) > 10:
             return self.reject('GPS velocity uncertainty too large for north alignment')
         # Relative yaw does not affect the vertical projection of body Z.
         w, x, y, z = q

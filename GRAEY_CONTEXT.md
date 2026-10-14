@@ -812,3 +812,17 @@ prepared_at code using inspect from /tmp, then restarted supervisor/GUI only.
 GPS qualifying, supervisor no longer Fault. Bridge instance and collected VN
 calibration preserved. No arming/movement/mission; manual north alignment pending.
 Future deployments must rebuild and verify installed imports, not assume symlinks.
+
+2026-10-14 GPS qualification follow-up: d161c6f deployed on Jetson as051877b,
+150 tests passed there. Fix withholds expired measurements but retains good dwell
+within the unchanged receipt-continuity limit; actual quality failures still reset.
+Added progress and last rejection diagnostics. Full observation restart reset
+baseline/north alignment; VN reader reconnects relative without saving flash or
+resetting learned HSI registers, but in-memory six-face coverage returns idle.
+Fresh passive read on continuation: killed/disarmed MANUAL/ESC-off, output off,
+baseline0, GPS position accuracy1.736m, velocity uncertainty0.433m/s. Automatic
+north alignment requires<=0.20m/s, so this receiver reading cannot pass; do not
+keep driving to chase the speed prompt. Reordered alignment checks to show poor
+velocity precision before asking for motion; thresholds unchanged.151 tests pass
+locally, including delayed5Hz packet/20Hz status alignment and rejection priority.
+Live moving alignment and physical mission remain unverified.
