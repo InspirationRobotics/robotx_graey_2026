@@ -53,3 +53,11 @@ after the prepare service ACK. Fixed by requiring supervisor publication time at
 or after that ACK before processing faults/alignment, with a10s bounded wait.
 New faults are still rejected; no missing/stale status can grant permission.
 Regression coverage includes cached fault, absent new status and real new fault.
+
+Follow-up: the first publication-time fix was insufficient. The supervisor had
+also latched the intentional pause as an operational fault; even new status
+therefore retained the maintenance reason. Updated the production supervisor
+callback to treat exactly this maintenance sentinel as non-latching only while
+inactive and bridge output disabled. Existing faults are never cleared by this
+exception; other faults and maintenance while active still latch. Added callback
+regressions for pause/reset, preservation of a real fault and active-mode pause.
