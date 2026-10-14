@@ -30,7 +30,6 @@ setup(
             'kill_switch = robotx_graey_2026.api.pixhawk.kill_switch:main',
             'dvl_node = robotx_graey_2026.api.navigation.dvl_node:main',
             'vn100_node = robotx_graey_2026.api.navigation.vn100_node:main',
-            'nav_ekf_bridge = robotx_graey_2026.api.navigation.nav_ekf_bridge:main',
             'fused_nav_bridge = robotx_graey_2026.api.navigation.fused_nav_bridge:main',
             'navigation_supervisor = robotx_graey_2026.api.navigation.navigation_supervisor:main',
             'pos_server = robotx_graey_2026.api.navigation.pos_server:main',

@@ -26,7 +26,7 @@ class PackagingTests(unittest.TestCase):
     def test_core_mavlink_components_are_unique(self):
         ids = []
         for path in ('led/pixhawk_led_node.py', 'pixhawk/kill_switch.py',
-                     'navigation/nav_ekf_bridge.py', 'navigation/navigation_supervisor.py',
+                     'navigation/fused_nav_bridge.py', 'navigation/navigation_supervisor.py',
                      'gui/gui_node.py', 'navigation/pos_server.py'):
             tree = ast.parse((ROOT/'robotx_graey_2026/api'/path).read_text())
             calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)

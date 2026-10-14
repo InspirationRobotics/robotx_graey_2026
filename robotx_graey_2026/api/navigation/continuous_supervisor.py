@@ -1,9 +1,37 @@
 """Continuous fusion supervision: no EKF selection or bridge reset actions."""
 import math
-from .supervisor_logic import Supervisor
+from dataclasses import dataclass
+
+@dataclass
+class Observation:
+    healthy: bool = False
+    reason: str = 'Waiting for navigation telemetry'
+    depth: float = float('nan')
+    depth_valid: bool = False
+    intent: str = ''
+    intent_fresh: bool = False
+    run_id: str = ''
+    gps_good: bool = False
+    reference_ready: bool = False
+    reference_saved: bool = False
+    configuration_verified: bool = False
+    heading_allowed: bool = False
+    heading_reason: str = 'Pre-dive heading check unavailable'
+    surface_authoritative: bool = False
+    surface_observed: object = None
 
 
-class ContinuousSupervisor(Supervisor):
+class ContinuousSupervisor:
+    def __init__(self, active=False, surface_enter=.15, surface_exit=.4, depth_dwell=2.):
+        if not 0 <= surface_enter < surface_exit:
+            raise ValueError('Surface thresholds must be ordered')
+        self.active = active
+        self.enter, self.exit, self.dwell = surface_enter, surface_exit, depth_dwell
+        self.surface = self.shallow_since = self.deep_since = self.last_step = None
+        self.fault = self.run_id = ''
+        self.state, self.reason = 'Initializing', 'Waiting for navigation telemetry'
+        self.allowed = self.dive_heading_approved = False
+
     def step(self, now, o):
         self.allowed = False
         if self.last_step is not None and not 0 <= now-self.last_step < 1.:
@@ -52,7 +80,11 @@ class ContinuousSupervisor(Supervisor):
         return []
 
     def snapshot(self, o):
-        status = super().snapshot(o)
-        status.update(fusion_policy='continuous', requested_source='Continuous fusion',
-                      confirmed_source='Continuous fusion' if o.configuration_verified else 'Unknown')
-        return status
+        surface = self.surface if o.depth_valid and math.isfinite(o.depth) else None
+        return dict(state=self.state, reason=self.reason,
+            mode='Active' if self.active else 'Observation', fusion_policy='continuous',
+            requested_source='Continuous fusion',
+            confirmed_source='Continuous fusion' if o.configuration_verified else 'Unverified',
+            navigation_ready=self.allowed, surfaced=surface,
+            surface_state='Surfaced' if surface is True else 'Submerged' if surface is False else 'Unknown',
+            run_id=self.run_id)

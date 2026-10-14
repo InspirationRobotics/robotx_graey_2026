@@ -214,12 +214,12 @@ class SitlMission(Node):
                 self.fail('Navigation health lost during simulated mission: '+failure)
                 return
         if self.stage == 'WAIT_SURFACE_GPS':
-            if status.get('state') == 'Surface GPS' and status.get('navigation_ready'):
+            if status.get('surfaced') is True and status.get('gps_qualified_input') is True and status.get('navigation_ready'):
                 self.enter('WAIT_DIVE_REFERENCE', 'DIVE')
         elif self.stage == 'WAIT_DIVE_REFERENCE':
             ref = status.get('reference')
             if (status.get('reference_current') and status.get('navigation_ready')
-                    and ref and status.get('confirmed_source') == 'Underwater'):
+                    and ref and status.get('fusion_policy') == 'continuous'):
                 self.mission_origin = tuple(ref['cube_ned'])
                 self.link.set_mode(MODE_GUIDED)
                 self.link.arm()
@@ -249,7 +249,7 @@ class SitlMission(Node):
         elif self.stage == 'SURFACING' and self.local and self.mission_origin:
             n0, e0, d0 = self.mission_origin
             self.command_target(n0+self.target_n, e0+self.target_e, d0)
-            if (status.get('state') == 'Surface GPS' and status.get('navigation_ready')
+            if (status.get('surfaced') is True and status.get('gps_qualified_input') is True and status.get('navigation_ready')
                     and self.gps_fix_type >= 3 and time.monotonic()-self.gps_received < 1.0):
                 self.gps_recovery_verified = True
                 self.link.disarm(tries=2, gap=.1)

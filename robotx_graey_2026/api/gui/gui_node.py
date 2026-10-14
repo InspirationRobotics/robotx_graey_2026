@@ -37,14 +37,14 @@ CAMERA = 'pole_tracker'
 GROUPS = {
     'led': ('LED stack', ['led_node', 'pixhawk_led_node']),
     'nav': ('Nav / EKF stack',
-            ['dvl_node', 'vn100_node', 'nav_ekf_bridge']),
+            ['dvl_node', 'vn100_node', 'fused_nav_bridge']),
     'camera': ('Camera tracker', [CAMERA]),
     'planner': ('Planner feed', ['pos_server']),
 }
 CORE_MANAGED_GROUPS = {'nav'}
 CORE_MANAGED_EXECUTABLES = frozenset(
     name for key in CORE_MANAGED_GROUPS for name in GROUPS[key][1]
-) | {'navigation_supervisor', 'fused_nav_bridge'}
+) | {'navigation_supervisor', 'nav_ekf_bridge'}
 READ_ONLY = {
     'mavproxy': ('MAVProxy', ['mavproxy.py']),
 }

@@ -16,7 +16,7 @@ def generate_launch_description():
     result_file = str(Path(__file__).resolve().parents[1] / 'sitl' / 'logs' / 'scenario-result.json')
     return LaunchDescription([
         DeclareLaunchArgument('interactive_waypoint', default_value='false'),
-        DeclareLaunchArgument('continuous_fusion', default_value='false'),
+        DeclareLaunchArgument('continuous_fusion', default_value='true'),
         DeclareLaunchArgument('surface_pressure_hpa', default_value='1013.25'),
         DeclareLaunchArgument('home_lat', default_value='32.9236125'),
         DeclareLaunchArgument('home_lon', default_value='-117.0385235'),
@@ -24,12 +24,7 @@ def generate_launch_description():
         DeclareLaunchArgument('waypoint_east_m', default_value='1.0'),
         DeclareLaunchArgument('supervisor_mavlink', default_value='udpout:127.0.0.1:14557'),
         DeclareLaunchArgument('result_file', default_value=result_file),
-        Node(package='robotx_graey_2026', executable='nav_ekf_bridge',
-             condition=UnlessCondition(LaunchConfiguration('continuous_fusion')),
-             additional_env={'GRAEY_RUNTIME_SCOPE': 'sitl'},
-             name='nav_ekf_bridge', parameters=[{'allow_alignment': True}], output='screen'),
         Node(package='robotx_graey_2026', executable='fused_nav_bridge',
-             condition=IfCondition(LaunchConfiguration('continuous_fusion')),
              additional_env={'GRAEY_RUNTIME_SCOPE': 'sitl'}, name='nav_ekf_bridge',
              parameters=[{'enabled': True, 'heading_reference_validated': True,
                           'sitl_depth_topic': '/graey/sitl/depth_m',
@@ -38,13 +33,12 @@ def generate_launch_description():
              additional_env={'GRAEY_RUNTIME_SCOPE': 'sitl'},
              name='navigation_supervisor', parameters=[{
                  'active': True, 'vehicle_validation_complete': True,
-                 'continuous_fusion': ParameterValue(LaunchConfiguration('continuous_fusion'), value_type=bool),
+                 'continuous_fusion': True,
                  'heading_reference_validated': True,  # synthetic sensors share true-NED axes
                  'mavlink': LaunchConfiguration('supervisor_mavlink'),
-                 'depth_topic': '/graey/sitl/depth_m',
-                 'reference_file': '/tmp/graey-sitl-navigation-reference.json'}], output='screen'),
+                                  'reference_file': '/tmp/graey-sitl-navigation-reference.json'}], output='screen'),
         Node(package='robotx_graey_2026', executable='sitl_sensor_sim',
-             parameters=[{'truth_only': ParameterValue(LaunchConfiguration('continuous_fusion'), value_type=bool)}],
+             parameters=[{'truth_only': True}],
              name='sitl_sensor_sim', output='screen'),
         Node(package='robotx_graey_2026', executable='sitl_mission',
              condition=UnlessCondition(LaunchConfiguration('interactive_waypoint')),
