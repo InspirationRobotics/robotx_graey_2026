@@ -100,10 +100,17 @@ class GPSAdmission:
         return True
 
     def status(self, now):
+        # Age the measurement itself, not just its arrival at this process.
+        self.age_bound = self.clock.age(self.last_fix, now) if self.last_fix is not None else None
         accepted = (not self.fault and self.last_good is not None
                     and self.last_accepted is not None
+                    and self.age_bound is not None and self.age_bound <= self.max_age
                     and 0 <= now-self.last_accepted <= self.max_age)
-        return dict(qualified=bool(accepted), reason=self.fault or self.reason,
+        reason = self.reason
+        if self.last_accepted is not None and not accepted:
+            reason = 'Cube fix timing unavailable or stale'
+            self.invalidate(reason)
+        return dict(qualified=bool(accepted), reason=self.fault or reason,
                     cube_fix_age_upper_s=self.age_bound,
                     timing_basis='Cube last-fix time; not receiver epoch',
                     receiver_delay_bound_s=None, fault=self.fault)

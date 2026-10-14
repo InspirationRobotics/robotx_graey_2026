@@ -60,7 +60,7 @@ class WaypointAPI:
         if self.clock()-item['created'] > 30:
             raise ValueError('Preview expired; select the point again')
         base = self.baseline(nav)
-        if (base['origin'] != item['base']['origin'] or base['session'] != item['base']['session']
+        if (base['origin'][:2] != item['base']['origin'][:2] or base['session'] != item['base']['session']
                 or math.dist(base['local'], item['base']['local']) > .5):
             raise ValueError('Vehicle/frame moved since preview; select the point again')
         return item, False

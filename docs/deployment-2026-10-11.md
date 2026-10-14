@@ -57,3 +57,16 @@ Next actions before waypoint execution:
    a disarmed surface/submerged transition before enabling mission permission.
 5. Confirm map registration, a short in-pool target, intended control source and
    stop/abort response. No waypoint mission is ready yet.
+
+2026-10-11 Wi-Fi follow-up: user requested removal of yaw offset and Pixhawk
+navigation preparation. Connected at192.168.8.105; verified kill active, disarmed,
+ESC off before restart/writes. Deployed cc7772c yaw_offset_deg0; separate roll
+mounting transform unchanged. Backed up and applied odometry_profile source values;
+fresh readback all match. Initial script readback failed on queued old replies;
+draining then rereading verified with no further writes. Backup/result JSONs are
+Jetson /home/graey/robotx_ws/logs/external-profile-*. New confirmed-surface baseline
+1011.2716064453125hPa. Final bridge healthy, valid DVL/VN, GPS qualified, Surfaced,
+depthabout-0.005m; VN heading86.8deg not physically validated. Output disabled,
+mission observation-only, controller RF/MANUAL/disarmed/SA active/ESC off. Runtime
+override temporary until reboot. Cube fusion/moving waypoint validation remains;
+this is preparation, not waypoint readiness. No full Pixhawk reset or arming.

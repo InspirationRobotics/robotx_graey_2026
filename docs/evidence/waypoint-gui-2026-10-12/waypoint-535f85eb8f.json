@@ -1,0 +1,34 @@
+{
+  "passed": false,
+  "stages": [
+    "STARTING",
+    "WAIT_SURFACE",
+    "PREPARE",
+    "GUIDED",
+    "ARM",
+    "DIVE",
+    "TRANSIT",
+    "SURFACE",
+    "DISARM",
+    "RECOVER_GPS"
+  ],
+  "gps_outage_seen": true,
+  "underwater_cube_seen": true,
+  "last_retry": "<urlopen error [Errno 111] Connection refused>",
+  "duplicate_idempotent": true,
+  "independent_clock_gaps": [],
+  "wall_clock_adjustments": [
+    {
+      "at": 774.935278921,
+      "wall_step": -2.478975957843204
+    },
+    {
+      "at": 822.443345377,
+      "wall_step": -3.6554989242254123
+    },
+    {
+      "at": 854.661773049,
+      "wall_step": -2.4802823790130333
+    }
+  ]
+}

@@ -679,3 +679,49 @@ heading block waypoint readiness. Scoped temporary runtime override expires at
 reboot. Controller ended disarmed MANUAL/RF, SA active, ESC off. Online branch and
 Jetson include the same navigation changes but Jetson-only sonar history remains.
 See docs/deployment-2026-10-11.md; this is dated evidence, not future live status.
+
+2026-10-11 Wi-Fi follow-up: user requested removal of yaw offset and Pixhawk
+navigation preparation. Connected at192.168.8.105; verified kill active, disarmed,
+ESC off before restart/writes. Deployed cc7772c yaw_offset_deg0; separate roll
+mounting transform unchanged. Backed up and applied odometry_profile source values;
+fresh readback all match. Initial script readback failed on queued old replies;
+draining then rereading verified with no further writes. Backup/result JSONs are
+Jetson /home/graey/robotx_ws/logs/external-profile-*. New confirmed-surface baseline
+1011.2716064453125hPa. Final bridge healthy, valid DVL/VN, GPS qualified, Surfaced,
+depthabout-0.005m; VN heading86.8deg not physically validated. Output disabled,
+mission observation-only, controller RF/MANUAL/disarmed/SA active/ESC off. Runtime
+override temporary until reboot. Cube fusion/moving waypoint validation remains;
+this is preparation, not waypoint readiness. No full Pixhawk reset or arming.
+
+## October 12 teammate context and waypoint audit
+User supplied Ruth's sonar reports dated Oct4, Oct10 and Oct11. Originals copied
+under docs/teammate-context; Oct11 explicitly supersedes misleading Oct10 pipe-band
+and ESC-noise conclusions. These are attributed teammate observations; recordings
+and camera attachments were not provided or independently inspected. Sonar map
+uses its own VN/DVL dead-reckoned Start frame, not Cube global navigation. Latest
+reported2b30056 sonar history was preserved in Oct11 deployment, not published as
+part of nav work. See docs/session-after-source-switching-2026-10-08.md for the
+consolidated history and correction provenance. Current live status not inferred.
+
+2026-10-12 local GUI audit:159 regressions pass; continuous production ROS bridge,
+supervisor, native ArduSub and GUI API now complete nominal dive/transit/surface
+missions with underwater GPS outage/recovery; operator Abort confirms MANUAL.
+Final deterministic fixture endpoint errorabout0.111m, not physical accuracy.
+Fixed TIMESYNC reply polling50ms vs50ms RTT gate (now10ms receive,20Hz output),
+bounded MAVLink drain, preserved callback error exits, monotonic independent-truth
+SITL fixtures. GUI map/status/zoom/track improved and browser inspected. No live
+deployment or mission enablement. Approximate pool-image live targets remain
+blocked; commissioned geographic route tested. See docs/waypoint-gui-audit-2026-10-12.md
+and committed failed/successful validation JSONs. Prior stationary-only limits
+are superseded for local runtime reachability, not live commissioning.
+
+2026-10-12 second architecture review: fixed receipt-only GPS qualification expiry
+(now checks current Cube-fix age and requalifies), waypoint pilot-mode takeover
+handling in ARM/DISARM, altitude-only origin metadata false aborts, and nonfinite
+pressure crashing bridge diagnostic JSON. 165 regressions and both GUI script
+checks pass; continuous GUI/API native SITL nominal and Abort runs pass. No live
+deployment. Identified remaining mission-process-death gap: kill watchdog treats
+GUIDED as autonomous; expiring mission Bool does not itself guarantee MANUAL.
+Independent run-scoped mission-liveness policy needs design and fault injection
+before unattended operation. See docs/architecture-review-2026-10-12.md. This is
+not a declaration of live readiness; existing untracked nav_lgoic.md preserved.

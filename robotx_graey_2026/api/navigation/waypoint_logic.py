@@ -101,12 +101,15 @@ class WaypointRun:
             failure = 'Mission callback missed freshness deadline'
         if o.get('abort'):
             failure = 'Operator aborted; pilot takeover requested'
-        if moving and (o.get('armed') is False or o.get('mode') not in (None, 4)):
+        if (moving and o.get('armed') is False) or (
+                self.stage in self.moving | {'ARM', 'DISARM'} and o.get('mode') not in (None, 4)):
             self.abort(now, 'Pilot changed mode or vehicle disarmed', pilot=True)
             return []
         if now-self.since > (10. if self.stage in ('GUIDED', 'ARM', 'DISARM') else 90.):
             failure = 'Mission stage timed out: '+self.stage
-        if self.origin is not None and tuple(o.get('origin') or ()) != self.origin:
+        # Geographic altitude metadata is independent of calibrated pressure
+        # depth and the frozen local-down offset. Only NE origin defines targets.
+        if self.origin is not None and tuple(o.get('origin') or ())[:2] != self.origin[:2]:
             failure = 'Cube origin unavailable or changed'
         if (moving or self.stage in ('GUIDED', 'ARM')) and (not s.get('navigation_ready') or not s.get('reference_current')
                        or not (s.get('fusion_policy') == 'continuous' or s.get('confirmed_source') == 'Underwater')

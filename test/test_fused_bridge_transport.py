@@ -54,6 +54,20 @@ class TransportTests(unittest.TestCase):
                                           velocity=[0, 0, 0], sensor_time=1))))
         self.assertFalse(self.b.est.motion_valid)
 
+    def test_nonfinite_pressure_blocks_output_without_crashing_status(self):
+        for pressure in (math.nan, math.inf):
+            self.clock.now += .1
+            stamp = round(self.clock.now*1000)
+            m = NS(time_boot_ms=stamp, press_abs=pressure,
+                   get_srcSystem=lambda: 1, get_srcComponent=lambda: 1)
+            self.b.consume('SCALED_PRESSURE2', m)
+            self.b.tick()
+            status = json.loads(self.b.pub.publish.call_args.args[0].data)
+            self.assertIsNone(status['pressure_sample']['hpa'])
+            self.assertIsNone(status['depth_m'])
+            self.assertFalse(status['healthy'])
+            self.b.link.odometry.assert_not_called()
+
     def test_profile_readback_expires_and_inhibits_output(self):
         self.b.params = {k: (10., v) for k, v in PROFILE.items()}
         self.assertTrue(self.b.configured(10.))
@@ -72,3 +86,14 @@ class TransportTests(unittest.TestCase):
         for slot in (1, 2, 3):
             for axis in ('POSXY', 'VELXY', 'POSZ', 'YAW'):
                 self.assertEqual(PROFILE[f'EK3_SRC{slot}_{axis}'], 6)
+
+    def test_fast_receive_polling_does_not_flood_odometry(self):
+        self.b.params = {k: (10., v) for k, v in PROFILE.items()}
+        self.b.est.status = lambda now: dict(healthy=True)
+        self.b.tick()
+        self.clock.now = 10.01
+        self.b.tick()
+        self.assertEqual(self.b.link.odometry.call_count, 1)
+        self.clock.now = 10.06
+        self.b.tick()
+        self.assertEqual(self.b.link.odometry.call_count, 2)
