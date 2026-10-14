@@ -16,6 +16,7 @@ from std_msgs.msg import Bool, Float32, String
 
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.pixhawk.mavlink import Link, mavutil
+from .bridge_estimator import yaw_rotate
 
 
 def qrotate(q, v):
@@ -31,6 +32,8 @@ class SitlSensorSim(Node):
         super().__init__('sitl_sensor_sim')
         self.declare_parameter('mavlink', 'udpout:127.0.0.1:14558')
         self.declare_parameter('truth_only', False)
+        self.declare_parameter('relative_yaw_offset_deg', 0.)
+        self.relative_yaw_offset = self.get_parameter('relative_yaw_offset_deg').value
         self.truth_only = self.get_parameter('truth_only').value
         self.link = Link(self.get_parameter('mavlink').value, 201, self.get_logger())
         self.imu_pub = self.create_publisher(Imu, '/graey/vn100/imu', 20)
@@ -74,7 +77,7 @@ class SitlSensorSim(Node):
         imu = Imu()
         imu.header.stamp = stamp
         imu.header.frame_id = 'vn100_sitl'
-        imu.orientation.w, imu.orientation.x, imu.orientation.y, imu.orientation.z = q
+        imu.orientation.w, imu.orientation.x, imu.orientation.y, imu.orientation.z = yaw_rotate(q, self.relative_yaw_offset)
         imu.angular_velocity.x, imu.angular_velocity.y, imu.angular_velocity.z = attitude['rates']
         self.imu_pub.publish(imu)
         sample = dict(stamp_ns=stamp_ns, velocity=body_velocity, valid=True,

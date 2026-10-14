@@ -735,3 +735,59 @@ DVL invalid and depth/GPS/heading readiness unconfirmed on land. User requested
 waiting until floating with bottom lock. No parameter writes, output enablement,
 arming or mission. See docs/deployment-2026-10-13.md; current physical status must
 be checked again, and mission-process-death safeguard remains outstanding.
+
+2026-10-13 continuous-only deployment: navigation commit81fd138 merged on Jetson
+as35eaec8, preserving sonar history.117 current regressions passed locally and
+on Jetson; native GUI/API nominal and Abort simulations passed with underwater
+GPS outage. Legacy switching runtime and executable registration removed; stale
+installed launcher archived outside executable directory. User confirmed floating,
+killed/disarmed. Session pressure baseline997.84228515625hPa applied. Initial DVL
+continuity fault required controlled core restart; subsequent passive check passed
+bridge health, DVL/VN, surface depthabout0.032m, GPS admission and Cube profile.
+Output and supervisor remain disabled. Physical heading reported68deg; observed
+VN263deg and Cube12deg disagree. VN yaw offset readback0.0, roll flipTrue. Heading
+NOT commissioned; no arbitrary correction, arming or mission performed. Persistent
+startup stays continuous observation; surface baseline is session-only. See
+ docs/continuous-only-2026-10-13.md. These are dated observations, not live status.
+
+October 13 rotation check: user ready at requested approximately124deg after
+stationary34deg reference. Fresh VN334.090deg and Cube98.422deg; previous
+VN261.746deg/Cube22.106deg. Observed clockwise changes72.344deg/76.316deg,
+versus requested approximately90deg. Both respond in the same direction, but
+absolute heading remains unvalidated. Approximate physical endpoints do not
+establish sensor scale or justify a fixed yaw offset. No parameter writes.
+
+2026-10-14 offline VN workflow: user reports teammate restored relative mode for
+magnetic interference and selected GPS/DVL surface movement for north alignment.
+Production VN driver now verifies relative mode at connection without saving flash.
+New guided tools/vn_calibrate.py acquires sole-reader lock, backs up registers,
+collects slow3D HSI/six-face coverage and stops learning on interruption; volatile
+only, hardware bench validation pending. Every new core bridge session now needs
+GPS/DVL velocity-vector north alignment before position initialization/odometry.
+No stationary GPS yaw assumption; timing/pressure/GPS/DVL/tilt/rate/speed/dwell gates
+apply. GUI shows alignment status. New checked session commissioning service enables
+supervisor after healthy Cube fusion/aligned odometry and fresh kill/disarm/ESC-off,
+without restarting bridge. Launch flags default output and mission off.130 regression
+tests, browser checks, nominal and Abort native GUI/SITL runs pass; injected40deg
+relative-reference error recovered as-40deg. These are simulated results, not live
+accuracy. Graey offline; SSH timed out. No deployment, live sensor writes, odometry
+activation, arming or vehicle mission. See docs/vn-pretest-workflow-2026-10-14.md.
+Earlier relative-mode diagnosis was overstated: relative mode alone does not prove
+arbitrary yaw/no north reference. Compass disabled/external yaw meant Cube yaw was
+not an independent compass reference in October13 comparisons. North-reference,
+magnetic calibration, mounting/body axes and timing require separate validation.
+
+2026-10-14 GUI follow-up: user explicitly prefers VN-100 as primary external
+attitude source over Cube-derived attitude. This is a design priority, not proof
+that VN is accurate under interference; no covariance weighting was tightened.
+Added /calibration page and main/Waypoint links. GUI jobs suspend mission permission
+and odometry, run HSI calibration in the existing VN reader (no competing serial
+owner), show120s/six-face progress and stop/fail on safety/link/readback problems.
+Prepare requires explicit floating-surface confirmation and stable fresh pressure,
+starts new relative-VN/GPS/DVL north alignment, and waits for killed/disarmed Cube
+fusion verification before checked session mission activation. No arm/mode/ESC
+commands. Bridge reset counter increments on controlled preparation; Cube origin
+stays continuous. Hardware kill/watchdog faults are not cleared by preparation.
+Reproduced/fixed supervisor crash on None VN/DVL received timestamp; regression
+added. New GUI physical calibration/positive commissioning paths await hardware;
+Graey remains offline and changes are not deployed. See docs/calibration-gui-2026-10-14.md.

@@ -32,6 +32,12 @@ def generate_launch_description():
             description='Pressure-gated external odometry; disabled pending commissioning'),
         DeclareLaunchArgument('surface_pressure_hpa', default_value='0.0',
             description='Measured confirmed-surface pressure for experimental bridge; zero disables depth'),
+        DeclareLaunchArgument('odometry_enabled', default_value='false',
+            description='Permit output only after automatic north alignment and sensor/profile checks'),
+        DeclareLaunchArgument('mission_commissioned', default_value='false',
+            description='Enable supervisor after live Cube fusion and mission checks'),
+        DeclareLaunchArgument('waypoint_enabled', default_value='0',
+            description='Set 1 to expose live waypoint execution after commissioning; readiness gates still apply'),
         Node(package=PKG, executable='led_node', name='led_node', output='screen', **RESPAWN),
         Node(package=PKG, executable='pixhawk_led_node', name='pixhawk_led_node', output='screen', **RESPAWN),
         # Belongs in the CORE stack, not the mission: SA must kill whether or not a
@@ -43,11 +49,16 @@ def generate_launch_description():
         Node(package=PKG, executable='vn100_node', name='vn100_node',
              parameters=[{'yaw_offset_deg': 0.0}], output='screen', **RESPAWN),
         Node(package=PKG, executable='fused_nav_bridge', name='nav_ekf_bridge',
-             parameters=[{'enabled': False, 'surface_pressure_hpa': ParameterValue(
+             parameters=[{'enabled': ParameterValue(LaunchConfiguration('odometry_enabled'), value_type=bool),
+                 'auto_north_alignment': True, 'require_disarmed_start': True,
+                 'surface_pressure_hpa': ParameterValue(
                  LaunchConfiguration('surface_pressure_hpa'), value_type=float)}], output='screen', respawn=False),
         Node(package=PKG, executable='navigation_supervisor', name='navigation_supervisor',
-             parameters=[{'active': False, 'continuous_fusion': ParameterValue(
+             parameters=[{'active': ParameterValue(LaunchConfiguration('mission_commissioned'), value_type=bool),
+                 'vehicle_validation_complete': ParameterValue(LaunchConfiguration('mission_commissioned'), value_type=bool),
+                 'continuous_fusion': ParameterValue(
                  LaunchConfiguration('continuous_fusion'), value_type=bool)}], output='screen', **RESPAWN),
-        Node(package=PKG, executable='gui_node', name='gui_node', output='screen', **RESPAWN),
+        Node(package=PKG, executable='gui_node', name='gui_node', output='screen',
+             additional_env={'GRAEY_WAYPOINT_ENABLED': LaunchConfiguration('waypoint_enabled')}, **RESPAWN),
     ])
 

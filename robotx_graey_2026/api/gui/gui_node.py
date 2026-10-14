@@ -26,6 +26,7 @@ from std_msgs.msg import Int32, Bool, Float32, String
 from geometry_msgs.msg import TwistWithCovarianceStamped
 from robotx_graey_2026.api.gui.navigation_view import NavigationView
 from robotx_graey_2026.api.gui.waypoint_api import WaypointAPI
+from robotx_graey_2026.api.gui.calibration_jobs import CalibrationJobs, ServiceQueue
 
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.process_ownership import executable_pids
@@ -57,6 +58,7 @@ FILES = {
     '/planner': 'pool_planner.html',
     '/pool-map': 'waypoint.html',
     '/waypoint': 'waypoint.html',
+    '/calibration': 'calibration.html',
     '/pool_reference.png': 'pool_reference.png',
     '/pool.png': 'pool.png',
     '/neighbor_pool.png': 'neighbor_pool.png',
@@ -124,6 +126,7 @@ waypoint_api = WaypointAPI()
 waypoint_aborts = queue.Queue()
 waypoint_process = None
 waypoint_launch = None
+calibration_jobs = None
 
 
 def waypoint_simulation():
@@ -135,6 +138,8 @@ def waypoint_simulation():
 def waypoint_capabilities():
     sim = waypoint_simulation()
     enabled = sim or os.environ.get('GRAEY_WAYPOINT_ENABLED') == '1'
+    if calibration_jobs is not None and calibration_jobs.snapshot().get('action'):
+        enabled = calibration_jobs.waypoint_permission and not calibration_jobs.snapshot().get('busy')
     return dict(simulation=sim, enabled=enabled,
                 pool_registration='approximate',
                 mapping_note=('Screenshot scale/anchor are approximate, not surveyed. Live pool-image starts are blocked.'
@@ -156,6 +161,8 @@ def waypoint_request(body):
         return dict(ok=True, msg='Abort requested; verify MANUAL mode and take control')
     if action != 'start':
         raise ValueError('Unknown waypoint action')
+    if calibration_jobs is not None and calibration_jobs.snapshot().get('busy'):
+        raise ValueError('Finish or cancel navigation preparation before starting a mission')
     item, duplicate = waypoint_api.consume(body.get('plan_id'), nav)
     if duplicate:
         return dict(ok=True, run_id=item['run_id'], duplicate=True)
@@ -566,6 +573,8 @@ def led_blackout(on):
 
 
 def mission_start(query):
+    if calibration_jobs is not None and calibration_jobs.snapshot().get('busy'):
+        return False, 'Finish or cancel calibration/preparation before starting a mission'
     if any_mission_running():
         return False, 'a mission is already running'
 
@@ -670,7 +679,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path not in ('/api/controller', '/api/navigation/reset', '/api/waypoint'):
+        if path not in ('/api/controller', '/api/navigation/reset', '/api/waypoint', '/api/calibration'):
             self.send_error(404)
             return
 
@@ -692,6 +701,20 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(size))
             if not isinstance(body, dict):
                 raise ValueError('expected object')
+
+            if path == '/api/calibration':
+                with operation_lock:
+                    try:
+                        if calibration_jobs is None:
+                            raise ValueError('Calibration services unavailable')
+                        result = calibration_jobs.request(body)
+                        if body.get('action') in ('calibrate','prepare'):
+                            navigation.reset_display()
+                    except (ValueError, TypeError, OSError) as error:
+                        self.reply_json(409, dict(ok=False,msg=str(error)))
+                        return
+                self.reply_json(202,dict(ok=True,job=result))
+                return
 
             if path == '/api/waypoint':
                 with operation_lock:
@@ -742,6 +765,12 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         u = urlparse(self.path)
         query = parse_qs(u.query)
+
+        if u.path == '/api/calibration':
+            self.reply_json(200,dict(job=calibration_jobs.snapshot() if calibration_jobs else {},
+                controller=control_bridge.snapshot() if control_bridge else {},
+                navigation=navigation.snapshot()))
+            return
 
         if u.path == '/api/waypoint':
             with operation_lock:
@@ -893,7 +922,7 @@ class Handler(BaseHTTPRequestHandler):
 class GuiNode(Node):
     def __init__(self):
         super().__init__('gui_node')
-        global web_dir, link, control_bridge
+        global web_dir, link, control_bridge, calibration_jobs
 
         self.declare_parameter('port', 8090)
         self.declare_parameter('web_dir', web_dir)
@@ -914,6 +943,14 @@ class GuiNode(Node):
 
         control_bridge = ControlBridge()
         self.control_bridge = control_bridge
+        self.calibration_services = ServiceQueue(self)
+        calibration_jobs = CalibrationJobs(control_bridge.snapshot,navigation.snapshot,
+            self.calibration_services.request,any_mission_running)
+        self.create_timer(.05,self.calibration_services.pump)
+        self.create_subscription(String, '/graey/vn100/calibration',
+            lambda msg: self.calibration_sample('vn_calibration',msg),10)
+        self.create_subscription(String, '/graey/navigation/bridge_status',
+            lambda msg: self.calibration_sample('bridge',msg),10)
         self.control_pub = self.create_publisher(
             String, CONTROL_REQUEST_TOPIC, 10
         )
@@ -972,6 +1009,14 @@ class GuiNode(Node):
             if isinstance(value, dict):
                 navigation.put('waypoint', value)
         except (ValueError, TypeError):
+            pass
+
+    def calibration_sample(self, name, msg):
+        try:
+            value = json.loads(msg.data)
+            if isinstance(value,dict):
+                navigation.put(name,value)
+        except (ValueError,TypeError):
             pass
 
     def flush_waypoint_aborts(self):
