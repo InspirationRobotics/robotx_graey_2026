@@ -171,3 +171,16 @@ north offset plus uninterrupted live VN orientation, NOT a new independent
 compass observation. Recovery JSONs under deployment-backups preserve provenance;
 GUI's generic Operator measured label alone is not sufficient provenance here.
 Automatic bounded DVL-dropout recovery remains separate and is not implemented.
+
+2026-10-14 explicit recovery verified: fixed Prepare's supervisor old-fault race
+in afb9b1f, rebuilt/deployed GUI only (bridge/sensors preserved),163 tests passed
+on Jetson. Recovery using retained true frame completed Ready; bridge fault empty,
+healthy/transmitting, reset_counter3. Cube LOCAL_POSITION_NED fresh age0.171s,
+EKF flags831 accepted, Cube estimate valid and heading288.4deg at that sample.
+Killed/disarmed/ESC-off throughout; no Cube reboot or source/firmware parameter
+write. First stationary check aborted without mutation; subsequent recovery attempt
+failed old supervisor latch before the fix. Original known20deg reference had
+rotated with VN; recovered286.318deg is DERIVED from retained reference, not newly
+measured true north. Preserve this provenance despite generic GUI method label.
+Automatic DVL dropout fault recovery is NOT added: explicit Prepare now recovers
+Cube without core restart. Underwater missing velocity cannot be silently repaired.
