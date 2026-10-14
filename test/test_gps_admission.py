@@ -1,7 +1,7 @@
 import unittest
 from robotx_graey_2026.api.navigation.gps_admission import CubeClock, GPSAdmission
 from robotx_graey_2026.api.navigation.continuous_supervisor import ContinuousSupervisor
-from robotx_graey_2026.api.navigation.supervisor_logic import Observation
+from robotx_graey_2026.api.navigation.continuous_supervisor import Observation
 
 
 class AdmissionTests(unittest.TestCase):

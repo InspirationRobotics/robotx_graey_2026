@@ -14,8 +14,9 @@ job is Mission Task 2 (Infrastructure Survey & Repair). Its Proof of Readiness
 ## Architecture
 
 GPS/navigation supervisor implementation and commissioning limits:
-[Navigation supervisor](docs/navigation-supervisor.md). The supervisor starts in
-observation mode; automatic source switching and supervised missions are opt-in.
+[Continuous navigation](docs/continuous-only-2026-10-13.md). Core always runs the
+continuous bridge. Odometry output and mission permission require commissioning;
+legacy source switching has been removed from the runtime.
 The local ArduSub software-in-the-loop workflow is documented in
 [SITL validation](docs/sitl-validation.md).
 

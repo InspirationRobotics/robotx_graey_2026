@@ -28,7 +28,7 @@ RESPAWN = {'respawn': True, 'respawn_delay': 2.0}
 
 def generate_launch_description():
     return LaunchDescription([
-        DeclareLaunchArgument('continuous_fusion', default_value='false',
+        DeclareLaunchArgument('continuous_fusion', default_value='true',
             description='Pressure-gated external odometry; disabled pending commissioning'),
         DeclareLaunchArgument('surface_pressure_hpa', default_value='0.0',
             description='Measured confirmed-surface pressure for experimental bridge; zero disables depth'),
@@ -42,11 +42,7 @@ def generate_launch_description():
         # Retain the separate physical roll mounting transform.
         Node(package=PKG, executable='vn100_node', name='vn100_node',
              parameters=[{'yaw_offset_deg': 0.0}], output='screen', **RESPAWN),
-        Node(package=PKG, executable='nav_ekf_bridge', name='nav_ekf_bridge',
-             condition=UnlessCondition(LaunchConfiguration('continuous_fusion')),
-             output='screen', respawn=False),
         Node(package=PKG, executable='fused_nav_bridge', name='nav_ekf_bridge',
-             condition=IfCondition(LaunchConfiguration('continuous_fusion')),
              parameters=[{'enabled': False, 'surface_pressure_hpa': ParameterValue(
                  LaunchConfiguration('surface_pressure_hpa'), value_type=float)}], output='screen', respawn=False),
         Node(package=PKG, executable='navigation_supervisor', name='navigation_supervisor',

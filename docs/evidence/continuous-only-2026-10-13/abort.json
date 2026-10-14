@@ -1,0 +1,159 @@
+{
+  "passed": true,
+  "continuous": true,
+  "stages": [
+    "STARTING",
+    "WAIT_SURFACE",
+    "PREPARE",
+    "GUIDED",
+    "ARM",
+    "DIVE",
+    "TRANSIT",
+    "ABORTED"
+  ],
+  "gps_outage_seen": true,
+  "underwater_cube_seen": true,
+  "last_retry": "<urlopen error [Errno 111] Connection refused>",
+  "duplicate_idempotent": true,
+  "mission": {
+    "run_id": "d6e48bb87cbc4d98b4f30130c292b40d",
+    "stage": "ABORTED",
+    "reason": "Operator aborted; pilot takeover requested",
+    "plan": {
+      "lat": 32.92362597472926,
+      "lon": -117.03851279807449,
+      "depth_m": 0.5,
+      "map": "geographic"
+    },
+    "surface_start": [
+      32.9236125,
+      -117.0385234
+    ],
+    "start_cube": [
+      -0.009386944584548473,
+      0.0093834875151515,
+      -0.0998145043849945
+    ],
+    "target_cube": [
+      1.5000000003379315,
+      1.0000000003399643,
+      0.4001854956150055
+    ],
+    "surface_down": -0.0998145043849945,
+    "heading_rad": 0.0011432155733928084,
+    "complete": false,
+    "simulation": true,
+    "published_monotonic": 60.577656063,
+    "telemetry_fresh": true,
+    "confirmed_source": "Continuous fusion"
+  },
+  "supervisor": {
+    "state": "DVL continuation",
+    "reason": "Continuous estimate healthy",
+    "mode": "Active",
+    "fusion_policy": "continuous",
+    "requested_source": "Continuous fusion",
+    "confirmed_source": "Continuous fusion",
+    "navigation_ready": true,
+    "surfaced": false,
+    "surface_state": "Submerged",
+    "run_id": "d6e48bb87cbc4d98b4f30130c292b40d",
+    "reference": {
+      "schema": 1,
+      "reference_id": "edcc94bb-67bc-41f6-b8b8-1aacceab8aac",
+      "run_id": "d6e48bb87cbc4d98b4f30130c292b40d",
+      "vehicle_epoch": "faf7f0c9-cc06-4178-a377-d821052834bd",
+      "gps_lat": 32.9236125,
+      "gps_lon": -117.0385235,
+      "gps_msl_alt": -0.12,
+      "gps_accuracy_m": 0.3,
+      "gps_time_us": 41420000,
+      "cube_ned": [
+        -0.009512020274996758,
+        0.009509436786174774,
+        -0.10039526224136353
+      ],
+      "captured_utc": "2026-10-14T01:58:42.710707+00:00"
+    },
+    "mission_ned": [
+      0.002407121006399393,
+      -0.0009751301258802414,
+      0.4065645933151245
+    ],
+    "reference_current": true,
+    "depth_m": 0.4100000262260437,
+    "gps_qualified_input": false,
+    "gps_quality_reason": "Pressure surface eligibility unavailable",
+    "configuration_verified": true,
+    "target_gps": {
+      "lat": 32.92362597472926,
+      "lon": -117.03851279807449,
+      "depth_m": 0.5,
+      "map": "geographic"
+    },
+    "gps_admission": {
+      "qualified": false,
+      "reason": "Pressure surface eligibility unavailable",
+      "cube_fix_age_upper_s": 4.088252770468892,
+      "timing_basis": "Cube last-fix time; not receiver epoch",
+      "receiver_delay_bound_s": null,
+      "fault": "",
+      "fix": {
+        "cube_fix_time_us": 41620000,
+        "received": 53.174771397,
+        "lat": 32.9236125,
+        "lon": -117.0385235,
+        "alt": -0.12,
+        "fix": 6,
+        "accuracy": 0.3,
+        "speed_mps": 0.0,
+        "course_deg": 0.0,
+        "speed_accuracy_mps": 0.04
+      },
+      "applied_recently": false
+    },
+    "dive_heading_check": {
+      "state": "Not applicable",
+      "allowed": false,
+      "reason": "Pre-dive check requires confirmed surface state",
+      "course_deg": null,
+      "vn_error_deg": null,
+      "cube_error_deg": null,
+      "correction_applied": false
+    },
+    "published_monotonic": 60.560511934
+  },
+  "final_local": [
+    -0.006996873300522566,
+    0.008409503847360611,
+    0.3070642948150635
+  ],
+  "final_target_error_m": 1.803965434782641,
+  "independent_clock_gaps": [],
+  "wall_clock_adjustments": [
+    {
+      "at": 33.799427488,
+      "wall_step": 1.0779828210987574
+    },
+    {
+      "at": 34.100918326,
+      "wall_step": -1.097116650625118
+    },
+    {
+      "at": 42.955346462,
+      "wall_step": 1.0705386199083264
+    },
+    {
+      "at": 43.106053534,
+      "wall_step": -1.0199711786508772
+    },
+    {
+      "at": 51.947390972,
+      "wall_step": 1.0468466785107395
+    },
+    {
+      "at": 52.097901232,
+      "wall_step": -1.0464956719965812
+    }
+  ]
+}

@@ -10,14 +10,14 @@
 <article><h2>Navigation state</h2><div id="state" class="value">Unavailable</div></article>
 <article><h2>Mission readiness</h2><div id="ready" class="value">Unavailable</div></article>
 <article><h2>Requested fusion policy</h2><div id="requested" class="value">Unavailable</div></article>
-<article><h2>Verified configuration / legacy source</h2><div id="confirmed" class="value">Unknown</div></article>
+<article><h2>Verified continuous configuration</h2><div id="confirmed" class="value">Unknown</div></article>
 <article><h2>Calibrated depth</h2><div id="depth" class="value">Unavailable</div></article>
 <article><h2>Depth-qualified vehicle state</h2><div id="surfaceState" class="value">Unknown</div></article></div>
 <p id="reason">Waiting for status</p>
 <p id="gpsQuality">GPS qualification unavailable</p>
 <p id="gpsTiming">GPS timing unavailable</p><p id="headingCheck">Pre-dive heading check unavailable</p>
 <article><h2>Dive start / mission zero</h2><div id="reference">No dive reference captured</div></article>
-<footer>Observation mode displays recommendations. Source selection alone does not prove GPS fusion. Dive zero uses a Jetson mission reference; the Cube coordinate frame stays continuous.</footer></main>
+<footer>Observation mode displays recommendations. Odometry transmission alone does not prove Cube fusion. Dive zero uses a Jetson mission reference; the Cube coordinate frame stays continuous.</footer></main>
 <script>
 'use strict';const $=id=>document.getElementById(id);let last=null,received=0,pollError='';
 function render(){const live=last?.fresh&&performance.now()-received<2000,s=live?last.data:null;
@@ -29,7 +29,7 @@ $('ready').textContent=s?(s.navigation_ready?'Ready':'Waiting / blocked'):'Unava
 $('reason').textContent=s?.reason??'No current supervisor decision. Previous permissions have expired.';
 $('gpsQuality').textContent='GPS: '+(s?.gps_quality_reason??'Qualification unavailable');
 const g=s?.gps_admission;
-$('gpsTiming').textContent=g?`${g.applied_recently?'Bridge GPS correction recent':'GPS correction withheld'} · ${g.timing_basis} · fix age bound ${Number.isFinite(g.cube_fix_age_upper_s)?(1000*g.cube_fix_age_upper_s).toFixed(0)+' ms':'unknown'} · receiver delay unknown · odometry transmission is not proof of Cube fusion`:'GPS timing unavailable / legacy source switching';
+$('gpsTiming').textContent=g?`${g.applied_recently?'Bridge GPS correction recent':'GPS correction withheld'} · ${g.timing_basis} · fix age bound ${Number.isFinite(g.cube_fix_age_upper_s)?(1000*g.cube_fix_age_upper_s).toFixed(0)+' ms':'unknown'} · receiver delay unknown · odometry transmission is not proof of Cube fusion`:'GPS timing unavailable';
 $('headingCheck').textContent='Pre-dive heading: '+(s?.dive_heading_check?.state??'Unavailable')+' — '+(s?.dive_heading_check?.reason??'No current assessment');
 $('depth').textContent=Number.isFinite(s?.depth_m)?s.depth_m.toFixed(2)+' m · pressure sensor':(live?'Surface pressure calibration or pressure samples unavailable':'Waiting for supervisor connection');
 $('surfaceState').textContent=depthKnown?(s?.surface_state??(s?.surfaced===true?'Surfaced':s?.surfaced===false?'Submerged':'Unknown')):'Unknown';

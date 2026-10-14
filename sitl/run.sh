@@ -44,12 +44,8 @@ finally:
     for s in held:
         s.close()
 PY
-cp "$ROOT/sitl/scripts/navigation_source_report.lua" "$RUN_DIR/scripts/"
-PARAM_FILE="$ROOT/params/sitl_graey.parm"
-CLOCK_ARGS=(--synthetic-clock)
-if [[ "${CONTINUOUS_FUSION:-false}" == true ]]; then
-  CLOCK_ARGS=()
-  PARAM_FILE="$RUN_DIR/continuous.parm"
+CLOCK_ARGS=()
+PARAM_FILE="$RUN_DIR/continuous.parm"
   python3 - "$PARAM_FILE" <<'PY'
 import sys
 from robotx_graey_2026.api.navigation.odometry_profile import PROFILE
@@ -57,7 +53,6 @@ p=dict(PROFILE, SYSID_THISMAV=1, EK2_ENABLE=0, SCR_ENABLE=0, SIM_GPS_DISABLE=0, 
        SIM_BARO_RND=0, SIM_BARO_DRIFT=0)
 open(sys.argv[1],'w').write('\n'.join(f'{k} {v}' for k,v in p.items()))
 PY
-fi
 # Preserve prior evidence, but never mistake yesterday's result for this run.
 if [[ -f "$LOG_DIR/scenario-result.json" ]]; then
   mv "$LOG_DIR/scenario-result.json" "$LOG_DIR/scenario-result.previous.$(date +%s%N).json"
@@ -114,7 +109,7 @@ colcon build --symlink-install --packages-select robotx_graey_2026
 source install/setup.bash
 ros2 launch robotx_graey_2026 sitl.launch.py \
   interactive_waypoint:="${WAYPOINT_INTERACTIVE:-false}" \
-  continuous_fusion:="${CONTINUOUS_FUSION:-false}" \
+  continuous_fusion:="true" \
   surface_pressure_hpa:="${SURFACE_PRESSURE_HPA:-1013.25}" \
   supervisor_mavlink:="${SUPERVISOR_MAVLINK:-udpout:127.0.0.1:14557}" \
   result_file:="$LOG_DIR/scenario-result.json" \

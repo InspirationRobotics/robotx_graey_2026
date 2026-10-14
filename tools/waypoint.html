@@ -11,7 +11,7 @@ header{border-bottom:1px solid #344655;background:#15222e}main{gap:1px;backgroun
 <label>Dive depth (m) <input id="depth" type="number" min="0.3" max="1" step="0.1" value="0.5" style="width:85px"></label>
 <div id="preview">Select a point on the map.</div><button id="start" disabled>Start mission</button> <button id="abort" disabled>Abort / take control</button><p id="message"></p>
 <p id="readiness" role="status">Waiting for navigation checks.</p>
-<dl><dt>Mission</dt><dd id="stage">—</dd><dt>Navigation source / state</dt><dd id="source">—</dd><dt>Cube latitude, longitude</dt><dd id="position">—</dd><dt>Cube heading / calibrated depth</dt><dd id="attitude">—</dd><dt>Cube local north, east, down (m)</dt><dd id="local">—</dd><dt>Surface start</dt><dd id="origin">Not captured</dd></dl>
+<dl><dt>Mission</dt><dd id="stage">—</dd><dt>Navigation fusion / state</dt><dd id="source">—</dd><dt>Cube latitude, longitude</dt><dd id="position">—</dd><dt>Cube heading / calibrated depth</dt><dd id="attitude">—</dd><dt>Cube local north, east, down (m)</dt><dd id="local">—</dd><dt>Surface start</dt><dd id="origin">Not captured</dd></dl>
 <p class="small">Blue = Cube estimate, including underwater. Green = captured Cube surface start. Pink = target. Gold = raw GPS ± receiver-reported accuracy (not a guaranteed error bound). Heading is Cube attitude, not GPS course.</p><p id="mapping" class="small"></p>
 </aside></main><script>
 'use strict';const $=id=>document.getElementById(id),canvas=$('map'),ctx=canvas.getContext('2d'),image=new Image(),R=6378137;

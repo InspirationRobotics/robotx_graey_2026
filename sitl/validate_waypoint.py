@@ -23,7 +23,7 @@ def api(body=None):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--abort', action='store_true')
-    parser.add_argument('--continuous', action='store_true')
+    parser.add_argument('--continuous', action='store_true', default=True)
     args=parser.parse_args()
     from robotx_graey_2026.api.navigation.waypoint_logic import ne_to_geo
     root=Path(__file__).resolve().parents[1]
