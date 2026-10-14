@@ -156,6 +156,42 @@ class BridgeEstimator:
     def orientation(self):
         return yaw_rotate(self.raw_q, self.north_offset+self.heading_bias)
 
+    def align_known_heading(self, now, degrees):
+        if (isinstance(degrees,bool) or not isinstance(degrees,(int,float))
+                or not math.isfinite(degrees) or not 0 <= degrees < 360):
+            raise ValueError('Enter a true heading from 0 inclusive to 360 exclusive')
+        if self.initialized or self.heading_validated or self.north_alignment is None:
+            raise ValueError('Run Prepare again before changing the north reference')
+        if self.fault or not self.gps_eligible(now):
+            raise ValueError(self.fault or 'Prepare at the floating surface first')
+        rows=[r for r in self.history if 0 <= now-r['t'] <= 2.]
+        if (len(rows)<10 or rows[-1]['t']-rows[0]['t']<1.5
+                or now-rows[-1]['t']>.25 or not self.fresh(self.imu_at,now)
+                or not self.motion_valid):
+            raise ValueError('Hold stationary for two seconds with fresh VN and DVL bottom lock')
+        for row in rows:
+            w,x,y,z=row['q']
+            if (math.sqrt(sum(v*v for v in row['raw_velocity']))>.05
+                    or max(abs(math.degrees(v)) for v in row['rates'])>2.
+                    or 1-2*(x*x+y*y)<math.cos(math.radians(15))):
+                raise ValueError('Keep Graey level and stationary while capturing true heading')
+            if abs(wrap(yaw(row['q'])-yaw(self.raw_q)))>3.:
+                raise ValueError('VN heading changing; hold the nose still before capture')
+        offset=wrap(degrees-yaw(self.raw_q))
+        self.north_offset=offset
+        self.heading_validated=True
+        self.north_alignment.offset=offset
+        self.north_alignment.method='Operator measured true heading'
+        self.north_alignment.reference=dict(true_heading_deg=degrees,vn_heading_deg=yaw(self.raw_q),
+                                            captured_monotonic=now)
+        self.north_alignment.reason=f'True heading {degrees:.1f} deg captured; independently verify alignment'
+        self.position[:2]=[0.,0.]
+        self.pending_gps=None
+        for row in self.history:
+            row['position']=(0.,0.,row['position'][2])
+            row['q']=yaw_rotate(row['q'],offset)
+        return self.north_alignment.reason
+
     def velocity(self):
         return tuple(a+b for a, b in zip(self.raw_velocity, self.velocity_bias))
 

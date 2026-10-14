@@ -1,5 +1,6 @@
 """GUI jobs call existing node services; never start competing navigation nodes."""
 import copy
+import math
 import queue
 import threading
 import time
@@ -10,12 +11,16 @@ from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reas
 class ServiceQueue:
     def __init__(self, node):
         from std_srvs.srv import Trigger, SetBool
+        from rcl_interfaces.srv import SetParametersAtomically
+        from rcl_interfaces.msg import Parameter, ParameterValue
+        self.parameter, self.parameter_value = Parameter, ParameterValue
         self.queue = queue.Queue()
         self.clients = {}
         for name, path, kind in (
             ('suspend','/graey/navigation/suspend',Trigger),
             ('pause','/graey/navigation/pause_odometry',Trigger),
             ('prepare','/graey/navigation/prepare',SetBool),
+            ('align_heading','/graey/navigation/align_heading',SetParametersAtomically),
             ('calibrate','/graey/vn100/calibrate_start',Trigger),
             ('cancel','/graey/vn100/calibrate_cancel',Trigger),
             ('commission','/graey/navigation/commission',Trigger)):
@@ -48,12 +53,18 @@ class ServiceQueue:
         request = kind.Request()
         if job['name'] == 'prepare':
             request.data = job['value'] is True
+        if job['name'] == 'align_heading':
+            request.parameters=[self.parameter(name='true_heading_deg',
+                value=self.parameter_value(type=3,double_value=float(job['value'])))]
         try:
             future = client.call_async(request)
             def done(result):
                 try:
                     response = result.result()
-                    finish(response.success,response.message)
+                    if job['name']=='align_heading':
+                        finish(response.result.successful,response.result.reason)
+                    else:
+                        finish(response.success,response.message)
                 except Exception as error:
                     finish(False,str(error))
             future.add_done_callback(done)
@@ -95,12 +106,22 @@ class CalibrationJobs:
             raise ValueError('Confirm that you read the instructions and maintained kill/disarm')
         if action == 'prepare' and body.get('surface_confirmed') is not True:
             raise ValueError('Confirm floating stationary at the water surface before pressure calibration')
+        mode=body.get('alignment_mode','gps')
+        heading=body.get('true_heading_deg')
+        if action=='prepare':
+            if mode not in ('gps','known'):
+                raise ValueError('Unknown north alignment method')
+            if mode=='known' and (body.get('heading_confirmed') is not True
+                    or isinstance(heading,bool) or not isinstance(heading,(int,float))
+                    or not math.isfinite(heading) or not 0 <= heading < 360):
+                raise ValueError('Confirm an independently measured true heading between 0 and 360 degrees')
         with self.lock:
             if self.job.get('busy'):
                 raise ValueError('A calibration or preparation job is already active')
             self.waypoint_permission = False
             self.job = dict(id=uuid.uuid4().hex,action=action,phase='starting',
-                            busy=True,cancel=False,message='Checking node services')
+                            busy=True,cancel=False,message='Checking node services',
+                            alignment_mode=mode,true_heading_deg=heading)
             threading.Thread(target=self.run,args=(action,),daemon=True).start()
         return self.snapshot()
 
@@ -138,6 +159,12 @@ class CalibrationJobs:
                 self.service('cancel')
                 raise ValueError('Calibration timed out; inspect sensor status')
             self.update(phase='preparing',message=self.service('prepare',True))
+            if self.snapshot().get('alignment_mode')=='known':
+                self.update(message='Hold level and stationary with kill engaged; capturing measured true heading')
+                self.sleep(2.2)
+                if self.snapshot().get('cancel') or maintenance_reason(self.controller()):
+                    raise ValueError('Heading capture cancelled or safety state changed')
+                self.service('align_heading',self.snapshot()['true_heading_deg'])
             # Service ACK precedes the next supervisor publication. Cached status
             # can still contain the maintenance fault set by pause_odometry.
             prepared_at = self.clock()
@@ -167,7 +194,7 @@ class CalibrationJobs:
                 if s.get('state') == 'Fault':
                     raise ValueError(s.get('reason','Navigation fault'))
                 if a.get('aligned'):
-                    self.update(phase='verify',message='North aligned. Stop, disarm and engage kill; checking Cube fusion.')
+                    self.update(phase='verify',message='North aligned. Stay stopped, disarmed and killed; checking Cube fusion.')
                     if not maintenance_reason(self.controller()):
                         try:
                             message = self.service('commission')

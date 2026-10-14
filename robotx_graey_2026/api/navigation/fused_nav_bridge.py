@@ -14,6 +14,7 @@ from std_srvs.srv import Trigger, SetBool
 from std_msgs.msg import String, Float32
 from sensor_msgs.msg import Imu
 from rcl_interfaces.msg import ParameterDescriptor
+from rcl_interfaces.srv import SetParametersAtomically
 from robotx_graey_2026.api.steady_node import SteadyNode
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.pixhawk.mavlink import Link
@@ -55,6 +56,7 @@ class FusedNavBridge(SteadyNode):
         self.create_subscription(String, '/graey/vn100/calibration', self.calibration_status, 10)
         self.create_service(Trigger, '/graey/navigation/pause_odometry', self.pause_odometry)
         self.create_service(SetBool, '/graey/navigation/prepare', self.prepare)
+        self.create_service(SetParametersAtomically, '/graey/navigation/align_heading', self.align_heading)
         if self.settings['sitl_depth_topic']:
             self.create_subscription(Float32, self.settings['sitl_depth_topic'],
                 lambda m: self.est.pressure_depth(time.monotonic(), m.data), 20)
@@ -68,6 +70,22 @@ class FusedNavBridge(SteadyNode):
             self.vn_calibration = (time.monotonic(), json.loads(msg.data))
         except (ValueError, TypeError):
             self.vn_calibration = None
+
+    def align_heading(self, request, response):
+        try:
+            require_maintenance()
+            if not self.output_permitted:
+                raise ValueError('Run Prepare before capturing north')
+            if (len(request.parameters)!=1 or request.parameters[0].name!='true_heading_deg'
+                    or request.parameters[0].value.type!=3):
+                raise ValueError('Expected one double true_heading_deg')
+            response.result.reason=self.est.align_known_heading(time.monotonic(),request.parameters[0].value.double_value)
+            self.get_logger().info('NORTH_REFERENCE '+json.dumps(self.est.north_alignment.status()))
+            response.result.successful=True
+        except (ValueError,OSError) as error:
+            response.result.successful=False
+            response.result.reason=str(error)
+        return response
 
     def pause_odometry(self, request, response):
         try:

@@ -8,6 +8,37 @@ from robotx_graey_2026.api.navigation.vn_calibration import VNCalibration
 
 
 class CalibrationJobsTests(unittest.TestCase):
+    def test_known_heading_requires_confirmation_and_numeric_true_bearing(self):
+        for value in (None,True,'90',-1,360,float('nan')):
+            with self.assertRaises(ValueError):
+                self.job.request(dict(action='prepare',confirmed=True,surface_confirmed=True,
+                    alignment_mode='known',heading_confirmed=True,true_heading_deg=value))
+        with self.assertRaises(ValueError):
+            self.job.request(dict(action='prepare',confirmed=True,surface_confirmed=True,
+                alignment_mode='known',heading_confirmed=False,true_heading_deg=90.))
+
+    def test_known_heading_preparation_captures_before_commission(self):
+        self.job.job=dict(busy=True,cancel=False,alignment_mode='known',true_heading_deg=90.)
+        def service(name,value=None):
+            self.calls.append((name,value))
+            if name=='align_heading':
+                self.put('supervisor',dict(north_alignment=dict(aligned=True)))
+            return 'ok'
+        self.job.service=service
+        self.job.run('prepare')
+        self.assertEqual(self.calls,[('suspend',None),('pause',None),('prepare',True),('align_heading',90.),('commission',None)])
+        self.assertTrue(self.job.waypoint_permission)
+
+    def test_known_heading_cancel_during_settling_never_captures_or_commissions(self):
+        self.job.job=dict(busy=True,cancel=False,alignment_mode='known',true_heading_deg=90.)
+        def sleep(seconds):
+            self.now+=seconds
+            self.job.job['cancel']=True
+        self.job.sleep=sleep
+        self.job.run('prepare')
+        self.assertNotIn(('align_heading',90.),self.calls)
+        self.assertFalse(self.job.waypoint_permission)
+
     def setUp(self):
         self.c = dict(online=True,vehicle_fresh=True,armed=False,sa_active=True,
                       esc_commanded_on=False,mission_claimed=False,autonomous=False)

@@ -6,6 +6,66 @@ from robotx_graey_2026.api.navigation.vn_protocol import packet, checked, transa
 
 
 class NorthTests(unittest.TestCase):
+    def stationary(self):
+        e=BridgeEstimator(auto_north_alignment=True)
+        e.set_origin((33.,-117.,0.))
+        for i in range(45):
+            t=100.+i*.05
+            e.imu(t,yaw_rotate((1.,0.,0.,0.),270.),(0.,0.,0.))
+            e.pressure_depth(t,0.)
+            e.dvl(t,(0.,0.,0.),True)
+        return e,t
+
+    def test_known_heading_is_session_only_and_does_not_initialize_position(self):
+        e,t=self.stationary()
+        e.align_known_heading(t,90.)
+        self.assertAlmostEqual(yaw(e.orientation()),90.)
+        self.assertTrue(e.heading_validated)
+        self.assertFalse(e.initialized)
+        self.assertIn('Operator',e.north_alignment.status()['method'])
+        self.assertEqual(e.origin,(33.,-117.,0.))
+        with self.assertRaises(ValueError): e.align_known_heading(t,180.)
+        self.assertFalse(BridgeEstimator(auto_north_alignment=True).heading_validated)
+
+    def test_known_heading_rejects_invalid_motion_and_missing_pressure(self):
+        for heading in (True,None,'90',math.nan,math.inf,-1.,360.):
+            e,t=self.stationary()
+            with self.assertRaises(ValueError): e.align_known_heading(t,heading)
+        for bad in ('moving','rotating','depth','stale'):
+            e,t=self.stationary()
+            if bad=='moving': e.history[-1]['raw_velocity']=(.1,0.,0.)
+            if bad=='rotating': e.history[-1]['rates']=(0.,0.,.1)
+            if bad=='depth': e.pressure_depth(t,.5)
+            if bad=='stale': t+=1.
+            with self.assertRaises(ValueError): e.align_known_heading(t,90.)
+            self.assertFalse(e.heading_validated)
+
+    def test_known_heading_allows_stationary_gps_anchor_then_underwater_continuation(self):
+        e,t=self.stationary()
+        e.align_known_heading(t,90.)
+        for i in range(1,121):
+            now=t+i*.05
+            e.gps.clock.offset,e.gps.clock.uncertainty,e.gps.clock.updated=90.,.005,now
+            e.imu(now,yaw_rotate((1.,0.,0.,0.),270.),(0.,0.,0.))
+            e.pressure_depth(now,0.)
+            e.dvl(now,(0.,0.,0.),True)
+            if i%4==0:
+                e.observe_gps(now,dict(cube_fix_time_us=round((now-90.-.1)*1e6),
+                    lat=33.,lon=-117.,alt=0.,accuracy=1.8,fix=3,
+                    course_deg=0.,speed_mps=.01,speed_accuracy_mps=.49,received=now))
+            status=e.status(now)
+        self.assertTrue(status['healthy'])
+        for i in range(1,81):
+            tick=now+i*.05
+            e.imu(tick,yaw_rotate((1.,0.,0.,0.),270.),(0.,0.,0.))
+            e.pressure_depth(tick,.5)
+            e.dvl(tick,(.2,0.,0.),True)
+            status=e.status(tick)
+        self.assertTrue(status['healthy'])
+        self.assertFalse(status['gps_admission']['qualified'])
+        self.assertAlmostEqual(yaw(e.orientation()),90.)
+        self.assertGreater(e.position[1],.7)
+
     def test_nine_hz_dvl_brackets_new_gps_without_requalifying(self):
         e=BridgeEstimator(auto_north_alignment=True)
         e.set_origin((33.,-117.,0.))

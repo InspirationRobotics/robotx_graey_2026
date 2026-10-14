@@ -117,3 +117,30 @@ work. Simulated low-rate DVL/new GPS ordering completes alignment; queued expire
 fix cannot initialize position.153 tests passed before final queue invalidation
 line; full suite rerun during deployment. GPS velocity uncertainty~0.488m/s remains
 an independent blocker; no accuracy/angular/freshness threshold loosened.
+
+## Stationary known true-heading option
+
+Added Calibration page method selector: GPS/DVL movement or Known true heading
+(stationary). Operator must enter0<=heading<360 degrees clockwise from true north
+and explicitly confirm the independently measured nose bearing. GUI validates it,
+then Prepare suspends mission/output, sets surface baseline and waits2.2s before
+requesting capture through /graey/navigation/align_heading. That service uses
+rcl_interfaces/SetParametersAtomically with exactly one double true_heading_deg;
+it is a dedicated checked service, not a persistent ROS parameter write.
+
+Bridge independently requires fresh killed/disarmed/ESC-off controller telemetry,
+Prepare output permission, uninitialized/unvalidated session, pressure-confirmed
+surface, fresh VN/DVL,>=1.5s history with>=10 samples, speed<=0.05m/s, all angular
+rates<=2deg/s, tilt<=15deg and yaw stability within3deg. Captures true minus current
+relative VN yaw as session offset; freezes reference, records source/value/time
+and rotates preinitialization history. Does not reset Cube origin, VN calibration,
+arm/mode/ESC state or GPS accuracy gates. Qualified GPS still anchors position;
+healthy Cube fusion is still required for mission permission. New Prepare/restart
+invalidates reference; cannot alter a live initialized frame via this service.
+
+161 Python tests pass and Node calibration-page test passes. Includes invalid
+input/confirmation, movement/depth/stale rejection, service safety, cancel before
+capture, immutable session reference and simulated stationary position anchoring
+with0.49m/s GPS velocity uncertainty followed by underwater DVL/VN continuation.
+No new full native GUI/SITL run or physical known-heading capture claimed. A mocked
+service test initially lacked logger/status fixtures; corrected then suite passed.

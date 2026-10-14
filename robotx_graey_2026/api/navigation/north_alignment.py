@@ -15,6 +15,8 @@ class NorthAlignment:
         self.samples = []
         self.last_fix = None
         self.offset = None
+        self.method = 'GPS/DVL velocity vectors'
+        self.reference = None
         self.reason = 'Make a steady surface movement with qualified GPS and DVL'
 
     def reject(self, reason):
@@ -76,4 +78,4 @@ class NorthAlignment:
     def status(self):
         return dict(aligned=self.offset is not None, offset_deg=self.offset,
                     reason=self.reason, samples=len(self.samples),
-                    method='GPS/DVL velocity vectors', persistence='bridge session only')
+                    method=self.method, reference=self.reference, persistence='bridge session only')
