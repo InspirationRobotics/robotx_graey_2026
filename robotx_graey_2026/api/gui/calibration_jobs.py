@@ -138,12 +138,22 @@ class CalibrationJobs:
                 self.service('cancel')
                 raise ValueError('Calibration timed out; inspect sensor status')
             self.update(phase='preparing',message=self.service('prepare',True))
+            # Service ACK precedes the next supervisor publication. Cached status
+            # can still contain the maintenance fault set by pause_odometry.
+            prepared_at = self.clock()
             deadline = self.clock()+300
             while self.clock() < deadline:
                 if self.snapshot().get('cancel'):
                     # Do not reset or change flight modes during manual movement.
                     raise ValueError('Preparation cancelled; waypoint permission remains off')
                 s = self.sample('supervisor')
+                stamp = s.get('published_monotonic')
+                if not isinstance(stamp,(int,float)) or not prepared_at <= stamp <= self.clock():
+                    if self.clock()-prepared_at >= 10:
+                        raise ValueError('No fresh supervisor acknowledgement after preparation')
+                    self.update(message='Surface baseline accepted; waiting for updated supervisor status')
+                    self.sleep(.2)
+                    continue
                 a = s.get('north_alignment') or {}
                 self.update(north=a,message=a.get('reason','Waiting for north-alignment telemetry'))
                 if s.get('state') == 'Fault':
