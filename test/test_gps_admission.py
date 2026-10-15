@@ -47,8 +47,30 @@ class AdmissionTests(unittest.TestCase):
         self.assertFalse(status['qualified'])
         self.assertGreater(status['cube_fix_age_upper_s'], .35)
         self.assertIn('stale', status['reason'])
-        self.assertFalse(self.feed(g, 10.62))
-        self.assertFalse(g.status(10.62)['qualified'])
+        # A NEW current fix after a normal packet interval keeps the good dwell.
+        self.assertTrue(self.feed(g, 10.62))
+        self.assertTrue(g.status(10.62)['qualified'])
+
+    def test_repeated_delayed_5hz_packets_do_not_restart_dwell_between_frames(self):
+        g = GPSAdmission(dwell=.6)
+        g.clock.offset,g.clock.uncertainty,g.clock.updated=5.,.005,10.
+        accepted=0
+        for i in range(25):
+            t=10.+i*.2
+            g.clock.updated=t
+            accepted += self.feed(g,t,stamp=round((t-5.-.25)*1e6))
+            self.assertFalse(g.status(t+.12)['qualified'])
+        self.assertGreater(accepted,15)
+        self.assertFalse(g.status(t+.4)['qualified'])
+        self.assertFalse(self.feed(g,t+.41))
+
+    def test_bad_quality_still_resets_dwell_and_reports_cause(self):
+        g=self.make()
+        for i in range(5): self.feed(g,10.1+i*.1)
+        self.assertFalse(self.feed(g,10.6,north=50.))
+        s=g.status(10.6)
+        self.assertIn('displacement',s['last_rejection'])
+        self.assertEqual(s['qualifying_s'],0.)
 
     def test_lost_clock_mapping_revokes_admission(self):
         g = self.make()

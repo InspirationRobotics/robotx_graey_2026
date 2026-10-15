@@ -6,6 +6,23 @@ from robotx_graey_2026.api.navigation.vn_protocol import packet, checked, transa
 
 
 class NorthTests(unittest.TestCase):
+    def test_delayed_five_hz_gps_aligns_despite_between_packet_expiry(self):
+        e=BridgeEstimator(auto_north_alignment=True)
+        e.set_origin((33.,-117.,0.))
+        for i in range(320):
+            t=100.+i*.05
+            e.gps.clock.offset,e.gps.clock.uncertainty,e.gps.clock.updated=90.,.005,t
+            e.imu(t,(1.,0.,0.,0.),(0.,0.,0.))
+            e.pressure_depth(t,0.)
+            e.dvl(t,(1.,0.,0.),True)
+            if i%4==0:
+                e.observe_gps(t,dict(cube_fix_time_us=round((t-90.-.25)*1e6),
+                    lat=33.+(t-100.)/111320.,lon=-117.,alt=0.,accuracy=.5,fix=3,
+                    course_deg=0.,speed_mps=1.,speed_accuracy_mps=.05,received=t))
+            e.status(t)
+        self.assertTrue(e.heading_validated,e.north_alignment.status())
+        self.assertTrue(e.initialized)
+
     def fix(self, t, course=90., speed=1., sigma=.05):
         return dict(cube_fix_time_us=int(t*1e6), speed_mps=speed,
                     course_deg=course, speed_accuracy_mps=sigma)

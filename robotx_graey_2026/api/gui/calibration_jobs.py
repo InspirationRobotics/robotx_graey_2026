@@ -155,7 +155,15 @@ class CalibrationJobs:
                     self.sleep(.2)
                     continue
                 a = s.get('north_alignment') or {}
-                self.update(north=a,message=a.get('reason','Waiting for north-alignment telemetry'))
+                message = a.get('reason','Waiting for north-alignment telemetry')
+                gps = s.get('gps_admission') or {}
+                if message == 'GPS qualifying':
+                    message = (f"GPS qualifying {gps.get('qualifying_s',0.):.1f}/"
+                               f"{gps.get('required_dwell_s',3.):.1f} s")
+                    if gps.get('last_rejection'):
+                        message += '; previous reset: '+gps['last_rejection']
+                    message += '. Stay stationary until GPS is qualified.'
+                self.update(north=a,message=message)
                 if s.get('state') == 'Fault':
                     raise ValueError(s.get('reason','Navigation fault'))
                 if a.get('aligned'):

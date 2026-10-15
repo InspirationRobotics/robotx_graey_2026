@@ -72,3 +72,21 @@ prepared_at code using inspect from /tmp, then restarted supervisor/GUI only.
 GPS qualifying, supervisor no longer Fault. Bridge instance and collected VN
 calibration preserved. No arming/movement/mission; manual north alignment pending.
 Future deployments must rebuild and verify installed imports, not assume symlinks.
+
+## GPS qualification cycling
+
+Passive100-snapshot capture during the reported cycle:57 qualifying,26 GPS/DVL
+displacement disagreements,12 excessive/unavailable horizontal accuracy,3 admitted,
+one DVL continuity loss and one invalid DVL-motion observation. This capture did
+not establish stale timing as the live cause; actual GPS/DVL quality issues exist.
+Separately reproduced a software defect: status polling erased the qualification
+dwell when a delayed but initially-fresh fix expired between normal5Hz packets.
+Fix retains dwell only within the existing receipt-continuity bound; expired fixes
+remain unqualified and never forwarded. New packets still pass all checks. Real
+quality errors, receipt gaps, clock loss, VN/DVL/depth failures still requalify.
+Added end-to-end estimator regression:5Hz fixes delayed250ms with20Hz status polling
+now complete north alignment. No freshness, accuracy, angular or movement threshold
+was relaxed. Added qualification progress/last-reset cause and observed GPS accuracy,
+velocity uncertainty and speed to calibration diagnostics.150 Python tests and
+Windows Node calibration-page check passed; WSL lacks Node (not a browser-test pass).
+Physical moving alignment remains unverified and may remain blocked by poor GPS.

@@ -60,6 +60,7 @@ class BridgeEstimator:
         self.horizontal_variance = 9.
         self.distance_travelled = 0.
         self.last_fix = None
+        self.last_observed_gps = None
         self.last_correction = None
         self.heading_since = None
         self.heading_count = 0
@@ -162,6 +163,7 @@ class BridgeEstimator:
         return None
 
     def observe_gps(self, now, fix):
+        self.last_observed_gps = dict(fix)
         duplicate = fix['cube_fix_time_us'] == self.gps.last_fix and fix['fix'] >= 3
         self._previous_anchors = self.gps.quality.anchors.copy()
         eligible = self.gps_eligible(now) and not self.fault
@@ -284,6 +286,7 @@ class BridgeEstimator:
                     depth_m=self.depth if self.fresh(self.depth_at, now) else None,
                     surfaced=self.surface if self.fresh(self.depth_at, now) else None,
                     gps_eligible=self.gps_eligible(now), gps_admission=gps,
+                    gps_observation=self.last_observed_gps,
                     position_ned=list(self.position), distance_travelled_m=self.distance_travelled,
                     position_sigma_m=math.sqrt(self.horizontal_variance),
                     heading_bias_deg=self.heading_bias, velocity_bias_mps=list(self.velocity_bias),
