@@ -883,3 +883,13 @@ Restart intentionally baseline0/output disabled; known-heading Prepare required.
 Backup /home/graey/deployment-backups/20261014-bounded-dvl-001311. Native simulation
 validated recovery; live postinitialization dropout recovery still awaits wet test.
 No real mission started, no main changes; sonar history/untracked files preserved.
+
+2026-10-14 waypoint interaction simplified: removed user-facing Preview and30s
+selection expiry. Map click retains selected coordinates/depth without POST.
+Start performs fresh server target validation then consumes the returned single-use
+plan; network-ambiguous retries retain the same plan/run identity. Definitively
+rejected validation clears cached token for next explicit Start. Existing backend
+frame/age/readiness/map registration checks remain; no new arm/mode permissions.
+Page tests cover selection surviving60s, no command on map click, validation failure
+not starting, and timeout retry using same plan.167 Python regressions pass; updated
+Node page check passes. Static page deploy needs no GUI/core restart or re-Prepare.
