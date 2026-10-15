@@ -854,3 +854,16 @@ known-heading request rejected409 with no job/reference change. Fresh controller
 killed/disarmed MANUAL/ESC-off. Core observation output off, no heading captured;
 operator must supply actual independent true bearing. Backup at
 /home/graey/deployment-backups/20261014-known-heading-234523. Main untouched.
+
+2026-10-14 explicit recovery verified: fixed Prepare's supervisor old-fault race
+in afb9b1f, rebuilt/deployed GUI only (bridge/sensors preserved),163 tests passed
+on Jetson. Recovery using retained true frame completed Ready; bridge fault empty,
+healthy/transmitting, reset_counter3. Cube LOCAL_POSITION_NED fresh age0.171s,
+EKF flags831 accepted, Cube estimate valid and heading288.4deg at that sample.
+Killed/disarmed/ESC-off throughout; no Cube reboot or source/firmware parameter
+write. First stationary check aborted without mutation; subsequent recovery attempt
+failed old supervisor latch before the fix. Original known20deg reference had
+rotated with VN; recovered286.318deg is DERIVED from retained reference, not newly
+measured true north. Preserve this provenance despite generic GUI method label.
+Automatic DVL dropout fault recovery is NOT added: explicit Prepare now recovers
+Cube without core restart. Underwater missing velocity cannot be silently repaired.
