@@ -791,3 +791,13 @@ stays continuous. Hardware kill/watchdog faults are not cleared by preparation.
 Reproduced/fixed supervisor crash on None VN/DVL received timestamp; regression
 added. New GUI physical calibration/positive commissioning paths await hardware;
 Graey remains offline and changes are not deployed. See docs/calibration-gui-2026-10-14.md.
+
+2026-10-14 tether deployment: navigation through9faf100 merged into Jetson sonar
+history as45b9525; ROS build and142 tests passed on Jetson. Calibration page/API
+HTTP200 and six new maintenance services verified. One fused bridge/supervisor,
+VN relative mode, fresh valid DVL, Cube bridge profile verified. Core remains
+continuous Observation, output disabled, baseline0; no physical calibration,
+preparation, arming or mission. Restart controller selected RF; killed/disarmed
+MANUAL/ESC-off confirmed. Sonar relay and untracked work preserved. Jetson sonar
+history remains additional to online navigation branch, not fully Git-identical.
+See docs/calibration-deployment-2026-10-14.md. These are dated observations.
