@@ -235,3 +235,18 @@ frame/age/readiness/map registration checks remain; no new arm/mode permissions.
 Page tests cover selection surviving60s, no command on map click, validation failure
 not starting, and timeout retry using same plan.167 Python regressions pass; updated
 Node page check passes. Static page deploy needs no GUI/core restart or re-Prepare.
+
+2026-10-14 Start/displacement investigation: user confirmed Pool image mode.
+Live Prepare Ready, bridge healthy/transmitting, Cube local/global fresh, mission
+capability enabled, no active waypoint. Therefore live pool-image restriction and
+selected target are the remaining page blockers, not current supervisor failure.
+Pool screenshot registration is approximate; no registration block bypassed.
+Added explicit view-only dropdown/watermark, disabled-button reason and Use live
+navigation grid button that switches mode and clears old image-derived target;
+operator must select a new target on the grid. Node tests cover this transition.
+GUI Cube marker reads GLOBAL_POSITION_INT, matching QGC Vehicle::_handleGlobalPositionInt
+in official https://github.com/mavlink/qgroundcontrol/blob/master/src/Vehicle/Vehicle.cc.
+Actual user's QGC feed/version was not inspected. Observed Cube global vs local NED
+about[-0.323,-1.055]m vs[-0.324,-1.057]m using Cube origin at one snapshot, consistent
+within centimetres. Pool image displacement mismatch is suspected map registration/
+scale, not a demonstrated EKF scale defect; physical/QGC movement comparison remains.

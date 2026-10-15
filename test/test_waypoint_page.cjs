@@ -20,5 +20,9 @@ async function render(data,options={}){
   await e.refreshAt(60100);assert(!e.start.disabled);await e.start.onclick();assert.deepEqual(e.posts.map(p=>p.action),['preview','start']);assert.equal(e.posts[1].plan_id,'single-plan');assert(e.start.disabled);
   e=await render(ready,{reject:true});e.map.onclick({clientX:500,clientY:300});await e.start.onclick();assert.equal(e.posts.length,1);assert.match(e.message.textContent,/Target rejected/);
   e=await render(ready,{timeoutStart:true});e.map.onclick({clientX:500,clientY:300});await e.start.onclick();await e.start.onclick();assert.deepEqual(e.posts.map(p=>p.action),['preview','start','start']);assert.equal(e.posts[1].plan_id,e.posts[2].plan_id);
+  e=await render({...ready,capabilities:{enabled:true,simulation:false}});e.maptype.value='pool';e.maptype.onchange();
+  e.map.onclick({clientX:500,clientY:300});assert(e.start.disabled);assert(!e.useGrid.hidden);assert.match(e.readiness.textContent,/view-only/);
+  e.useGrid.onclick();assert.equal(e.maptype.value,'geographic');assert(e.useGrid.hidden);assert(e.start.disabled);assert.equal(e.posts.length,0);
+  e.map.onclick({clientX:500,clientY:300});assert(!e.start.disabled);
   console.log('Waypoint rendering, readiness explanations and zoom controls pass');
 })().catch(e=>{console.error(e);process.exit(1)});
