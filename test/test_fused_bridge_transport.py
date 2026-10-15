@@ -14,6 +14,31 @@ from robotx_graey_2026.api.navigation.odometry_profile import PROFILE
 
 
 class TransportTests(unittest.TestCase):
+    def test_known_heading_service_requires_maintenance_and_explicit_double(self):
+        self.b.est.align_known_heading=Mock(return_value='captured')
+        self.b.est.north_alignment=Mock(status=Mock(return_value={}))
+        self.b.get_logger=Mock(return_value=Mock())
+        request=NS(parameters=[NS(name='true_heading_deg',value=NS(type=3,double_value=90.))])
+        response=NS(result=NS())
+        self.b.align_heading(request,response)
+        self.assertTrue(response.result.successful)
+        self.b.est.align_known_heading.assert_called_once_with(10.,90.)
+        self.b.est.align_known_heading.reset_mock()
+        self.b.align_heading.__func__.__globals__['require_maintenance'].side_effect=ValueError('Keep killed')
+        self.b.align_heading(request,response)
+        self.assertFalse(response.result.successful)
+        self.b.est.align_known_heading.assert_not_called()
+
+    def test_known_heading_service_rejects_missing_prepare_and_wrong_type(self):
+        self.b.est.align_known_heading=Mock()
+        response=NS(result=NS())
+        for enabled,parameters in ((False,[NS(name='true_heading_deg',value=NS(type=3,double_value=90.))]),
+                                   (True,[]),(True,[NS(name='true_heading_deg',value=NS(type=2))])):
+            self.b.output_permitted=enabled
+            self.b.align_heading(NS(parameters=parameters),response)
+            self.assertFalse(response.result.successful)
+        self.b.est.align_known_heading.assert_not_called()
+
     def setUp(self):
         path = Path(__file__).parents[1]/'robotx_graey_2026/api/navigation/fused_nav_bridge.py'
         tree = ast.parse(path.read_text())

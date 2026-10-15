@@ -24,6 +24,10 @@ async function render(state){
  assert.equal(page.elements.progress.value,60);assert.match(page.elements.coverage.textContent,/5 \/ 5 \/ 0/);
  page=await render({controller:safe,job:{phase:'preparing'},navigation:{streams:{bridge:{fresh:true,data:{gps_admission:{qualified:false,reason:'GPS qualifying',last_rejection:'GPS displacement disagrees with DVL motion'},gps_observation:{accuracy:3.5,speed_accuracy_mps:.3,speed_mps:.1}}}}}});
  assert.match(page.elements.gpsQuality.textContent,/3.50 m/);assert.match(page.elements.gpsQuality.textContent,/displacement/);
+ page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{vn_calibration:{fresh:true,data:{phase:'idle'}}}}});
+ e=page.elements;e.alignmentMode.value='known';e.surfaceConfirm.checked=true;e.alignmentMode.onchange();assert(e.prepare.disabled);
+ e.trueHeading.value='90';e.headingConfirm.checked=true;e.headingConfirm.onchange();assert(!e.prepare.disabled);
+ await e.prepare.onclick();assert.equal(page.posts[0].alignment_mode,'known');assert.equal(page.posts[0].true_heading_deg,90);assert(page.posts[0].heading_confirmed);
  assert(html.includes('not an independent compass reference'));assert(html.includes('not save flash'));
  console.log('Calibration page confirmations, stale/armed controls, progress and instructions pass');
 })().catch(error=>{console.error(error);process.exit(1)});

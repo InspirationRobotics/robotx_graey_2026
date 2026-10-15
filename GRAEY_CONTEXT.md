@@ -839,3 +839,10 @@ work. Simulated low-rate DVL/new GPS ordering completes alignment; queued expire
 fix cannot initialize position.153 tests passed before final queue invalidation
 line; full suite rerun during deployment. GPS velocity uncertainty~0.488m/s remains
 an independent blocker; no accuracy/angular/freshness threshold loosened.
+
+2026-10-14 added stationary known true-heading method to Calibration Prepare,
+with explicit measured-heading confirmation, independent bridge kill/disarm,
+surface/stationary checks and session-only provenance. Does not relax GPS position
+or mission/Cube health gates. GPS velocity precision is not needed for operator
+north reference.161 regressions and Node page check pass; physical capture requires
+user's actual true bearing. See docs/calibration-deployment-2026-10-14.md.
