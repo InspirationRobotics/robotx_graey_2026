@@ -24,7 +24,36 @@ class CalibrationJobsTests(unittest.TestCase):
         self.now += seconds
 
     def put(self, name, value):
+        if name == 'supervisor':
+            value.setdefault('published_monotonic',self.now)
         self.nav['streams'][name] = dict(fresh=True,data=value)
+
+    def test_prepare_ignores_cached_maintenance_fault_until_new_status(self):
+        self.put('supervisor',dict(state='Fault',reason='Navigation maintenance; Prepare required before reuse',
+                                  published_monotonic=-1.))
+        self.job.job = dict(busy=True,cancel=False)
+        def sleep(seconds):
+            self.now += seconds
+            self.put('supervisor',dict(north_alignment=dict(aligned=True)))
+        self.job.sleep = sleep
+        self.job.run('prepare')
+        self.assertEqual(self.job.snapshot()['phase'],'ready')
+        self.assertTrue(self.job.waypoint_permission)
+
+    def test_prepare_missing_new_status_times_out_without_permission(self):
+        self.put('supervisor',dict(state='Fault',published_monotonic=-1.))
+        self.job.job = dict(busy=True,cancel=False)
+        self.job.run('prepare')
+        self.assertEqual(self.job.snapshot()['phase'],'failed')
+        self.assertIn('No fresh supervisor',self.job.snapshot()['message'])
+        self.assertFalse(self.job.waypoint_permission)
+
+    def test_prepare_new_fault_is_not_ignored(self):
+        self.put('supervisor',dict(state='Fault',reason='DVL continuity fault'))
+        self.job.job = dict(busy=True,cancel=False)
+        self.job.run('prepare')
+        self.assertEqual(self.job.snapshot()['message'],'DVL continuity fault')
+        self.assertFalse(self.job.waypoint_permission)
 
     def test_unconfirmed_or_armed_request_cannot_start(self):
         for field, value in (('armed',True),('sa_active',False),('online',False),('vehicle_fresh',False),('esc_commanded_on',True)):

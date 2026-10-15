@@ -39,3 +39,17 @@ protection remains a separate unresolved prerequisite for unattended operation.
 Repository synchronization: navigation code is present online and deployed.
 Jetson also contains additional sonar history; this deployment does not claim
 the whole Jetson and online Git histories are identical or publish that history.
+
+## Prepare status race found during live use
+
+After physical VN calibration reported collected six-face counts11/11/9/8/15/42
+(relative mode, volatile), the user encountered a failed Prepare job:
+`Navigation maintenance; Prepare required before reuse`. Fresh bridge telemetry
+showed the reset had actually succeeded: baseline1009.2704467773438hPa,
+reset_counter2, surface state true, GPS qualified, valid DVL and fresh VN,
+output permission true but transmission withheld pending north alignment.
+GUI consumed a cached supervisor Fault from its own pause operation immediately
+after the prepare service ACK. Fixed by requiring supervisor publication time at
+or after that ACK before processing faults/alignment, with a10s bounded wait.
+New faults are still rejected; no missing/stale status can grant permission.
+Regression coverage includes cached fault, absent new status and real new fault.
