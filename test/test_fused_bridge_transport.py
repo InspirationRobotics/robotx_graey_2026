@@ -24,6 +24,7 @@ class TransportTests(unittest.TestCase):
         self.b.est = BridgeEstimator()
         self.b.stamps, self.b.params = {}, {}
         self.b.boot_ms = self.b.last_sent = None
+        self.b.start_checked = True
         self.b.settings = dict(enabled=True, surface_pressure_hpa=1000., water_density=1000.)
         self.b.link, self.b.pub = Mock(), Mock()
         self.b.instance = 'test'
@@ -81,6 +82,19 @@ class TransportTests(unittest.TestCase):
         self.pressure(10000)
         self.pressure(100)
         self.assertIn('restarted', self.b.est.fault)
+
+    def test_armed_start_latches_fault_and_missing_heartbeat_blocks_output(self):
+        self.b.start_checked = False
+        self.b.params = {k: (10., v) for k, v in PROFILE.items()}
+        self.b.est.status = lambda now: dict(healthy=not self.b.est.fault)
+        self.b.tick()
+        self.b.link.odometry.assert_not_called()
+        self.b.consume('HEARTBEAT', NS(base_mode=128, get_srcSystem=lambda: 1, get_srcComponent=lambda: 1))
+        self.assertIn('started while armed', self.b.est.fault)
+        self.b.tick()
+        self.b.link.odometry.assert_not_called()
+        self.b.consume('HEARTBEAT', NS(base_mode=0, get_srcSystem=lambda: 1, get_srcComponent=lambda: 1))
+        self.assertTrue(self.b.est.fault)  # Must restart; no automatic recovery.
 
     def test_profile_never_selects_native_gps(self):
         for slot in (1, 2, 3):

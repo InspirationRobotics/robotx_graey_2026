@@ -23,3 +23,5 @@ Cube external-only parameters persist, so never assume reboot restores the old
 working navigation path. No output must be mistaken for a ready Cube estimate.
 
 
+
+October14 update: use vn-pretest-workflow-2026-10-14.md for the current relative-VN north-alignment and checked activation workflow. Graey remains undeployed/offline in this session.

@@ -24,6 +24,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--abort', action='store_true')
     parser.add_argument('--continuous', action='store_true', default=True)
+    parser.add_argument('--auto-north', action='store_true', help='Manual surface movement with a 40-degree synthetic VN reference error')
     args=parser.parse_args()
     from robotx_graey_2026.api.navigation.waypoint_logic import ne_to_geo
     root=Path(__file__).resolve().parents[1]
@@ -31,6 +32,8 @@ def main():
     env=dict(os.environ,SITL_LOG_DIR=str(folder),SITL_RUN_DIR=str(folder/'runtime'),
              WAYPOINT_INTERACTIVE='true',GRAEY_WAYPOINT_LOG_DIR=str(folder))
     env['CONTINUOUS_FUSION'] = str(args.continuous).lower()
+    if args.auto_north:
+        env.update(AUTO_NORTH_ALIGNMENT='true', RELATIVE_YAW_OFFSET_DEG='40.0')
     env.pop('QGC_HOST',None)
     result=dict(passed=False,continuous=args.continuous,stages=[],gps_outage_seen=False,underwater_cube_seen=False)
     stop=threading.Event()
@@ -51,6 +54,8 @@ def main():
         result['wall_clock_adjustments']=adjustments
     observer=threading.Thread(target=monitor,daemon=True);observer.start()
     proc=None; plan=None; run_id=None; abort_sent=False
+    manual_link = None
+    alignment_stopped = False
     try:
         with (folder/'runner.log').open('w') as output:
             proc=subprocess.Popen(['bash','sitl/run.sh'],cwd=root,env=env,stdout=output,
@@ -61,6 +66,29 @@ def main():
                 try:
                     state=api();nav=state['navigation'];streams=nav['streams']
                     s=streams.get('supervisor',{}).get('data',{});c=nav['cube_estimate']
+                    if args.auto_north and not alignment_stopped and streams.get('heartbeat',{}).get('fresh'):
+                        from pymavlink import mavutil
+                        if manual_link is None:
+                            manual_link=mavutil.mavlink_connection('udpout:127.0.0.1:14559',source_system=255,source_component=202)
+                        manual_link.mav.heartbeat_send(6,8,0,0,0)
+                        alignment=s.get('north_alignment') or {}
+                        if not alignment.get('aligned'):
+                            # Owned isolated simulator only. MANUAL surface movement
+                            # establishes alignment before any external odometry.
+                            manual_link.mav.set_mode_send(1,1,19)
+                            if not streams['heartbeat']['data'].get('armed'):
+                                manual_link.mav.command_long_send(1,1,400,0,1,0,0,0,0,0,0)
+                            manual_link.mav.manual_control_send(1,800,0,500,0,0)
+                            result['alignment_progress']=alignment
+                            time.sleep(.2)
+                            continue
+                        manual_link.mav.manual_control_send(1,0,0,500,0,0)
+                        manual_link.mav.command_long_send(1,1,400,0,0,0,0,0,0,0,0)
+                        if streams['heartbeat']['data'].get('armed'):
+                            time.sleep(.2)
+                            continue
+                        result['north_alignment']=alignment
+                        alignment_stopped=True
                     if run_id is None and c['valid'] and s.get('configuration_verified') and s.get('surfaced'):
                         lat,lon=ne_to_geo(1.5,1.,(c['lat'],c['lon']))
                         plan=api(dict(action='preview',plan=dict(lat=lat,lon=lon,depth_m=.5,map='geographic')))
@@ -89,6 +117,9 @@ def main():
                             result['passed']=bool(outcome and result['gps_outage_seen']
                                 and result['underwater_cube_seen'] and result.get('duplicate_idempotent')
                                 and (not args.abort or streams['heartbeat']['data']['mode_id']==19))
+                            if args.auto_north:
+                                result['passed'] &= bool(alignment_stopped and abs(
+                                    result.get('north_alignment',{}).get('offset_deg',999)+40.) < 5.)
                             break
                 except (OSError,KeyError,ValueError) as error:
                     result['last_retry']=str(error)
@@ -96,6 +127,8 @@ def main():
             else: result['error']='Validation deadline exceeded'
     except Exception as error: result['error']=repr(error)
     finally:
+        if manual_link:
+            manual_link.close()
         if proc:
             try: os.killpg(proc.pid,signal.SIGINT)
             except ProcessLookupError: pass

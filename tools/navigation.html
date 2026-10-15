@@ -142,7 +142,7 @@ function update(){
  $('origin').textContent=state?.origin?'Fixed display origin: '+fmt(state.origin[0],7)+', '+fmt(state.origin[1],7)+'; '+fmt(state.origin[2])+' m MSL. Separate from Cube local origin.':reset?.state==='waiting'?'Waiting for a new valid GPS fix.':reset?.state==='timeout'?'Origin unset. Retry reset when GPS is available.':'Waiting for first valid geographic position.';
  $('navSummary').textContent=(supervisor?.state??'Unavailable')+'\n'+(supervisor?.mode??'')+'\n'+(supervisor?.reason??'')+'\nGPS: '+(supervisor?.gps_quality_reason??'No assessment');
  const dv=stream('dvl_valid'),vel=stream('dvl_velocity'),cl=stream('clearance'),vn=stream('vn_heading'),ek=stream('ekf');
- $('sensors').textContent='DVL '+(dv?(dv.valid?'valid':'invalid'):'unavailable')+' · '+age('dvl_valid')+'\nDVL velocity ('+(vel?.frame??'sensor frame')+')\n'+vec(dv?.valid?vel?.xyz:null)+'\nBottom clearance '+fmt(dv?.valid?cl?.meters:null)+' m\nVN heading '+fmt(vn?.degrees)+'° · '+age('vn_heading')+'\nEKF flags '+(ek?.flags??'unavailable')+' · '+age('ekf');
+ $('sensors').textContent='DVL '+(dv?(dv.valid?'valid':'invalid'):'unavailable')+' · '+age('dvl_valid')+'\nDVL velocity ('+(vel?.frame??'sensor frame')+')\n'+vec(dv?.valid?vel?.xyz:null)+'\nBottom clearance '+fmt(dv?.valid?cl?.meters:null)+' m\nVN sensor heading (before bridge north alignment) '+fmt(vn?.degrees)+'° · '+age('vn_heading')+'\nEKF flags '+(ek?.flags??'unavailable')+' · '+age('ekf');
  draw();
 }
 function draw(){

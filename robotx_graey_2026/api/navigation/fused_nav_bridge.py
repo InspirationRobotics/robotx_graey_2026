@@ -24,18 +24,22 @@ class FusedNavBridge(SteadyNode):
         defaults = dict(enabled=False, mavlink='udpout:127.0.0.1:14551',
                         surface_pressure_hpa=0., water_density=1000.,
                         sitl_depth_topic='',
+                        auto_north_alignment=False,
+                        require_disarmed_start=False,
                         heading_reference_validated=False)
         for name, value in defaults.items():
             self.declare_parameter(name, value, ParameterDescriptor(read_only=True))
         self.settings = {k: self.get_parameter(k).value for k in defaults}
         if self.settings['sitl_depth_topic'] and os.environ.get('GRAEY_RUNTIME_SCOPE') != 'sitl':
             raise ValueError('Synthetic depth is restricted to isolated SITL')
-        self.est = BridgeEstimator(self.settings['heading_reference_validated'])
+        self.est = BridgeEstimator(self.settings['heading_reference_validated'],
+                                   self.settings['auto_north_alignment'])
         self.link = Link(self.settings['mavlink'], 197, self.get_logger())
         self.instance = str(uuid.uuid4())
         self.stamps, self.params = {}, {}
         self.last_sent = None
         self.boot_ms = None
+        self.start_checked = not self.settings['require_disarmed_start']
         self.pressure_sample = None
         self.pub = self.create_publisher(String, '/graey/navigation/bridge_status', 10)
         self.create_subscription(Imu, '/graey/vn100/imu', self.imu, 20)
@@ -98,7 +102,11 @@ class FusedNavBridge(SteadyNode):
         if (m.get_srcSystem(), m.get_srcComponent()) != (1, 1):
             return
         now = time.monotonic()
-        if kind == 'TIMESYNC' and m.tc1:
+        if kind == 'HEARTBEAT' and not self.start_checked:
+            self.start_checked = True
+            if m.base_mode & 128:
+                self.est.fault = 'Bridge started while armed; disarm and restart preparation'
+        elif kind == 'TIMESYNC' and m.tc1:
             self.est.gps.clock.reply(m.ts1, m.tc1, time.monotonic_ns())
         elif kind == 'PARAM_VALUE':
             self.params[m.param_id.rstrip('\x00')] = (now, m.param_value)
@@ -139,7 +147,7 @@ class FusedNavBridge(SteadyNode):
         now = time.monotonic()
         status = self.est.status(now)
         configured = self.configured(now)
-        if self.settings['enabled'] and configured and status['healthy'] and (self.last_sent is None or now-self.last_sent >= .05):
+        if self.start_checked and self.settings['enabled'] and configured and status['healthy'] and (self.last_sent is None or now-self.last_sent >= .05):
             self.link.odometry(self.est.position, self.est.orientation(), self.est.velocity(),
                                self.est.rates, covariance=self.est.covariance(), quality=80)
             self.last_sent = now

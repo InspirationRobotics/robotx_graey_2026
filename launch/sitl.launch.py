@@ -17,6 +17,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument('interactive_waypoint', default_value='false'),
         DeclareLaunchArgument('continuous_fusion', default_value='true'),
+        DeclareLaunchArgument('auto_north_alignment', default_value='false'),
+        DeclareLaunchArgument('relative_yaw_offset_deg', default_value='0.0'),
         DeclareLaunchArgument('surface_pressure_hpa', default_value='1013.25'),
         DeclareLaunchArgument('home_lat', default_value='32.9236125'),
         DeclareLaunchArgument('home_lon', default_value='-117.0385235'),
@@ -27,6 +29,7 @@ def generate_launch_description():
         Node(package='robotx_graey_2026', executable='fused_nav_bridge',
              additional_env={'GRAEY_RUNTIME_SCOPE': 'sitl'}, name='nav_ekf_bridge',
              parameters=[{'enabled': True, 'heading_reference_validated': True,
+                          'auto_north_alignment': ParameterValue(LaunchConfiguration('auto_north_alignment'), value_type=bool),
                           'sitl_depth_topic': '/graey/sitl/depth_m',
                           'surface_pressure_hpa': ParameterValue(LaunchConfiguration('surface_pressure_hpa'), value_type=float)}], output='screen'),
         Node(package='robotx_graey_2026', executable='navigation_supervisor',
@@ -38,7 +41,8 @@ def generate_launch_description():
                  'mavlink': LaunchConfiguration('supervisor_mavlink'),
                                   'reference_file': '/tmp/graey-sitl-navigation-reference.json'}], output='screen'),
         Node(package='robotx_graey_2026', executable='sitl_sensor_sim',
-             parameters=[{'truth_only': True}],
+             parameters=[{'truth_only': True, 'relative_yaw_offset_deg': ParameterValue(
+                 LaunchConfiguration('relative_yaw_offset_deg'), value_type=float)}],
              name='sitl_sensor_sim', output='screen'),
         Node(package='robotx_graey_2026', executable='sitl_mission',
              condition=UnlessCondition(LaunchConfiguration('interactive_waypoint')),

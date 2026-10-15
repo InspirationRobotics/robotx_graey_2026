@@ -18,6 +18,7 @@ from sensor_msgs.msg import Imu
 import serial
 
 from robotx_graey_2026.api.node_util import run
+from .vn_protocol import relative_heading, checked
 
 DEFAULT_PORT = '/dev/serial/by-id/usb-FTDI_USB-RS232_Cable_AV0K9DQE-if00-port0'
 
@@ -63,8 +64,13 @@ class VN100Node(Node):
         if self.ser is None:
             try:
                 self.ser = serial.Serial(self.port, self.baud, timeout=0.05)
+                relative_heading(self.ser)
+                self.buf = b''
                 self.get_logger().info(f'VN-100 open on {self.port}')
             except OSError as e:
+                if self.ser is not None:
+                    self.ser.close()
+                    self.ser = None
                 self.get_logger().warn(f'VN-100 open failed: {e}')
                 return
         try:
@@ -86,7 +92,10 @@ class VN100Node(Node):
         txt = line.decode('ascii', 'ignore')
         if not txt.startswith('$VNYBA'):
             return
-        f = txt.split('*')[0].split(',')             # drop the checksum, then split fields
+        try:
+            f = checked(line)
+        except ValueError:
+            return
         if len(f) < 10:
             return
         try:
@@ -94,6 +103,8 @@ class VN100Node(Node):
             ax, ay, az = float(f[4]), float(f[5]), float(f[6])
             gx, gy, gz = float(f[7]), float(f[8]), float(f[9])
         except ValueError:
+            return
+        if not all(math.isfinite(v) for v in (yaw, pitch, roll, ax, ay, az, gx, gy, gz)):
             return
 
         if self.flip:

@@ -756,3 +756,23 @@ VN261.746deg/Cube22.106deg. Observed clockwise changes72.344deg/76.316deg,
 versus requested approximately90deg. Both respond in the same direction, but
 absolute heading remains unvalidated. Approximate physical endpoints do not
 establish sensor scale or justify a fixed yaw offset. No parameter writes.
+
+2026-10-14 offline VN workflow: user reports teammate restored relative mode for
+magnetic interference and selected GPS/DVL surface movement for north alignment.
+Production VN driver now verifies relative mode at connection without saving flash.
+New guided tools/vn_calibrate.py acquires sole-reader lock, backs up registers,
+collects slow3D HSI/six-face coverage and stops learning on interruption; volatile
+only, hardware bench validation pending. Every new core bridge session now needs
+GPS/DVL velocity-vector north alignment before position initialization/odometry.
+No stationary GPS yaw assumption; timing/pressure/GPS/DVL/tilt/rate/speed/dwell gates
+apply. GUI shows alignment status. New checked session commissioning service enables
+supervisor after healthy Cube fusion/aligned odometry and fresh kill/disarm/ESC-off,
+without restarting bridge. Launch flags default output and mission off.130 regression
+tests, browser checks, nominal and Abort native GUI/SITL runs pass; injected40deg
+relative-reference error recovered as-40deg. These are simulated results, not live
+accuracy. Graey offline; SSH timed out. No deployment, live sensor writes, odometry
+activation, arming or vehicle mission. See docs/vn-pretest-workflow-2026-10-14.md.
+Earlier relative-mode diagnosis was overstated: relative mode alone does not prove
+arbitrary yaw/no north reference. Compass disabled/external yaw meant Cube yaw was
+not an independent compass reference in October13 comparisons. North-reference,
+magnetic calibration, mounting/body axes and timing require separate validation.

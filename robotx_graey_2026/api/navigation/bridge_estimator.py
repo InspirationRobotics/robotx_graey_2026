@@ -7,6 +7,7 @@ No Cube position is used as a measurement. Origin is immutable frame metadata.
 from collections import deque
 import math
 from .gps_admission import GPSAdmission
+from .north_alignment import NorthAlignment
 
 
 def wrap(deg):
@@ -35,9 +36,13 @@ def rotate(q, v, inverse=False):
 
 
 class BridgeEstimator:
-    def __init__(self, heading_validated=False):
+    def __init__(self, heading_validated=False, auto_north_alignment=False):
         self.gps = GPSAdmission()
         self.heading_validated = heading_validated
+        self.north_alignment = NorthAlignment() if auto_north_alignment else None
+        if auto_north_alignment:
+            self.heading_validated = False
+        self.north_offset = 0.
         self.origin = None
         self.initialized = False
         self.position = [0., 0., 0.]
@@ -138,7 +143,7 @@ class BridgeEstimator:
                                  raw_velocity=self.raw_velocity, rates=self.rates))
 
     def orientation(self):
-        return yaw_rotate(self.raw_q, self.heading_bias)
+        return yaw_rotate(self.raw_q, self.north_offset+self.heading_bias)
 
     def velocity(self):
         return tuple(a+b for a, b in zip(self.raw_velocity, self.velocity_bias))
@@ -166,6 +171,8 @@ class BridgeEstimator:
                           cube_fix_time_us=fix['cube_fix_time_us'], raw_lat=fix['lat'], raw_lon=fix['lon'],
                           age_upper_s=self.gps.age_bound, depth_m=self.depth)
         if not good:
+            if self.north_alignment and not self.heading_validated and not duplicate:
+                self.north_alignment.reject(self.gps.reason)
             if not duplicate:
                 self.heading_since, self.heading_count = None, 0
             return False
@@ -175,6 +182,22 @@ class BridgeEstimator:
         sample = self.at(sample_time)
         if sample is None:
             return self.reject('GPS cannot be aligned to DVL/VN history')
+        if self.north_alignment and not self.heading_validated:
+            aligned = self.north_alignment.observe(now, fix,
+                rotate(sample['q'], sample['raw_velocity']), sample['rates'], sample['q'])
+            if not aligned:
+                self.event.update(decision='aligning', reason=self.north_alignment.reason)
+                return False
+            # No external output/position initialization is permitted before
+            # alignment. Discard coordinates integrated in the relative frame;
+            # the first admitted fix anchors north/east in the corrected frame.
+            self.north_offset = self.north_alignment.offset
+            self.heading_validated = True
+            self.position[:2] = [0., 0.]
+            for row in self.history:
+                row['position'] = (0., 0., row['position'][2])
+                row['q'] = yaw_rotate(row['q'], self.north_offset)
+            sample = self.at(sample_time)
         lat, lon, _ = self.origin
         gps_ne = ((fix['lat']-lat)*111320.,
                   ((fix['lon']-lon+180)%360-180)*111320.*math.cos(math.radians(lat)))
@@ -254,6 +277,8 @@ class BridgeEstimator:
         gps = self.gps.status(now)
         gps.update(fix=self.last_fix, applied_recently=self.last_correction is not None
                    and 0 <= now-self.last_correction <= .35)
+        if self.north_alignment and not self.heading_validated:
+            healthy = False
         return dict(healthy=bool(healthy), navigation_valid=bool(healthy and self.horizontal_variance <= 25.),
                     fault=self.fault, initialized=self.initialized,
                     depth_m=self.depth if self.fresh(self.depth_at, now) else None,
@@ -262,7 +287,8 @@ class BridgeEstimator:
                     position_ned=list(self.position), distance_travelled_m=self.distance_travelled,
                     position_sigma_m=math.sqrt(self.horizontal_variance),
                     heading_bias_deg=self.heading_bias, velocity_bias_mps=list(self.velocity_bias),
-                    heading_reference_validated=self.heading_validated)
+                    heading_reference_validated=self.heading_validated,
+                    north_alignment=self.north_alignment.status() if self.north_alignment else None)
 
     def covariance(self):
         cov = [0.]*21
