@@ -801,3 +801,14 @@ preparation, arming or mission. Restart controller selected RF; killed/disarmed
 MANUAL/ESC-off confirmed. Sonar relay and untracked work preserved. Jetson sonar
 history remains additional to online navigation branch, not fully Git-identical.
 See docs/calibration-deployment-2026-10-14.md. These are dated observations.
+
+2026-10-14 repeated Prepare failure resolved: supervisor latched the intentional
+bridge maintenance sentinel. d664f93 skips only that sentinel when supervisor
+inactive AND bridge output disabled; real/active faults remain latched. Source
+merge/restart alone did not update the installed Python copy on this Jetson.
+Rebuilt package, verified installed supervisor maintenance_pause and GUI
+prepared_at code using inspect from /tmp, then restarted supervisor/GUI only.
+147 tests passed on Jetson. Live API Prepare remained busy/preparing after5s,
+GPS qualifying, supervisor no longer Fault. Bridge instance and collected VN
+calibration preserved. No arming/movement/mission; manual north alignment pending.
+Future deployments must rebuild and verify installed imports, not assume symlinks.

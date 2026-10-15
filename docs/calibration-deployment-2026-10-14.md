@@ -61,3 +61,14 @@ callback to treat exactly this maintenance sentinel as non-latching only while
 inactive and bridge output disabled. Existing faults are never cleared by this
 exception; other faults and maintenance while active still latch. Added callback
 regressions for pause/reset, preservation of a real fault and active-mode pause.
+
+2026-10-14 repeated Prepare failure resolved: supervisor latched the intentional
+bridge maintenance sentinel. d664f93 skips only that sentinel when supervisor
+inactive AND bridge output disabled; real/active faults remain latched. Source
+merge/restart alone did not update the installed Python copy on this Jetson.
+Rebuilt package, verified installed supervisor maintenance_pause and GUI
+prepared_at code using inspect from /tmp, then restarted supervisor/GUI only.
+147 tests passed on Jetson. Live API Prepare remained busy/preparing after5s,
+GPS qualifying, supervisor no longer Fault. Bridge instance and collected VN
+calibration preserved. No arming/movement/mission; manual north alignment pending.
+Future deployments must rebuild and verify installed imports, not assume symlinks.
