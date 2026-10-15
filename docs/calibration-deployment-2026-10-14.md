@@ -144,3 +144,11 @@ capture, immutable session reference and simulated stationary position anchoring
 with0.49m/s GPS velocity uncertainty followed by underwater DVL/VN continuation.
 No new full native GUI/SITL run or physical known-heading capture claimed. A mocked
 service test initially lacked logger/status fixtures; corrected then suite passed.
+
+2026-10-14 known-heading feature deployed over tether: navigation through236815a
+merged on Jetson asa2a7ed7, package rebuilt,161 tests passed there. Installed
+service/client imports and served Calibration HTML verified. Live unconfirmed
+known-heading request rejected409 with no job/reference change. Fresh controller
+killed/disarmed MANUAL/ESC-off. Core observation output off, no heading captured;
+operator must supply actual independent true bearing. Backup at
+/home/graey/deployment-backups/20261014-known-heading-234523. Main untouched.

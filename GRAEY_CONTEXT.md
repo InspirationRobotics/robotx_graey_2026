@@ -846,3 +846,11 @@ surface/stationary checks and session-only provenance. Does not relax GPS positi
 or mission/Cube health gates. GPS velocity precision is not needed for operator
 north reference.161 regressions and Node page check pass; physical capture requires
 user's actual true bearing. See docs/calibration-deployment-2026-10-14.md.
+
+2026-10-14 known-heading feature deployed over tether: navigation through236815a
+merged on Jetson asa2a7ed7, package rebuilt,161 tests passed there. Installed
+service/client imports and served Calibration HTML verified. Live unconfirmed
+known-heading request rejected409 with no job/reference change. Fresh controller
+killed/disarmed MANUAL/ESC-off. Core observation output off, no heading captured;
+operator must supply actual independent true bearing. Backup at
+/home/graey/deployment-backups/20261014-known-heading-234523. Main untouched.
