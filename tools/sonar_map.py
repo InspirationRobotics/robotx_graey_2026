@@ -193,6 +193,7 @@ def main():
             seen["settings"] = settings_now()
             rec.mark("settings: " + json.dumps(seen["settings"]), auto=True)
     radar = Radar()
+    webview.set_probe(radar.probe)          # a click on the Radar tab reads the echo there
     outliner = Outliner()
     track = []
     run = {"state": "waiting", "epoch": 0, "sweeps": 0}

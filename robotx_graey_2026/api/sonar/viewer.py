@@ -162,6 +162,33 @@ class Radar:
     def max_range_m(self):
         return self.polar.shape[1] * self.metres_per_bin
 
+    def probe(self, right_m, up_m):
+        """The echo at a spot clicked on the Radar tab, right_m and up_m from the
+        sonar in its scan plane. peak is the strongest 5-bin-smoothed sample
+        within 5 cm and 1 deg of the spot: the smoothing the map's threshold is
+        checked against (crumbs.smooth). raw is the strongest sample unsmoothed."""
+        r = math.hypot(right_m, up_m)
+        a = math.degrees(math.atan2(up_m, right_m)) % 360.0
+        out = {"right": round(right_m, 2), "up": round(up_m, 2), "range": round(r, 2),
+               "angle": round(a, 1)}
+        if self.polar is None:
+            return dict(out, why="no sweep yet")
+        if r > self.max_range_m:
+            return dict(out, why="beyond the range")
+        row = int(round(-a * _POLAR_ROWS / 360.0))
+        rows = np.arange(row - _POLAR_ROWS // 360, row + _POLAR_ROWS // 360 + 1) % _POLAR_ROWS
+        rows = rows[self.swept[rows]]
+        if not len(rows):
+            return dict(out, why="not swept")
+        b = int(r / self.metres_per_bin)
+        w = max(1, int(round(0.05 / self.metres_per_bin)))
+        lo, hi = max(0, b - w), min(self.polar.shape[1], b + w + 1)
+        k = np.ones(5) / 5
+        peak = max(np.convolve(self.polar[i].astype(float), k, "same")[lo:hi].max() for i in rows)
+        raw = int(self.polar[rows, max(0, lo - 2):hi + 2].max())    # the samples the smoothing saw
+        return dict(out, peak=int(round(peak)), raw=raw,
+                    stale=bool(self.stale[rows].any()), blind=bool(r < S.MIN_RANGE_M))
+
 
 def render(perception, memory=None, state="", radar=None, size=SIZE,
            panel_w=PANEL_W, target="", page=0, selected=(), note=""):
