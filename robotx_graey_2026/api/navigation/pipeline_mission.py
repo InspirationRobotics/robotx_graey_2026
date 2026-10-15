@@ -95,6 +95,41 @@ DESCEND_SECTOR = '240 300'   # +-30 deg either side of straight down, so sweeps 
 BELOW_RADIUS_M = 1.0    # echoes this close to straight below count as "below"
 
 
+SIDE_WINDOW_DEG = 60.0  # pool plan: the pick's nearest point this close to straight out the sonar's side
+BEHIND_M = 0.5          # ... and its middle no farther behind where the scan started
+
+
+def pool_candidates(found, sonar_xy, side, max_pick, ignore_flat):
+    """The shapes the pool plan may pick, best first, as (score, shape):
+    - within max_pick m of the sonar (0 = any distance);
+    - toward the sonar's side of where the scan started: the map is (0,0) at the
+      sub when the scan began, +y its heading then. The shape's point nearest the
+      sonar (where the approach goes) must lie within SIDE_WINDOW_DEG of straight
+      left (side -1) or right (+1) from there, and its middle no more than
+      BEHIND_M behind the start, so a wall behind the sub isn't picked (Oct 14 dry
+      runs) while a long pipe reaching far ahead still is (sim);
+    - scored without the 'flat' part when a height band already caps the heights,
+      because then a pipe's smear and a wall look the same height-wise (Oct 14).
+    Returns (candidates, ignored-for-distance, ignored-for-side)."""
+    out, far, wrong_side = [], 0, 0
+    for g in found:
+        near = min(g['spine'], key=lambda q: math.hypot(q[0] - sonar_xy[0], q[1] - sonar_xy[1]))
+        if max_pick > 0 and math.hypot(near[0] - sonar_xy[0], near[1] - sonar_xy[1]) > max_pick:
+            far += 1
+            continue
+        bearing = math.degrees(math.atan2(near[0], near[1]))  # 0 ahead, -90 left, +90 right
+        mid_y = float(np.mean(np.asarray(g['spine'], float)[:, 1]))
+        if abs((bearing - 90.0 * side + 180.0) % 360.0 - 180.0) > SIDE_WINDOW_DEG or mid_y < -BEHIND_M:
+            wrong_side += 1
+            continue
+        score = g['score']
+        if ignore_flat and g.get('parts'):
+            score = float(np.prod([v for k, v in g['parts'].items() if k != 'flat']))
+        out.append((score, g))
+    out.sort(key=lambda sg: -sg[0])
+    return out, far, wrong_side
+
+
 def wrap_pi(a):
     return (a + math.pi) % (2 * math.pi) - math.pi
 
@@ -483,19 +518,17 @@ class PipelineMission(MissionBase):
     # ---------- pool plan: approach the nearest part of the pipe ----------
     def pick_target(self, m):
         found = m.get('outlines') or []
-        if m.get('sonar') and self.pool_max_pick > 0:
-            sx, sy = m['sonar']
-            near = lambda g: min(math.hypot(x - sx, y - sy) for x, y in g['spine'])
-            far = [g for g in found if near(g) > self.pool_max_pick]
-            if far:
-                self.get_logger().info(f'    ignoring {len(far)} shape(s) more than {self.pool_max_pick:.1f} m away '
-                                       f'(best {max(g["score"] for g in far):.0%})')
-            found = [g for g in found if near(g) <= self.pool_max_pick]
-        for i, g in enumerate(found[:5]):
-            self.get_logger().info(f'    outline {i}: pipe {g["score"]:.0%} {g["parts"]} {g["n"]} crumbs, '
+        sonar = m.get('sonar') or [0.0, 0.0]
+        cands, far, wrong = pool_candidates(found, sonar, self.side, self.pool_max_pick,
+                                            ignore_flat=self.pool_band != 'off')
+        for i, (score, g) in enumerate(cands[:5]):
+            self.get_logger().info(f'    outline {i}: pipe {score:.0%} {g["parts"]} {g["n"]} crumbs, '
                                    f'{g["length"]:.1f} m long, {g["width"]:.2f} m wide')
-        best = found[0] if found else None
-        if best is None or best['score'] < self.min_score:
+        if far or wrong:
+            self.get_logger().info(f'    ignored {far} shape(s) more than {self.pool_max_pick:.1f} m away and '
+                                   f'{wrong} on the other side of where the scan started')
+        best = cands[0][1] if cands else None
+        if best is None or cands[0][0] < self.min_score:
             self.get_logger().warn(f'pool scan: no outline scores {self.min_score:.0%} - surfacing')
             self.enter(S.SURFACE)
             return
@@ -509,7 +542,7 @@ class PipelineMission(MissionBase):
         # turn so the pipe is on pool_side: to the right means heading 90 deg left of it
         self.approach_yaw = math.atan2(te - here[1], tn - here[0]) - self.side * math.pi / 2
         self.get_logger().info(
-            f'picked: pipe {best["score"]:.0%}, {best["length"]:.1f} m; nearest part at NED '
+            f'picked: pipe {cands[0][0]:.0%}, {best["length"]:.1f} m; nearest part at NED '
             f'({tn:.2f}, {te:.2f}), {math.hypot(tn - here[0], te - here[1]):.2f} m away - '
             f'strafing to it, heading {math.degrees(self.approach_yaw) % 360:.0f} deg')
         self.retarget_t = self.now()
