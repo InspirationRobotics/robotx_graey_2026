@@ -56,6 +56,7 @@ def main():
     proc=None; plan=None; run_id=None; abort_sent=False
     manual_link = None
     alignment_stopped = False
+    alignment_drive_started = None
     try:
         with (folder/'runner.log').open('w') as output:
             proc=subprocess.Popen(['bash','sitl/run.sh'],cwd=root,env=env,stdout=output,
@@ -68,11 +69,24 @@ def main():
                     s=streams.get('supervisor',{}).get('data',{});c=nav['cube_estimate']
                     if args.auto_north and not alignment_stopped and streams.get('heartbeat',{}).get('fresh'):
                         from pymavlink import mavutil
+                        if not streams.get('supervisor',{}).get('fresh'):
+                            if alignment_drive_started is not None:
+                                raise RuntimeError('Supervisor telemetry disappeared during alignment fixture')
+                            time.sleep(.2)
+                            continue
                         if manual_link is None:
                             manual_link=mavutil.mavlink_connection('udpout:127.0.0.1:14559',source_system=255,source_component=202)
                         manual_link.mav.heartbeat_send(6,8,0,0,0)
                         alignment=s.get('north_alignment') or {}
                         if not alignment.get('aligned'):
+                            if alignment_drive_started is None and not (s.get('gps_admission') or {}).get('qualified'):
+                                result['alignment_waiting_for_gps'] = True
+                                time.sleep(.2)
+                                continue
+                            if alignment_drive_started is None:
+                                alignment_drive_started=time.monotonic()
+                            if time.monotonic()-alignment_drive_started > 25:
+                                raise RuntimeError('Alignment fixture movement exceeded 25 seconds')
                             # Owned isolated simulator only. MANUAL surface movement
                             # establishes alignment before any external odometry.
                             manual_link.mav.set_mode_send(1,1,19)
@@ -128,6 +142,8 @@ def main():
     except Exception as error: result['error']=repr(error)
     finally:
         if manual_link:
+            manual_link.mav.manual_control_send(1,0,0,500,0,0)
+            manual_link.mav.command_long_send(1,1,400,0,0,0,0,0,0,0,0)
             manual_link.close()
         if proc:
             try: os.killpg(proc.pid,signal.SIGINT)

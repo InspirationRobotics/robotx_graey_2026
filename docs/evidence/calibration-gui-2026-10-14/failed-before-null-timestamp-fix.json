@@ -1,0 +1,19 @@
+{
+  "passed": false,
+  "continuous": true,
+  "stages": [],
+  "gps_outage_seen": false,
+  "underwater_cube_seen": false,
+  "last_retry": "<urlopen error [Errno 111] Connection refused>",
+  "alignment_progress": {
+    "aligned": false,
+    "offset_deg": null,
+    "reason": "Pressure surface eligibility unavailable",
+    "samples": 0,
+    "method": "GPS/DVL velocity vectors",
+    "persistence": "bridge session only"
+  },
+  "error": "Validation deadline exceeded",
+  "independent_clock_gaps": [],
+  "wall_clock_adjustments": []
+}

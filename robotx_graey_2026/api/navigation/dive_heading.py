@@ -28,6 +28,11 @@ class DiveHeadingCheck:
         result = dict(state='Waiting', allowed=False, reason='', course_deg=None,
                       vn_error_deg=None, cube_error_deg=None, correction_applied=False)
 
+        def fresh(sample):
+            stamp = sample.get('received') if isinstance(sample,dict) else None
+            return (isinstance(stamp,(int,float)) and math.isfinite(stamp)
+                    and 0 <= now-stamp < .5)
+
         def finish(state, reason, allowed=False, reset=True):
             if reset:
                 self.reset_window()
@@ -47,7 +52,7 @@ class DiveHeadingCheck:
         if not self.reference_validated:
             return finish('Blocked', 'Heading north references and forward axes not validated')
         for label, sample in [('VN attitude', vn), ('Cube attitude', cube), ('DVL motion', dvl)]:
-            if not sample or not 0 <= now-sample.get('received', -math.inf) < .5:
+            if not fresh(sample):
                 return finish('Waiting', label+' unavailable or stale')
         if not dvl.get('valid'):
             return finish('Waiting', 'DVL motion invalid')
@@ -61,7 +66,7 @@ class DiveHeadingCheck:
             return finish('Waiting', 'Heading or motion fields unavailable')
         if abs(angle_error(vyaw, cyaw)) > self.tolerance:
             return finish('Blocked', 'VN and Cube heading disagree')
-        if not gps_good or not gps or not 0 <= now-gps.get('received', -math.inf) < .5:
+        if not gps_good or not fresh(gps):
             return skip('GPS course not qualified')
         course, speed, uncertainty = (gps.get(k) for k in ('course_deg', 'speed_mps', 'speed_accuracy_mps'))
         if any(x is None or not math.isfinite(x) for x in (course, speed, uncertainty)):

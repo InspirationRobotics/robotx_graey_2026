@@ -1,5 +1,7 @@
 # VN relative heading and pre-test north alignment — October 14, 2026
 
+GUI update: use [Calibration GUI](calibration-gui-2026-10-14.md) for the new buttons and current workflow. The terminal-only procedure below remains available for offline maintenance; GUI calibration keeps the core running and uses the existing VN reader.
+
 ## What changed
 
 User selected GPS/DVL surface movement rather than a manually entered heading.

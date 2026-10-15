@@ -776,3 +776,18 @@ Earlier relative-mode diagnosis was overstated: relative mode alone does not pro
 arbitrary yaw/no north reference. Compass disabled/external yaw meant Cube yaw was
 not an independent compass reference in October13 comparisons. North-reference,
 magnetic calibration, mounting/body axes and timing require separate validation.
+
+2026-10-14 GUI follow-up: user explicitly prefers VN-100 as primary external
+attitude source over Cube-derived attitude. This is a design priority, not proof
+that VN is accurate under interference; no covariance weighting was tightened.
+Added /calibration page and main/Waypoint links. GUI jobs suspend mission permission
+and odometry, run HSI calibration in the existing VN reader (no competing serial
+owner), show120s/six-face progress and stop/fail on safety/link/readback problems.
+Prepare requires explicit floating-surface confirmation and stable fresh pressure,
+starts new relative-VN/GPS/DVL north alignment, and waits for killed/disarmed Cube
+fusion verification before checked session mission activation. No arm/mode/ESC
+commands. Bridge reset counter increments on controlled preparation; Cube origin
+stays continuous. Hardware kill/watchdog faults are not cleared by preparation.
+Reproduced/fixed supervisor crash on None VN/DVL received timestamp; regression
+added. New GUI physical calibration/positive commissioning paths await hardware;
+Graey remains offline and changes are not deployed. See docs/calibration-gui-2026-10-14.md.

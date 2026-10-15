@@ -2,6 +2,8 @@
 import ast
 import json
 import math
+import statistics
+from collections import deque
 from pathlib import Path
 from types import SimpleNamespace as NS
 import unittest
@@ -18,13 +20,18 @@ class TransportTests(unittest.TestCase):
         tree.body = [n for n in tree.body if isinstance(n, ast.ClassDef)]
         self.clock = NS(now=10.)
         ns = dict(SteadyNode=object, math=math, json=json, String=NS, PROFILE=PROFILE,
-                  yaw=yaw, time=NS(monotonic=lambda: self.clock.now))
+                  yaw=yaw, time=NS(monotonic=lambda: self.clock.now),
+                  statistics=statistics, BridgeEstimator=BridgeEstimator, require_maintenance=Mock())
         exec(compile(tree, str(path), 'exec'), ns)
         self.b = ns['FusedNavBridge'].__new__(ns['FusedNavBridge'])
         self.b.est = BridgeEstimator()
         self.b.stamps, self.b.params = {}, {}
         self.b.boot_ms = self.b.last_sent = None
         self.b.start_checked = True
+        self.b.output_permitted = True
+        self.b.reset_counter = 0
+        self.b.pressures = deque(maxlen=80)
+        self.b.vn_calibration = (10.,dict(phase='idle'))
         self.b.settings = dict(enabled=True, surface_pressure_hpa=1000., water_density=1000.)
         self.b.link, self.b.pub = Mock(), Mock()
         self.b.instance = 'test'
@@ -95,6 +102,36 @@ class TransportTests(unittest.TestCase):
         self.b.link.odometry.assert_not_called()
         self.b.consume('HEARTBEAT', NS(base_mode=0, get_srcSystem=lambda: 1, get_srcComponent=lambda: 1))
         self.assertTrue(self.b.est.fault)  # Must restart; no automatic recovery.
+
+    def test_prepare_requires_confirmed_surface_and_restarts_alignment_with_reset_counter(self):
+        self.b.params = {k:(10.,v) for k,v in PROFILE.items()}
+        self.b.pressures.extend((8.+i*.1,1000.+i*.001) for i in range(21))
+        self.b.est.set_origin((33.,-117.,0.))
+        self.b.est.initialized = True
+        self.b.est.position = [20.,10.,.5]
+        old = self.b.est
+        response = self.b.prepare(NS(data=False),NS())
+        self.assertFalse(response.success)
+        self.assertIs(self.b.est,old)
+        response = self.b.prepare(NS(data=True),NS())
+        self.assertTrue(response.success,response.message)
+        self.assertEqual(self.b.est.origin,(33.,-117.,0.))
+        self.assertFalse(self.b.est.initialized)
+        self.assertIsNone(self.b.est.north_alignment.offset)
+        self.assertEqual(self.b.reset_counter,1)
+        self.assertTrue(self.b.output_permitted)
+        self.b.tick()
+        self.b.link.odometry.assert_not_called()
+        self.b.link.command.assert_not_called()
+
+    def test_prepare_rejects_unstable_pressure_or_failed_calibration(self):
+        self.b.params = {k:(10.,v) for k,v in PROFILE.items()}
+        for phase,spread in (('failed',0.),('collecting',0.),('idle',20.)):
+            self.b.vn_calibration = (10.,dict(phase=phase))
+            self.b.pressures = deque((8.+i*.1,1000.+spread*i/20) for i in range(21))
+            response = self.b.prepare(NS(data=True),NS())
+            self.assertFalse(response.success)
+            self.assertEqual(self.b.reset_counter,0)
 
     def test_profile_never_selects_native_gps(self):
         for slot in (1, 2, 3):

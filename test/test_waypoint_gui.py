@@ -18,6 +18,7 @@ class WaypointGuiTests(unittest.TestCase):
             waypoint_api=NS(consume=lambda *args:(self.item,False)),
             waypoint_capabilities=lambda:dict(enabled=False,simulation=False),
             waypoint_process=None,waypoint_launch=None,waypoint_aborts=queue.Queue(),
+            calibration_jobs=None,
             pids_for=lambda name:[],MISSION_EXECUTABLES=('waypoint_mission',),
             subprocess=NS(Popen=Mock()),link=Mock())
         exec(compile(tree,str(path),'exec'),self.ns)
