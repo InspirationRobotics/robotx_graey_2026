@@ -25,19 +25,30 @@ active buoy, on the surface. Built in steps, each checked in the simulator:
 
 Every scan turns slower than the map's 10 deg/s limit, so no ping is thrown away.
 
-POOL PLAN (plan:=pool; Ruth, Oct 10). In the 0.9 m pool, with the pipeline hung
-mid-water and the sonar looking sideways (sector 270 -> 60), it tests the real
-scanning and the approach:
+POOL PLAN (plan:=pool; Ruth, Oct 10; for the lake too, Oct 14). With the pipe
+about level with the sonar and the sonar looking to one side (pool_side; left =
+sector 140 -> 210, as Ruth sweeps), it tests the real scanning and the approach.
+The scan uses Ruth's map settings: threshold 100, little dots only, fade off, and
+a height band around sonar level (pool_band), so the floor and the sonar's own
+ringing don't become the pick. At threshold 100 the pipe is heard to only about
+1.5-2 m (Oct 3 measurements; the sim is tuned to them), so START THE RUN WITHIN
+ABOUT 1.5 M OF THE PIPE:
   DIVE        to pool_depth (0.3 m)
   POOL SCAN   one slow turn, the map at pool_range (6 m) looking sideways
   PICK        the most pipe-like outline, and its crumb nearest the sonar
-  FACE        turn so that point is straight to the right, where the sonar looks
+  FACE        turn so that point is straight to the pool_side, where the sonar looks
   APPROACH    strafe sideways toward it at approach_speed - a target that moves
               (stream_posvel), since GUIDED alone runs at WPNAV_SPEED (0.45 m/s on
               Graey) and overshot 0.2 m in the sim - re-aiming as new crumbs land,
-              until the sonar is approach_range (0.8 m) from it, just outside
-              its 0.75 m blind zone
+              until the sonar is approach_range (1.2 m) from it: in the pool the
+              pipe vanished into the 0.75 m blind zone and its ringing (to about
+              1.05 m) whenever the sub got closer than that
   HOLD        hold_s seconds there, then surface where it is
+
+stop_after:=scan|pick|face|approach ends the run after that stage (hold, then
+surface), so each stage can be tried alone. In a dry run the scan waits for the
+PILOT to turn the sub through scan_turn_deg (read from the Cube's attitude), so
+a dry run while someone drives tests the real pick.
 
 THE MAP. tools/sonar_map.py runs beside this (on Graey, on the host; in the sim,
 sim/sim_sonar_map.py) and is driven through its web page's own controls, the
@@ -140,12 +151,17 @@ class PipelineMission(MissionBase):
         p('pool_depth', 0.3)                # m below the surface (the pool is 0.9 m)
         p('pool_max_depth', 0.6)            # m; no pool target ever goes deeper
         p('pool_range', 6.0)
-        p('pool_sector', '270 60')          # Ruth: down, through right, to 60 up - sideways
+        p('pool_sector', '140 210')         # Ruth, Oct 14: the left side, a little up and down
+        p('pool_side', 'left')              # where the sonar looks: 'left' or 'right'
+        p('pool_band', '-0.3 0.4')          # m from the sonar; the pipe is about level with it.
+                                            # 'off' = every height
+        p('pool_compact', True)             # little dots only: walls make no crumbs
         p('pool_floor_cut', 0.25)           # the pipe hangs ~0.45 m off the pool floor
-        p('approach_range', 0.8)            # m, sonar to pipe at the stop: just outside the
-                                            # sonar's 0.75 m blind zone
+        p('approach_range', 1.2)            # m, sonar to pipe at the stop: past the 0.75 m blind
+                                            # zone AND its ringing (to ~1.05 m), where the pipe hid
         p('approach_speed', 0.15)           # m/s
         p('hold_s', 15.0)
+        p('stop_after', '')                 # '' = the whole plan; or scan, pick, face, approach
 
     def read_extra_parameters(self):
         g = lambda n: self.get_parameter(n).value
@@ -167,6 +183,13 @@ class PipelineMission(MissionBase):
         self.plan = g('plan')
         self.approach_range, self.approach_speed = g('approach_range'), g('approach_speed')
         self.hold_s = g('hold_s')
+        self.stop_after = g('stop_after').strip().lower()
+        if self.stop_after not in ('', 'scan', 'pick', 'face', 'approach'):
+            raise ValueError(f"stop_after must be scan, pick, face or approach, not {self.stop_after!r}")
+        self.side = 1.0 if g('pool_side').strip().lower() == 'right' else -1.0
+        band = g('pool_band').strip().lower()
+        self.pool_band = 'off' if band in ('', 'off', 'none') else band
+        self.pool_compact = bool(g('pool_compact'))
         if self.plan == 'pool':
             self.depth = g('pool_depth')
             self.max_depth = g('pool_max_depth')
@@ -269,6 +292,11 @@ class PipelineMission(MissionBase):
             self.map_post('/sector', sector)
             self.map_post('/threshold', threshold)
             self.map_post('/floorcut', cut)
+            pool = self.scan == 'pool'
+            self.map_post('/compact', 'on' if pool and self.pool_compact else 'off')
+            if pool:        # keep every crumb of the turn: with fade on the turn wiped 97% of them (sim)
+                self.map_post('/fade', 'off')
+            self.map_post('/band', self.pool_band if pool else 'off')
             for cmd in ('reset', 'start', 'resume'):    # whatever state it was in
                 self.map_post('/mapcmd', cmd)
             self.to_phase(f'{self.scan} scan: map start')
@@ -288,27 +316,49 @@ class PipelineMission(MissionBase):
             n, e, down, _ = self.hold
             self.stream_posvel(n, e, down, 0.0, 0.0, self.scan_rate, f'{self.scan} scan turn')
             if self.cur_yaw is not None and self.last_yaw is not None:
+                before = abs(self.turned)
                 self.turned += wrap_pi(self.cur_yaw - self.last_yaw)
+                if int(abs(self.turned) // math.radians(45)) > int(before // math.radians(45)):
+                    self.get_logger().info(f'    turned {math.degrees(abs(self.turned)):.0f} of '
+                                           f'{math.degrees(self.scan_turn):.0f} deg'
+                                           + (' (dry run: the pilot turns the sub)' if self.dry else ''))
             self.last_yaw = self.cur_yaw
-            if abs(self.turned) >= self.scan_turn or (self.dry and self.now() - self.state_t0 > 5):
+            # a dry run sends nothing, so it waits for the pilot to turn the sub; with
+            # no attitude at all (no Cube) it stops waiting after 5 s
+            no_yaw = self.dry and self.cur_yaw is None and self.now() - self.state_t0 > 5
+            if abs(self.turned) >= self.scan_turn or no_yaw:
                 self.hold_here(self.hold[2], 'hold')
                 self.to_phase(f'{self.scan} scan: settle')
 
         elif ph == 'settle':
             self.goto_ned(*self.hold, 'hold')
             if self.now() - self.state_t0 >= SETTLE_S:
+                if self.stop_after == 'scan':
+                    self.stop_here('scan')
+                    return
                 {'far': self.locate, 'close': self.pick, 'pool': self.pick_target}[self.scan](self.map_get())
 
         elif ph == 'face':
+            if self.stop_after == 'pick':
+                self.stop_here('pick')
+                return
             self.goto_ned(self.hold[0], self.hold[1], self.hold[2], self.approach_yaw, 'face the pipe')
             if self.dry or (self.cur_yaw is not None
                             and abs(wrap_pi(self.cur_yaw - self.approach_yaw)) < math.radians(5)):
+                if self.stop_after == 'face':
+                    self.stop_here('face')
+                    return
                 self.carrot = (self.cur[0], self.cur[1]) if self.cur else self.hold[:2]
                 self.last_t = self.now()
                 self.to_phase('approach')
 
         elif ph == 'approach':
             self.approach(self.map_get())
+
+        elif ph == 'stopped':
+            self.goto_ned(*self.hold, 'hold')
+            if self.now() - self.state_t0 >= 5.0:
+                self.enter(S.SURFACE)
 
         elif ph == 'at pipe':
             self.goto_ned(*self.hold, 'hold at the pipe')
@@ -350,6 +400,13 @@ class PipelineMission(MissionBase):
                     return
                 self.step_z = min(self.step_z + 0.5, limit)       # nothing seen yet: a bit lower
             self.goto_ned(n, e, self.step_z, self.hold[3], 'descend')
+
+    def stop_here(self, stage):
+        """stop_after: hold where the sub is for 5 s, then surface."""
+        self.get_logger().info(f'stop_after:={stage} - holding 5 s, then surfacing')
+        if self.cur and not self.dry:
+            self.hold_here(self.cur[2], 'hold')
+        self.to_phase('stopped')
 
     def pipe_below(self, m):
         """How far below the sonar the highest raised echo near straight down is
@@ -431,10 +488,12 @@ class PipelineMission(MissionBase):
             self.enter(S.SURFACE)
             return
         tn, te = self.map_to_ned(*self.aim)
-        self.approach_yaw = math.atan2(te - self.cur[1], tn - self.cur[0]) - math.pi / 2  # pipe on the right
+        here = self.cur if self.cur else self.hold     # a dry run on a sub with no position yet
+        # turn so the pipe is on pool_side: to the right means heading 90 deg left of it
+        self.approach_yaw = math.atan2(te - here[1], tn - here[0]) - self.side * math.pi / 2
         self.get_logger().info(
             f'picked: pipe {best["score"]:.0%}, {best["length"]:.1f} m; nearest part at NED '
-            f'({tn:.2f}, {te:.2f}), {math.hypot(tn - self.cur[0], te - self.cur[1]):.2f} m away - '
+            f'({tn:.2f}, {te:.2f}), {math.hypot(tn - here[0], te - here[1]):.2f} m away - '
             f'strafing to it, heading {math.degrees(self.approach_yaw) % 360:.0f} deg')
         self.retarget_t = self.now()
         self.to_phase('face')
@@ -463,9 +522,9 @@ class PipelineMission(MissionBase):
         yaw = self.approach_yaw
         fwd, right = (math.cos(yaw), math.sin(yaw)), (-math.sin(yaw), math.cos(yaw))
         ahead = sonar_settings.SONAR_FWD_M
-        # stand where the SONAR is approach_range from the aim, with the aim straight to its right
-        gn = tn - self.approach_range * right[0] - ahead * fwd[0]
-        ge = te - self.approach_range * right[1] - ahead * fwd[1]
+        # stand where the SONAR is approach_range from the aim, with the aim straight to its pool_side
+        gn = tn - self.side * self.approach_range * right[0] - ahead * fwd[0]
+        ge = te - self.side * self.approach_range * right[1] - ahead * fwd[1]
         # the carrot walks toward that spot at approach_speed; the sub follows it
         dt, self.last_t = min(self.now() - self.last_t, 0.5), self.now()
         cn, ce = self.carrot
