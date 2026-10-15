@@ -159,6 +159,23 @@ class CalibrationJobs:
                 self.service('cancel')
                 raise ValueError('Calibration timed out; inspect sensor status')
             self.update(phase='preparing',message=self.service('prepare',True))
+            # While the first suspend/pause/reset was in flight, supervisor can
+            # legitimately latch the OLD bridge fault. Wait for post-reset clean
+            # bridge status, then explicitly suspend once more while maintained.
+            reset_ack = self.clock()
+            while True:
+                b=self.sample('bridge')
+                stamp=b.get('published_monotonic')
+                if (isinstance(stamp,(int,float)) and reset_ack <= stamp <= self.clock()
+                        and not b.get('fault')):
+                    break
+                if self.snapshot().get('cancel') or self.clock()-reset_ack>=10:
+                    raise ValueError('No clean bridge status after reset; preparation stopped')
+                self.sleep(.1)
+            self.sleep(.6)  # Old bridge publications are outside the 0.5s gate.
+            if self.snapshot().get('cancel') or maintenance_reason(self.controller()):
+                raise ValueError('Preparation cancelled or safety state changed')
+            self.service('suspend')
             if self.snapshot().get('alignment_mode')=='known':
                 self.update(message='Hold level and stationary with kill engaged; capturing measured true heading')
                 self.sleep(2.2)

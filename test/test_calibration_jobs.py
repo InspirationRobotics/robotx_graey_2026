@@ -8,6 +8,36 @@ from robotx_graey_2026.api.navigation.vn_calibration import VNCalibration
 
 
 class CalibrationJobsTests(unittest.TestCase):
+    def test_recovery_clears_old_latch_only_after_clean_bridge_reset(self):
+        self.put('supervisor',dict(state='Fault',reason='DVL continuity lost'))
+        self.job.job=dict(busy=True,cancel=False)
+        count=[0]
+        def service(name,value=None):
+            result=self.service(name,value)
+            if name=='suspend':
+                count[0]+=1
+                if count[0]==2:
+                    self.assertGreaterEqual(self.now,.6)
+                    self.assertFalse(self.nav['streams']['bridge']['data']['fault'])
+                    self.put('supervisor',dict(north_alignment=dict(aligned=True)))
+            return result
+        self.job.service=service
+        self.job.run('prepare')
+        self.assertTrue(self.job.waypoint_permission)
+        self.assertEqual(count[0],2)
+
+    def test_recovery_does_not_clear_fault_without_clean_reset_status(self):
+        self.job.job=dict(busy=True,cancel=False)
+        def service(name,value=None):
+            result=self.service(name,value)
+            if name=='prepare':self.put('bridge',dict(published_monotonic=0.,fault='Still invalid'))
+            return result
+        self.job.service=service
+        self.job.run('prepare')
+        self.assertFalse(self.job.waypoint_permission)
+        self.assertEqual(sum(name=='suspend' for name,value in self.calls),1)
+        self.assertIn('No clean bridge',self.job.snapshot()['message'])
+
     def test_known_heading_requires_confirmation_and_numeric_true_bearing(self):
         for value in (None,True,'90',-1,360,float('nan')):
             with self.assertRaises(ValueError):
@@ -20,13 +50,13 @@ class CalibrationJobsTests(unittest.TestCase):
     def test_known_heading_preparation_captures_before_commission(self):
         self.job.job=dict(busy=True,cancel=False,alignment_mode='known',true_heading_deg=90.)
         def service(name,value=None):
-            self.calls.append((name,value))
+            self.service(name,value)
             if name=='align_heading':
                 self.put('supervisor',dict(north_alignment=dict(aligned=True)))
             return 'ok'
         self.job.service=service
         self.job.run('prepare')
-        self.assertEqual(self.calls,[('suspend',None),('pause',None),('prepare',True),('align_heading',90.),('commission',None)])
+        self.assertEqual(self.calls,[('suspend',None),('pause',None),('prepare',True),('suspend',None),('align_heading',90.),('commission',None)])
         self.assertTrue(self.job.waypoint_permission)
 
     def test_known_heading_cancel_during_settling_never_captures_or_commissions(self):
@@ -44,11 +74,16 @@ class CalibrationJobsTests(unittest.TestCase):
                       esc_commanded_on=False,mission_claimed=False,autonomous=False)
         self.nav = dict(streams={})
         self.now, self.calls = 0., []
+        self.refresh_status=True
         self.job = CalibrationJobs(lambda:self.c,lambda:self.nav,self.service,lambda:False,
                                    clock=lambda:self.now,sleep=self.sleep)
 
     def service(self, name, value=None):
         self.calls.append((name,value))
+        if name=='prepare':
+            self.put('bridge',dict(published_monotonic=self.now,fault=''))
+        if name=='suspend' and self.now>=.6 and self.refresh_status and 'supervisor' in self.nav['streams']:
+            self.nav['streams']['supervisor']['data']['published_monotonic']=self.now
         return name+' accepted'
 
     def sleep(self, seconds):
@@ -72,6 +107,7 @@ class CalibrationJobsTests(unittest.TestCase):
         self.assertTrue(self.job.waypoint_permission)
 
     def test_prepare_missing_new_status_times_out_without_permission(self):
+        self.refresh_status=False
         self.put('supervisor',dict(state='Fault',published_monotonic=-1.))
         self.job.job = dict(busy=True,cancel=False)
         self.job.run('prepare')
@@ -104,14 +140,14 @@ class CalibrationJobsTests(unittest.TestCase):
         self.job.job = dict(busy=True,cancel=False,action='prepare')
         def sleep(seconds):
             self.now += seconds
-            if self.now == 1:
+            if 1 <= self.now < 2:
                 self.c.update(armed=True,sa_active=False,esc_commanded_on=True)
                 self.put('supervisor',dict(north_alignment=dict(aligned=True,reason='Aligned')))
-            if self.now == 2:
+            if self.now >= 2:
                 self.c.update(armed=False,sa_active=True,esc_commanded_on=False)
         self.job.sleep = sleep
         self.job.run('prepare')
-        self.assertEqual(self.calls,[('suspend',None),('pause',None),('prepare',True),('commission',None)])
+        self.assertEqual(self.calls,[('suspend',None),('pause',None),('prepare',True),('suspend',None),('commission',None)])
         self.assertTrue(self.job.waypoint_permission)
         self.assertEqual(self.job.snapshot()['phase'],'ready')
 
@@ -139,6 +175,7 @@ class CalibrationJobsTests(unittest.TestCase):
         self.put('supervisor',dict(north_alignment=dict(aligned=True)))
         self.job.job = dict(busy=True,cancel=False)
         def service(name, value=None):
+            self.service(name,value)
             if name == 'commission':
                 self.job.request(dict(action='cancel'))
             return 'ok'
