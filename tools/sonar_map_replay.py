@@ -123,6 +123,7 @@ def main():
 
     outliner = Outliner()
     radar, last_radar = Radar(), [-1e9]
+    webview.set_probe(radar.probe)          # a click on the Radar tab reads the echo there
 
     def show_radar(s, force=False):
         """The Radar tab's picture of sweep s, drawn as the live tool draws it,

@@ -45,6 +45,7 @@ import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 import cv2
 
@@ -69,6 +70,7 @@ _band = None                         # (lo, hi) m from the sonar's height that m
 _compact = False                     # little dots only: wall-like tall echoes make no crumbs
 _radar_geom = None                   # {size, range} of the radar picture, for the band's lines
 _radar_dots = []                     # the newest sweep's crumbs [right, up, brightness], to circle
+_probe = None                        # fn(right_m, up_m) -> dict: the echo under a click (Radar.probe)
 _rows = []                          # one summary per detection, for the buttons
 _per_page = 10
 _view = {"page": 0, "selected": []}
@@ -282,6 +284,13 @@ def set_radar_dots(dots):
         _radar_dots = list(dots)
 
 
+def set_probe(fn):
+    """What answers a click on the Radar tab: Radar.probe."""
+    global _probe
+    with _lock:
+        _probe = fn
+
+
 def set_floor_cut(value):
     global _floor_cut
     with _lock:
@@ -335,7 +344,10 @@ padding:5px 10px;font:13px ui-monospace,Menlo,monospace;cursor:pointer">set</but
 <label id="cdw" style="display:none;white-space:nowrap" title="circle every echo of the newest sweep that became a crumb on the map"><input id="cd" type="checkbox" style="vertical-align:middle"> circle map dots</label>
 <span id="note" style="color:#8ea;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 max-width:45vw"></span></div>
-<div style="flex:1;min-height:0;position:relative">
+<div id="rw" style="flex:1;min-height:0;position:relative">
+<div id="pl" style="position:absolute;display:none;z-index:2;max-width:330px;padding:7px 9px;border-radius:4px;
+background:rgba(14,12,11,0.92);border:1px solid #ffb84d;color:#eee;font:12px/1.45 ui-monospace,Menlo,monospace;
+pointer-events:none;white-space:pre"></div>
 <img id="im" src="/stream" style="position:absolute;left:0;top:0;width:100%;height:100%;object-fit:contain">
 <canvas id="hb" style="position:absolute;left:0;top:0;width:100%;height:100%;touch-action:none;pointer-events:none"></canvas></div>
 <div id="bar" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;
@@ -395,6 +407,28 @@ function geom(){if(!GEOM||!im.naturalWidth)return null;
 var W=hc.clientWidth,H=hc.clientHeight,nw=im.naturalWidth,nh=im.naturalHeight,
 s=Math.min(W/nw,H/nh),x0=(W-nw*s)/2,y0=(H-nh*s)/2,c=Math.floor(nh/2),m=Math.floor(nh*0.065);
 return{left:x0,right:x0+nh*s,top:y0,bottom:y0+nh*s,cy:y0+c*s,ppm:(c-m)/GEOM.range*s};}
+var PROBE=null,PRES=null,TH=null,dragged=false,pl=document.getElementById('pl'),rw=document.getElementById('rw');
+function showProbe(){var g=geom();if(!PROBE||!g){pl.style.display='none';return;}
+var cx=(g.left+g.right)/2,x=cx+PROBE[0]*g.ppm,y=g.cy-PROBE[1]*g.ppm,r=PRES,t;
+if(!r)t='reading...';else if(r.why)t=r.range.toFixed(2)+' m away, '+Math.round(r.angle)+' deg: '+r.why;
+else t='strength '+r.peak+'  (raw peak '+r.raw+')'+(TH!==null?(r.peak>=TH?'  - above':'  - below')+' threshold '+TH:'')+
+'\\n'+r.range.toFixed(2)+' m away, '+Math.abs(r.right).toFixed(2)+' m '+(r.right<0?'left':'right')+', '+
+Math.abs(r.up).toFixed(2)+' m '+(r.up<0?'down':'up')+', '+Math.round(r.angle)+' deg'+
+(r.blind?'\\ninside the blind zone: nothing heard here':'')+(r.stale?'\\nold picture (range changed)':'')+'\\nclick elsewhere to move, Esc to close';
+pl.textContent=t;pl.style.display='block';
+var W=rw.clientWidth,H=rw.clientHeight,bw=pl.offsetWidth,bh=pl.offsetHeight;
+pl.style.left=Math.max(4,Math.min(W-bw-4,x+14))+'px';pl.style.top=Math.max(4,Math.min(H-bh-4,y-bh-10))+'px';}
+function doProbe(){if(!PROBE)return;var p=PROBE;
+fetch('/probe?x='+p[0].toFixed(3)+'&y='+p[1].toFixed(3)).then(function(r){return r.json();})
+.then(function(r){if(p===PROBE){PRES=r;showProbe();}}).catch(function(){});}
+rw.addEventListener('click',function(e){if(dragged){dragged=false;return;}var g=geom();if(!g)return;
+var b=rw.getBoundingClientRect(),x=e.clientX-b.left,y=e.clientY-b.top;
+if(x<g.left||x>g.right||y<g.top||y>g.bottom){PROBE=null;PRES=null;showProbe();drawBand();return;}
+PROBE=[(x-(g.left+g.right)/2)/g.ppm,(g.cy-y)/g.ppm];PRES=null;showProbe();drawBand();doProbe();});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'&&PROBE){PROBE=null;PRES=null;showProbe();drawBand();}});
+function drawProbe(g){if(!PROBE)return;var cx=(g.left+g.right)/2,x=cx+PROBE[0]*g.ppm,y=g.cy-PROBE[1]*g.ppm;
+hx.strokeStyle='#ffb84d';hx.lineWidth=2;hx.beginPath();hx.moveTo(x-11,y);hx.lineTo(x-4,y);hx.moveTo(x+4,y);hx.lineTo(x+11,y);
+hx.moveTo(x,y-11);hx.lineTo(x,y-4);hx.moveTo(x,y+4);hx.lineTo(x,y+11);hx.stroke();}
 function drawDots(g){if(!cd.checked||!DOTS.length)return;var cx=(g.left+g.right)/2;
 DOTS.forEach(function(d){var x=cx+d[0]*g.ppm,y=g.cy-d[1]*g.ppm;
 if(x<g.left||x>g.right||y<g.top||y>g.bottom)return;
@@ -403,7 +437,7 @@ hx.lineWidth=1.8;hx.strokeStyle='#fff';hx.beginPath();hx.arc(x,y,7,0,7);hx.strok
 function drawBand(){var W=hc.clientWidth,H=hc.clientHeight;
 if(hc.width!==W||hc.height!==H){hc.width=W;hc.height=H;}
 hx.clearRect(0,0,W,H);var b=drag?drag.b:BAND,g=geom();
-hc.style.pointerEvents=(b&&g)?'auto':'none';if(g)drawDots(g);if(!b||!g)return;
+hc.style.pointerEvents=(b&&g)?'auto':'none';if(g){drawDots(g);drawProbe(g);showProbe();}if(!b||!g)return;
 var yh=g.cy-b[1]*g.ppm,yl=g.cy-b[0]*g.ppm,w=g.right-g.left;
 hx.fillStyle='rgba(0,0,0,0.4)';
 hx.fillRect(g.left,g.top,w,Math.max(0,Math.min(yh,g.bottom)-g.top));
@@ -428,7 +462,7 @@ h=Math.max(-GEOM.range,Math.min(GEOM.range,h));
 if(drag.k===1)drag.b[1]=Math.max(h,drag.b[0]+0.05);else drag.b[0]=Math.min(h,drag.b[1]-0.05);
 drag.b=[Math.round(drag.b[0]*100)/100,Math.round(drag.b[1]*100)/100];
 hbt.textContent=fmt(drag.b);drawBand();});
-function endDrag(){if(!drag)return;BAND=LAST=drag.b;drag=null;sendBand(BAND);drawBand();}
+function endDrag(){if(!drag)return;BAND=LAST=drag.b;drag=null;dragged=true;sendBand(BAND);drawBand();}
 hc.addEventListener('pointerup',endDrag);hc.addEventListener('pointercancel',endDrag);
 hbon.onchange=function(){BAND=hbon.checked?LAST.slice():null;sendBand(BAND);drawBand();};
 window.addEventListener('resize',drawBand);im.addEventListener('load',drawBand);
@@ -471,6 +505,7 @@ thw.style.display=(s.map&&s.threshold!==null&&s.threshold!==undefined)?'inline':
 if(s.threshold!==null&&s.threshold!==undefined&&document.activeElement!==th)th.value=s.threshold;
 ldw.style.display=s.map?'inline':'none';if(document.activeElement!==ld)ld.checked=!!s.compact;
 cdw.style.display=(s.map&&s.radar)?'inline':'none';DOTS=s.dots||[];
+TH=(s.threshold===null||s.threshold===undefined)?null:s.threshold;doProbe();
 if(!drag){BAND=s.band;if(s.band)LAST=s.band;if(document.activeElement!==hbon)hbon.checked=!!s.band;
 if(hbt.textContent.indexOf('need')<0&&hbt.textContent.indexOf('say')<0)hbt.textContent=s.band?fmt(s.band):'';}
 drawBand();})
@@ -861,6 +896,17 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/':
             self._send(PAGE, 'text/html')
+            return
+        if self.path.startswith('/probe?'):
+            with _lock:
+                fn = _probe
+            try:
+                q = parse_qs(urlparse(self.path).query)
+                x, y = float(q['x'][0]), float(q['y'][0])
+            except (KeyError, ValueError):
+                self.send_error(400)
+                return
+            self._send(json.dumps(fn(x, y) if fn else {"why": "no radar"}).encode(), 'application/json')
             return
         if self.path in ('/map', '/mapdata'):
             with _lock:
