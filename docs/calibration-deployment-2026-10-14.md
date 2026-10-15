@@ -217,3 +217,11 @@ injector: sitl/validate_dvl_recovery.py, run from repository root after sourcing
 Initial nominal launch lacked repository import path; corrected using PYTHONPATH=.
 Injector initially lost ROS import path due environment override; rerun with system
 Python and original sourced ROS paths succeeded. Those attempts are not test passes.
+
+2026-10-14 bounded DVL recovery deployed through ebdcf9c on Jetson as9f100a3.
+ROS build and167 regressions passed on Jetson. Fresh API exposes dvl_continuity,
+VN/DVL inputs fresh, no bridge fault; killed/disarmed ESC-off, RF selected.
+Restart intentionally baseline0/output disabled; known-heading Prepare required.
+Backup /home/graey/deployment-backups/20261014-bounded-dvl-001311. Native simulation
+validated recovery; live postinitialization dropout recovery still awaits wet test.
+No real mission started, no main changes; sonar history/untracked files preserved.

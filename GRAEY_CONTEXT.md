@@ -875,3 +875,11 @@ increase uncertainty for unmeasured gap; long loss and other hard faults latch.
 167 tests, native nominal waypoint and native short/long DVL fault injection pass.
 Mission may still abort on real unhealthy data; no silent run restart. See
  docs/calibration-deployment-2026-10-14.md and committed evidence.
+
+2026-10-14 bounded DVL recovery deployed through ebdcf9c on Jetson as9f100a3.
+ROS build and167 regressions passed on Jetson. Fresh API exposes dvl_continuity,
+VN/DVL inputs fresh, no bridge fault; killed/disarmed ESC-off, RF selected.
+Restart intentionally baseline0/output disabled; known-heading Prepare required.
+Backup /home/graey/deployment-backups/20261014-bounded-dvl-001311. Native simulation
+validated recovery; live postinitialization dropout recovery still awaits wet test.
+No real mission started, no main changes; sonar history/untracked files preserved.
