@@ -168,7 +168,13 @@ class NavigationSupervisor(Node):
             self.put('gps_admission', gps)
             if good:
                 self.put('gps', gps.get('fix'))
-            if d.get('fault'):
+            # GUI preparation suspends the supervisor then pauses the bridge.
+            # That intentional pause is a recoverable observation state, not a
+            # sensor/frame fault to latch across the subsequent Prepare reset.
+            maintenance_pause = (
+                d.get('fault') == 'Navigation maintenance; Prepare required before reuse'
+                and self.logic.active is False and d.get('enabled') is False)
+            if d.get('fault') and not maintenance_pause:
                 self.logic.fault = d['fault']
         except (ValueError, TypeError):
             return
