@@ -6,6 +6,12 @@ from robotx_graey_2026.api.navigation.vn_protocol import packet, checked, transa
 
 
 class NorthTests(unittest.TestCase):
+    def test_uncertain_stationary_gps_does_not_prompt_surface_acceleration(self):
+        a=NorthAlignment()
+        a.observe(1.,self.fix(1.,speed=.05,sigma=.439),(0.,0.,0.),(0.,0.,0.),(1.,0.,0.,0.))
+        self.assertIn('uncertainty',a.reason)
+        self.assertNotIn('0.5',a.reason)
+
     def test_delayed_five_hz_gps_aligns_despite_between_packet_expiry(self):
         e=BridgeEstimator(auto_north_alignment=True)
         e.set_origin((33.,-117.,0.))
