@@ -250,3 +250,26 @@ Actual user's QGC feed/version was not inspected. Observed Cube global vs local 
 about[-0.323,-1.055]m vs[-0.324,-1.057]m using Cube origin at one snapshot, consistent
 within centimetres. Pool image displacement mismatch is suspected map registration/
 scale, not a demonstrated EKF scale defect; physical/QGC movement comparison remains.
+
+## Georeferenced satellite waypoint background
+
+User needs pool context for live target selection. Added default Satellite live
+waypoint mode to the existing waypoint canvas. Loads public Esri World_Imagery
+Web Mercator tiles directly in the operator browser; no QGC stream/screenshot
+capture or private map key. Verified public MapServer metadata: EPSG3857,256px
+tiles, LOD through23, attribution Source Esri,Vantor,Earthstar Geographics,GIS User
+Community. Renderer uses standard slippy-tile projection/inverse and geographic
+viewport transform, caps native request zoom21/cache96 tiles, retains north-up
+orientation and metric scale. Raw GPS uncertainty, Cube position/heading, track,
+start/target and mission route overlay the imagery in the same geographic frame.
+Satellite clicks submit existing geographic plans; no old screenshot offsets,
+registration bypass or additional mission permissions. Cannot select a point on an
+unloaded tile; loading/error message and offline geographic grid remain available.
+Satellite positioning is not surveyed pool registration; imagery and GPS errors
+remain independent and first pool missions need clear margins/manual takeover.
+
+Node tests pass for coordinate round-trip at northern/southern latitudes, loading
+failure blocking selection, rendered satellite click to geographic mission plan,
+existing readiness/preview-free Start and ambiguous-network idempotency. No backend,
+EKF, sensor/heading or supervisor policy change. Satellite availability needs internet
+on the operator laptop/browser, not necessarily the Jetson. QGC need not be open.
