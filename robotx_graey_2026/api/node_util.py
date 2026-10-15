@@ -2,6 +2,7 @@
 """Shared entry point. Every node's main() was these same twelve lines."""
 import os
 import sys
+import traceback
 from contextlib import nullcontext
 from robotx_graey_2026.api.process_ownership import ProcessOwnership
 
@@ -17,16 +18,20 @@ def run(node_cls, ownership=None):
 def _run(node_cls):
     rclpy.init()
     node = node_cls()
+    exit_code = 0
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
+    except Exception:
+        exit_code = 1
+        traceback.print_exc()
     finally:
         node.destroy_node()                 # nodes owning hardware release it here
         if rclpy.ok():
             rclpy.shutdown()
         sys.stdout.flush()
         sys.stderr.flush()
-        os._exit(0)                         # skip interpreter teardown: force-killing a
+        os._exit(exit_code)                 # preserve runtime failures in logs/status
                                             # thread parked in torch's C++ ends in
                                             # std::terminate and a 30 s hang on Ctrl-C

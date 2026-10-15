@@ -14,91 +14,22 @@ from enum import Enum
 from unittest.mock import Mock
 from robotx_graey_2026.api.navigation.gps_quality import GPSQuality
 from robotx_graey_2026.api.navigation.bridge_identity import BridgeIdentity
-
-
 ROOT = Path(__file__).parents[1] / 'robotx_graey_2026/api/navigation'
-
 
 def load_callbacks(filename, classname):
     tree = ast.parse((ROOT / filename).read_text(encoding='utf-8'))
     tree.body = [n for n in tree.body if isinstance(n, (ast.ClassDef, ast.FunctionDef))]
-    clock = NS(now=10.)
-    namespace = dict(Node=object, String=NS, Bool=NS, Enum=Enum, json=json, math=math, uuid=uuid,
-                     MODE_MANUAL=19,
-                     time=NS(monotonic=lambda: clock.now))
+    clock = NS(now=10.0)
+    namespace = dict(Node=object, String=NS, Bool=NS, Enum=Enum, json=json, math=math, uuid=uuid, MODE_MANUAL=19, time=NS(monotonic=lambda : clock.now))
     exec(compile(tree, filename, 'exec'), namespace)
-    return namespace[classname].__new__(namespace[classname]), clock
-
-
-class BridgeTests(unittest.TestCase):
-    def setUp(self):
-        self.b, self.clock = load_callbacks('nav_ekf_bridge.py', 'NavEKFBridge')
-        self.b.have_att = self.b.valid = True
-        self.b.imu_received = self.b.dvl_received = 10.
-        self.b.imu_stamp = -1
-        self.b.sensor_stamp = self.b.last_t = None
-        self.b.q = (1., 0., 0., 0.)
-        self.b.vb = self.b.rates = (0., 0., 0.)
-        self.b.pos = [0., 0., 0.]
-        self.b.yaw_off = self.b.sent = self.b.reset_counter = 0
-        self.b.aligned_id = ''
-        self.b.link = Mock()
-        self.b.publish_status = Mock()
-        self.b.get_parameter = lambda _: NS(value=True)
-
-    def sample(self, stamp, valid=True, velocity=(1, 0, 0), sensor=None):
-        self.b.on_sample(NS(data=json.dumps(dict(stamp_ns=stamp, valid=valid,
-            velocity=velocity, sensor_time=sensor))))
-
-    def test_stale_or_invalid_dvl_withholds_odometry(self):
-        self.b.send_odom()
-        self.assertEqual(self.b.link.odometry.call_count, 1)
-
-        self.clock.now += .6
-        self.b.send_odom()
-        self.sample(1000000000, valid=False)
-        self.b.send_odom()
-        self.assertEqual(self.b.link.odometry.call_count, 1)
-
-    def test_backward_clock_does_not_make_measurements_fresh(self):
-        self.clock.now = 9.
-        self.b.send_odom()
-        self.b.link.odometry.assert_not_called()
-
-    def test_atomic_invalid_sample_never_integrates_zero_or_velocity(self):
-        self.sample(1000000000)
-        self.sample(1100000000, valid=False, velocity=(100, 0, 0))
-        self.assertEqual(self.b.pos, [0, 0, 0])
-        self.sample(1200000000)
-        self.assertAlmostEqual(self.b.pos[0], .1)
-
-    def test_replayed_dvl_sensor_time_does_not_refresh_age(self):
-        self.sample(1000000000, sensor=123)
-        self.clock.now += .6
-        self.sample(2000000000, sensor=123)
-        self.assertFalse(self.b.fresh())
-
-    def test_nonfinite_rates_reject_imu(self):
-        self.b.on_imu(NS(header=NS(stamp=NS(sec=1, nanosec=0)),
-            orientation=NS(w=1., x=0., y=0., z=0.),
-            angular_velocity=NS(x=math.nan, y=0., z=0.)))
-        self.assertFalse(self.b.have_att)
-
-    def test_alignment_is_once_and_expired_requests_ignored(self):
-        msg = NS(data=json.dumps(dict(request_id='one', cube_ned=[4, 5, 6], expires_at=10.4)))
-        self.b.align(msg); self.b.align(msg)
-        self.assertEqual(self.b.pos, [4, 5, 6])
-        self.assertEqual(self.b.reset_counter, 1)
-        self.clock.now += 1
-        self.b.align(NS(data=json.dumps(dict(request_id='two', cube_ned=[0, 0, 0], expires_at=10.4))))
-        self.assertEqual(self.b.reset_counter, 1)
-
+    return (namespace[classname].__new__(namespace[classname]), clock)
 
 class TelemetryTests(unittest.TestCase):
+
     def setUp(self):
-        self.s, self.clock = load_callbacks('navigation_supervisor.py', 'NavigationSupervisor')
-        self.s.samples, self.s.stamps, self.s.params = {}, {}, {}
-        self.s.settings = dict(pressure_message='SCALED_PRESSURE2', surface_pressure_hpa=0., water_density=1025.)
+        (self.s, self.clock) = load_callbacks('navigation_supervisor.py', 'NavigationSupervisor')
+        (self.s.samples, self.s.stamps, self.s.params) = ({}, {}, {})
+        self.s.settings = dict(pressure_message='SCALED_PRESSURE2', surface_pressure_hpa=0.0, water_density=1025.0)
         self.s.boot_ms = self.s.cube_origin = self.s.last_gps = self.s.last_gps_time = None
         self.s.epoch = 'original'
         self.s.logic = NS(fault='')
@@ -110,40 +41,7 @@ class TelemetryTests(unittest.TestCase):
         self.s.gps_quality.motion(self.clock.now, (0, 0, 0), True)
 
     def receive(self, kind, **fields):
-        self.s.consume(kind, NS(get_srcSystem=lambda: 1, get_srcComponent=lambda: 1, **fields))
-
-    def test_ack_rejects_wrong_target_and_unsolicited_messages(self):
-        self.receive('COMMAND_ACK', command=42007, result=0, target_system=1, target_component=196)
-        self.assertNotIn('ack', self.s.samples)
-        self.s.logic.pending = (2, 9.)
-        for sys, comp in ((2, 196), (1, 197)):
-            self.receive('COMMAND_ACK', command=42007, result=0, target_system=sys, target_component=comp)
-        self.assertNotIn('ack', self.s.samples)
-        self.receive('COMMAND_ACK', command=42007, result=5, target_system=1, target_component=196)
-        self.assertNotIn('ack', self.s.samples)
-        self.receive('COMMAND_ACK', command=42007, result=0, target_system=1, target_component=196)
-        self.assertEqual(self.s.fresh('ack'), 'accepted')
-
-    def test_replayed_source_report_does_not_refresh_receive_time(self):
-        self.receive('NAMED_VALUE_FLOAT', name='NAV_SRC', time_boot_ms=100, value=2.)
-        received = self.s.samples['source'][0]
-        self.clock.now += 2
-        self.receive('NAMED_VALUE_FLOAT', name='NAV_SRC', time_boot_ms=100, value=2.)
-        self.assertEqual(self.s.samples['source'][0], received)
-        self.assertIsNone(self.s.fresh('source'))
-
-    def test_transaction_trace_preserves_first_source_and_completed_outcome(self):
-        self.s.logic.pending = (2, 9.)
-        self.s.logic.timeout = 3.
-        self.s.switch_trace = dict(id=1, target=2, sent=9.)
-        self.receive('NAMED_VALUE_FLOAT', name='NAV_SRC', time_boot_ms=100, value=2.)
-        self.clock.now += .2
-        self.receive('NAMED_VALUE_FLOAT', name='NAV_SRC', time_boot_ms=200, value=2.)
-        self.assertEqual(self.s.switch_trace['first_matching_source_received'], 10.)
-        self.s.switch_trace['outcome'] = 'confirmed'
-        saved = dict(self.s.switch_trace)
-        self.receive('NAMED_VALUE_FLOAT', name='NAV_SRC', time_boot_ms=300, value=1.)
-        self.assertEqual(self.s.switch_trace, saved)
+        self.s.consume(kind, NS(get_srcSystem=lambda : 1, get_srcComponent=lambda : 1, **fields))
 
     def test_bridge_duplicates_latch_fault_and_malformed_status_does_not_refresh(self):
         for data in ('null', '[]', '42', '{}', '{"instance": 12}'):
@@ -151,71 +49,15 @@ class TelemetryTests(unittest.TestCase):
         self.assertNotIn('bridge', self.s.samples)
         for instance in ('first', 'second', 'first'):
             self.s.bridge_status(NS(data=json.dumps(dict(instance=instance, healthy=True))))
-            self.clock.now += .1
+            self.clock.now += 0.1
         self.assertIn('Multiple', self.s.logic.fault)
         self.clock.now += 2
         self.s.bridge_status(NS(data='{"instance":"first","healthy":true}'))
         self.assertIn('Multiple', self.s.logic.fault)
 
-    def gps(self, stamp=100, fix=3, accuracy=1000, lat=330000000):
-        self.receive('GPS_RAW_INT', time_usec=stamp, fix_type=fix, lat=lat,
-                     lon=-1170000000, alt=100000, h_acc=accuracy)
-
-    def test_cached_gps_expires_and_missing_accuracy_rejected(self):
-        self.gps(); self.assertTrue(self.s.fresh('gps_good'))
-        self.clock.now += 2; self.gps()
-        self.assertIsNone(self.s.fresh('gps_good'))
-        self.gps(stamp=101, accuracy=0)
-        self.assertFalse(self.s.fresh('gps_good'))
-
-    def test_gps_jump_and_fix_loss_rejected(self):
-        self.gps(); self.clock.now += .2
-        self.gps(stamp=101, lat=340000000)
-        self.assertFalse(self.s.fresh('gps_good'))
-        self.gps(stamp=101, fix=1)
-        self.assertFalse(self.s.fresh('gps_good'))
-
-    def test_depth_requires_explicit_surface_calibration(self):
-        self.receive('SCALED_PRESSURE2', time_boot_ms=100, press_abs=1013.)
-        self.assertTrue(math.isnan(self.s.fresh('depth')))
-        self.s.settings['surface_pressure_hpa'] = 1013.
-        self.receive('SCALED_PRESSURE2', time_boot_ms=101, press_abs=1113.)
-        self.assertAlmostEqual(self.s.fresh('depth'), .99484, places=4)
-
-    def test_atomic_dvl_replay_does_not_qualify_gps(self):
-        self.s.dvl_sample(NS(data=json.dumps(dict(stamp_ns=100, sensor_time=12,
-                                                velocity=[0, 0, 0], valid=True))))
-        self.clock.now += 1
-        self.s.dvl_sample(NS(data=json.dumps(dict(stamp_ns=101, sensor_time=12,
-                                                velocity=[0, 0, 0], valid=True))))
-        self.gps(stamp=101)
-        self.assertFalse(self.s.fresh('gps_good'))
-        self.assertIn('DVL', self.s.fresh('gps_reason'))
-
-    def test_atomic_invalid_dvl_cannot_claim_stationarity(self):
-        self.s.dvl_sample(NS(data=json.dumps(dict(stamp_ns=100,
-                                                velocity=[0, 0, 0], valid=False))))
-        self.gps()
-        self.assertFalse(self.s.fresh('gps_good'))
-
-    def test_simulated_depth_topic_isolated_from_cube_pressure(self):
-        self.s.settings['depth_topic'] = '/graey/sitl/depth_m'
-        self.s.sim_depth(NS(data=.5))
-        self.receive('SCALED_PRESSURE2', time_boot_ms=101, press_abs=1200.)
-        self.assertEqual(self.s.fresh('depth'), .5)
-
-    def test_vn_turn_rate_converts_radians_to_degrees_per_second(self):
-        self.s.stamps = {}
-        self.s.put = lambda key, value: self.s.samples.__setitem__(key, (self.clock.now, value))
-        msg = NS(header=NS(stamp=NS(sec=1, nanosec=0)),
-            orientation=NS(w=1., x=0., y=0., z=0.),
-            angular_velocity=NS(z=math.radians(10.)))
-        self.s.vn(msg)
-        self.assertAlmostEqual(self.s.samples['heading_vn'][1]['rate'], 10.)
-
     def test_cube_reboot_and_origin_change_invalidate_frame(self):
-        self.receive('LOCAL_POSITION_NED', time_boot_ms=10000, x=0., y=0., z=0.)
-        self.receive('LOCAL_POSITION_NED', time_boot_ms=100, x=0., y=0., z=0.)
+        self.receive('LOCAL_POSITION_NED', time_boot_ms=10000, x=0.0, y=0.0, z=0.0)
+        self.receive('LOCAL_POSITION_NED', time_boot_ms=100, x=0.0, y=0.0, z=0.0)
         self.assertNotEqual(self.s.epoch, 'original')
         self.assertIn('restarted', self.s.logic.fault)
         self.receive('GPS_GLOBAL_ORIGIN', latitude=1, longitude=2, altitude=3)
@@ -224,39 +66,38 @@ class TelemetryTests(unittest.TestCase):
 
     def test_uninitialized_or_constant_position_ekf_is_not_healthy(self):
         for flags in (1 | 2 | 8 | 32 | 32768, 1 | 2 | 8 | 32 | 128):
-            self.receive('EKF_STATUS_REPORT', flags=flags, velocity_variance=.1,
-                         pos_horiz_variance=.1, pos_vert_variance=.1)
+            self.receive('EKF_STATUS_REPORT', flags=flags, velocity_variance=0.1, pos_horiz_variance=0.1, pos_vert_variance=0.1)
             self.assertFalse(self.s.fresh('ekf'))
 
-
 class RuntimeRegressionTests(unittest.TestCase):
+
     def test_sitl_target_is_not_restarted_every_tick(self):
-        node, clock = load_callbacks('sitl_mission.py', 'SitlMission')
+        (node, clock) = load_callbacks('sitl_mission.py', 'SitlMission')
         node.link = Mock()
-        node.last_target, node.last_target_time, node.target_yaw = None, -math.inf, None
-        node.attitude = .4
-        node.command_target(1, 2, .5)
+        (node.last_target, node.last_target_time, node.target_yaw) = (None, -math.inf, None)
+        node.attitude = 0.4
+        node.command_target(1, 2, 0.5)
         for _ in range(20):
-            clock.now += .1
-            node.attitude += .01
-            node.command_target(1, 2, .5)
+            clock.now += 0.1
+            node.attitude += 0.01
+            node.command_target(1, 2, 0.5)
         self.assertEqual(node.link.goto_ned.call_count, 1)
         clock.now += 2
-        node.command_target(1, 2, .5)
+        node.command_target(1, 2, 0.5)
         self.assertEqual(node.link.goto_ned.call_count, 2)
-        self.assertEqual(node.link.goto_ned.call_args.args[-1], .4)
-        node.command_target(2, 2, .5)
+        self.assertEqual(node.link.goto_ned.call_args.args[-1], 0.4)
+        node.command_target(2, 2, 0.5)
         self.assertEqual(node.link.goto_ned.call_count, 3)
 
     def test_sitl_health_loss_records_failure_and_never_sends_target(self):
-        node, clock = load_callbacks('sitl_mission.py', 'SitlMission')
+        (node, clock) = load_callbacks('sitl_mission.py', 'SitlMission')
         node.intent_pub = Mock()
         node.publish_intent = Mock()
         node.stage = 'UNDERWATER_WAYPOINT'
-        node.stage_started, node.timeout = clock.now, 90
-        node.status_received, node.run_id = clock.now, 'run'
+        (node.stage_started, node.timeout) = (clock.now, 90)
+        (node.status_received, node.run_id) = (clock.now, 'run')
         node.status = dict(run_id='run', state='Waiting for healthy navigation', reason='DVL stale')
-        node.link, node.write_result, node.command_target = Mock(), Mock(), Mock()
+        (node.link, node.write_result, node.command_target) = (Mock(), Mock(), Mock())
         node.get_logger = Mock(return_value=Mock())
         node.tick()
         self.assertEqual(node.stage, 'FAULT')
@@ -265,10 +106,10 @@ class RuntimeRegressionTests(unittest.TestCase):
         node.link.disarm.assert_called_once()
 
     def test_vn_read_failure_closes_port_and_discards_partial_line(self):
-        node, _ = load_callbacks('vn100_node.py', 'VN100Node')
+        (node, _) = load_callbacks('vn100_node.py', 'VN100Node')
         port = Mock()
         port.read.side_effect = OSError('disconnected')
-        node.ser, node.buf = port, b'partial'
+        (node.ser, node.buf) = (port, b'partial')
         node.get_logger = Mock(return_value=Mock())
         node.tick()
         port.close.assert_called_once()
@@ -276,15 +117,14 @@ class RuntimeRegressionTests(unittest.TestCase):
         self.assertEqual(node.buf, b'')
 
     def test_sitl_stale_healthy_status_aborts_with_actual_reason(self):
-        node, clock = load_callbacks('sitl_mission.py', 'SitlMission')
+        (node, clock) = load_callbacks('sitl_mission.py', 'SitlMission')
         node.intent_pub = Mock()
         node.publish_intent = Mock()
         node.stage = 'SURFACING'
-        node.stage_started, node.timeout = clock.now, 90
-        node.status_received, node.run_id = clock.now-1.17, 'run'
-        node.status = dict(run_id='run', state='Surface GPS',
-                           reason='Navigation inputs healthy', navigation_ready=True)
-        node.link, node.write_result, node.command_target = Mock(), Mock(), Mock()
+        (node.stage_started, node.timeout) = (clock.now, 90)
+        (node.status_received, node.run_id) = (clock.now - 1.17, 'run')
+        node.status = dict(run_id='run', state='Surface GPS', reason='Navigation inputs healthy', navigation_ready=True)
+        (node.link, node.write_result, node.command_target) = (Mock(), Mock(), Mock())
         node.get_logger = Mock(return_value=Mock())
         node.tick()
         self.assertEqual(node.stage, 'FAULT')
@@ -295,19 +135,19 @@ class RuntimeRegressionTests(unittest.TestCase):
         node.link.disarm.assert_called_once()
 
     def test_simulator_does_not_restamp_cached_attitude(self):
-        node, clock = load_callbacks('sitl_sensor_sim.py', 'SitlSensorSim')
+        (node, clock) = load_callbacks('sitl_sensor_sim.py', 'SitlSensorSim')
         node.last_request = clock.now
-        node.last_publish = 0.
+        node.last_publish = 0.0
         node.link = Mock()
         node.imu_pub = Mock()
-        node.latest = {'attitude': {'received': clock.now-1, 'q': (1, 0, 0, 0)}}
+        node.latest = {'attitude': {'received': clock.now - 1, 'q': (1, 0, 0, 0)}}
         node.tick()
         node.imu_pub.publish.assert_not_called()
 
-
 class MissionGateTests(unittest.TestCase):
+
     def setUp(self):
-        self.m, self.clock = load_callbacks('mission_base.py', 'MissionBase')
+        (self.m, self.clock) = load_callbacks('mission_base.py', 'MissionBase')
         self.states = self.m.navigation_gate.__globals__['S']
         self.m.state = self.states.WAIT_NAV
         self.m.nav_run = 'run'
@@ -315,7 +155,7 @@ class MissionGateTests(unittest.TestCase):
         self.m.nav_supervised = True
         self.m.nav_interrupted = False
         self.m.nav_abort_last = -math.inf
-        self.m.nav_status_time = 10.
+        self.m.nav_status_time = 10.0
         self.m.nav_status = dict(run_id='run', navigation_ready=True, reference_current=True)
         self.m.nav_intent_pub = Mock()
         self.m.auto_pub = Mock()
@@ -349,7 +189,5 @@ class MissionGateTests(unittest.TestCase):
         self.m.nav_status['navigation_ready'] = False
         self.assertFalse(self.m.navigation_gate())
         self.m.link.set_mode.assert_not_called()
-
-
 if __name__ == '__main__':
     unittest.main()

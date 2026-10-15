@@ -111,8 +111,11 @@ class Link:
         self.send('heartbeat_send', GCS_TYPE, GCS_AUTOPILOT, 0, 0, 0)
 
     def drain(self, handler):
-        """Consume every queued message. handler(msg_type, msg) per message."""
-        while True:
+        """Bound receive work so continuous telemetry cannot starve ROS timers."""
+        deadline = time.monotonic()+.02
+        for _ in range(256):
+            if time.monotonic() >= deadline:
+                return
             try:
                 m = self.mav.recv_match(blocking=False)
             except OSError as e:                    # ECONNREFUSED arrives on recv too
@@ -161,7 +164,7 @@ class Link:
                   0, TARGET_SYS, TARGET_COMP, FRAME_LOCAL_NED, MASK_POSVEL_YAWRATE,
                   n, e, down, vn, ve, vd, 0, 0, 0, 0, yaw_rate)
 
-    def odometry(self, pos, q, vel, rates, reset_counter=0):
+    def odometry(self, pos, q, vel, rates, reset_counter=0, covariance=None, quality=0):
         """VN-100 attitude + DVL velocity + dead-reckoned position, as one ODOMETRY.
 
         Here rather than in nav_ekf_bridge so the guarded send covers it too - it
@@ -171,4 +174,5 @@ class Link:
                   int(time.monotonic()*1000000), FRAME_LOCAL_FRD, FRAME_BODY_FRD,
                   pos[0], pos[1], pos[2], list(q),
                   vel[0], vel[1], vel[2], rates[0], rates[1], rates[2],
-                  COV_UNKNOWN, COV_UNKNOWN, reset_counter, EST_VIO)
+                  covariance if covariance is not None else COV_UNKNOWN,
+                  COV_UNKNOWN, reset_counter, EST_VIO, quality)

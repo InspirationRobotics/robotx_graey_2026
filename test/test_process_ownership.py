@@ -118,7 +118,7 @@ class ProcessDisplayTests(unittest.TestCase):
         calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
                  and isinstance(n.func, ast.Name) and n.func.id == 'Node']
         bridge = next(n for n in calls if any(k.arg == 'executable'
-                      and isinstance(k.value, ast.Constant) and k.value.value == 'nav_ekf_bridge'
+                      and isinstance(k.value, ast.Constant) and k.value.value == 'fused_nav_bridge'
                       for k in n.keywords))
         self.assertFalse(any(k.arg is None for k in bridge.keywords))
         self.assertFalse(next(k.value.value for k in bridge.keywords if k.arg == 'respawn'))

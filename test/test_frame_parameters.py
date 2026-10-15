@@ -9,14 +9,12 @@ class FrameParameters(unittest.TestCase):
     def check_offset(self, offset):
         import rclpy
         from rclpy.parameter import Parameter
-        from robotx_graey_2026.api.navigation import vn100_node, nav_ekf_bridge
+        from robotx_graey_2026.api.navigation import vn100_node
         rclpy.init(args=['--ros-args', '-p', 'yaw_offset_deg:='+str(offset)])
         nodes = []
         try:
-            with patch.object(vn100_node.serial, 'Serial') as serial, \
-                    patch.object(nav_ekf_bridge, 'Link'):
+            with patch.object(vn100_node.serial, 'Serial') as serial:
                 nodes.append(vn100_node.VN100Node())
-                nodes.append(nav_ekf_bridge.NavEKFBridge())
                 for node in nodes:
                     descriptor = node.describe_parameter('yaw_offset_deg')
                     self.assertEqual(descriptor.name, 'yaw_offset_deg')

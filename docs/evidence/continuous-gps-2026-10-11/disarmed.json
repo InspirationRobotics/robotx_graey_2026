@@ -1,0 +1,265 @@
+{
+  "evidence": "/mnt/c/Users/libei/OneDrive/Documents/ChatGPT/RX 2026 GRAEY/robotx_graey_2026/sitl/logs/continuous-yvw28jtr",
+  "phases": [
+    {
+      "phase": "acquire",
+      "forwarded": 183,
+      "status": {
+        "qualified": true,
+        "reason": "GPS admitted; Cube-fix timing approximation",
+        "cube_fix_age_upper_s": 0.19646735844103835,
+        "timing_basis": "Cube last-fix time; not receiver epoch",
+        "receiver_delay_bound_s": null,
+        "fault": ""
+      },
+      "latest": {
+        "GLOBAL_POSITION_INT": {
+          "mavpackettype": "GLOBAL_POSITION_INT",
+          "time_boot_ms": 47827,
+          "lat": 329240000,
+          "lon": -1170385000,
+          "alt": -170,
+          "relative_alt": -346,
+          "vx": 0,
+          "vy": 0,
+          "vz": 0,
+          "hdg": 13
+        },
+        "EKF_STATUS_REPORT": {
+          "mavpackettype": "EKF_STATUS_REPORT",
+          "flags": 831,
+          "velocity_variance": 0.00410872045904398,
+          "pos_horiz_variance": 0.00016086797404568642,
+          "pos_vert_variance": 0.2686920166015625,
+          "compass_variance": 0.0037537079770118,
+          "terrain_alt_variance": 0.0,
+          "airspeed_variance": 0.0
+        },
+        "GPS_RAW_INT": {
+          "mavpackettype": "GPS_RAW_INT",
+          "time_usec": 47620000,
+          "fix_type": 6,
+          "lat": 329240000,
+          "lon": -1170385000,
+          "alt": -130,
+          "eph": 121,
+          "epv": 200,
+          "vel": 0,
+          "cog": 0,
+          "satellites_visible": 10,
+          "alt_ellipsoid": -130,
+          "h_acc": 300,
+          "v_acc": 300,
+          "vel_acc": 40,
+          "hdg_acc": 0,
+          "yaw": 0
+        },
+        "GPS2_RAW": {
+          "mavpackettype": "GPS2_RAW",
+          "time_usec": 47757000,
+          "fix_type": 6,
+          "lat": 329240000,
+          "lon": -1170385000,
+          "alt": -130,
+          "eph": 121,
+          "epv": 200,
+          "vel": 0,
+          "cog": 0,
+          "satellites_visible": 10,
+          "dgps_numch": 0,
+          "dgps_age": 0,
+          "yaw": 0,
+          "alt_ellipsoid": 0,
+          "h_acc": 300,
+          "v_acc": 0,
+          "vel_acc": 0,
+          "hdg_acc": 0
+        },
+        "LOCAL_POSITION_NED": {
+          "mavpackettype": "LOCAL_POSITION_NED",
+          "time_boot_ms": 47827,
+          "x": -0.000625140150077641,
+          "y": 0.0006103550549596548,
+          "z": 0.05625930428504944,
+          "vx": -0.0027916845865547657,
+          "vy": 0.0028464170172810555,
+          "vz": 0.004690844099968672
+        }
+      }
+    },
+    {
+      "phase": "reject_jump",
+      "forwarded": 1,
+      "status": {
+        "qualified": false,
+        "reason": "GPS displacement disagrees with DVL motion",
+        "cube_fix_age_upper_s": 0.19017218070765862,
+        "timing_basis": "Cube last-fix time; not receiver epoch",
+        "receiver_delay_bound_s": null,
+        "fault": ""
+      },
+      "latest": {
+        "GLOBAL_POSITION_INT": {
+          "mavpackettype": "GLOBAL_POSITION_INT",
+          "time_boot_ms": 67627,
+          "lat": 329240000,
+          "lon": -1170385000,
+          "alt": -150,
+          "relative_alt": -322,
+          "vx": 0,
+          "vy": 0,
+          "vz": -1,
+          "hdg": 22
+        },
+        "EKF_STATUS_REPORT": {
+          "mavpackettype": "EKF_STATUS_REPORT",
+          "flags": 39,
+          "velocity_variance": 0.0135793536901474,
+          "pos_horiz_variance": 0.00016123935347422957,
+          "pos_vert_variance": 0.08988988399505615,
+          "compass_variance": 0.006379046477377415,
+          "terrain_alt_variance": 0.0,
+          "airspeed_variance": 0.0
+        },
+        "GPS_RAW_INT": {
+          "mavpackettype": "GPS_RAW_INT",
+          "time_usec": 67420000,
+          "fix_type": 6,
+          "lat": 329244499,
+          "lon": -1170385000,
+          "alt": -130,
+          "eph": 121,
+          "epv": 200,
+          "vel": 0,
+          "cog": 0,
+          "satellites_visible": 10,
+          "alt_ellipsoid": -130,
+          "h_acc": 300,
+          "v_acc": 300,
+          "vel_acc": 40,
+          "hdg_acc": 0,
+          "yaw": 0
+        },
+        "GPS2_RAW": {
+          "mavpackettype": "GPS2_RAW",
+          "time_usec": 47937000,
+          "fix_type": 1,
+          "lat": 0,
+          "lon": 0,
+          "alt": 0,
+          "eph": 65535,
+          "epv": 65535,
+          "vel": 0,
+          "cog": 0,
+          "satellites_visible": 0,
+          "dgps_numch": 0,
+          "dgps_age": 0,
+          "yaw": 0,
+          "alt_ellipsoid": 0,
+          "h_acc": 0,
+          "v_acc": 0,
+          "vel_acc": 0,
+          "hdg_acc": 0
+        },
+        "LOCAL_POSITION_NED": {
+          "mavpackettype": "LOCAL_POSITION_NED",
+          "time_boot_ms": 67627,
+          "x": -0.0012884208699688315,
+          "y": 0.001221075770445168,
+          "z": 0.03277839720249176,
+          "vx": -0.0033176355063915253,
+          "vy": 0.0030579539015889168,
+          "vz": -0.010001767426729202
+        }
+      }
+    },
+    {
+      "phase": "recover",
+      "forwarded": 84,
+      "status": {
+        "qualified": true,
+        "reason": "GPS admitted; Cube-fix timing approximation",
+        "cube_fix_age_upper_s": 0.19438383424099348,
+        "timing_basis": "Cube last-fix time; not receiver epoch",
+        "receiver_delay_bound_s": null,
+        "fault": ""
+      },
+      "latest": {
+        "GLOBAL_POSITION_INT": {
+          "mavpackettype": "GLOBAL_POSITION_INT",
+          "time_boot_ms": 87627,
+          "lat": 329240000,
+          "lon": -1170385000,
+          "alt": -150,
+          "relative_alt": -320,
+          "vx": 0,
+          "vy": 0,
+          "vz": 0,
+          "hdg": 28
+        },
+        "EKF_STATUS_REPORT": {
+          "mavpackettype": "EKF_STATUS_REPORT",
+          "flags": 831,
+          "velocity_variance": 0.006178594194352627,
+          "pos_horiz_variance": 0.00020607536134775728,
+          "pos_vert_variance": 0.006190992891788483,
+          "compass_variance": 0.008306454867124557,
+          "terrain_alt_variance": 0.0,
+          "airspeed_variance": 0.0
+        },
+        "GPS_RAW_INT": {
+          "mavpackettype": "GPS_RAW_INT",
+          "time_usec": 87420000,
+          "fix_type": 6,
+          "lat": 329240000,
+          "lon": -1170385000,
+          "alt": -130,
+          "eph": 121,
+          "epv": 200,
+          "vel": 0,
+          "cog": 0,
+          "satellites_visible": 10,
+          "alt_ellipsoid": -130,
+          "h_acc": 300,
+          "v_acc": 300,
+          "vel_acc": 40,
+          "hdg_acc": 0,
+          "yaw": 0
+        },
+        "GPS2_RAW": {
+          "mavpackettype": "GPS2_RAW",
+          "time_usec": 87557000,
+          "fix_type": 6,
+          "lat": 329240000,
+          "lon": -1170385000,
+          "alt": -130,
+          "eph": 121,
+          "epv": 200,
+          "vel": 0,
+          "cog": 0,
+          "satellites_visible": 10,
+          "dgps_numch": 0,
+          "dgps_age": 0,
+          "yaw": 0,
+          "alt_ellipsoid": 0,
+          "h_acc": 300,
+          "v_acc": 0,
+          "vel_acc": 0,
+          "hdg_acc": 0
+        },
+        "LOCAL_POSITION_NED": {
+          "mavpackettype": "LOCAL_POSITION_NED",
+          "time_boot_ms": 87627,
+          "x": -0.0008185713086277246,
+          "y": 0.0007395497523248196,
+          "z": 0.03007301688194275,
+          "vx": -0.003543875878676772,
+          "vy": 0.0033466548193246126,
+          "vz": -0.008897925727069378
+        }
+      }
+    }
+  ],
+  "passed": true,
+  "profile_verified": true
+}

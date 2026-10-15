@@ -38,9 +38,10 @@ class MissionReference:
                 max_age_s=1.0, max_skew_s=.5, max_accuracy_m=3.0):
         """Capture paired fresh inputs; receipt-time skew is not time sync proof.
 
-        Supervisor additionally requires a new GPS fix after the dive request,
-        confirmed GPS source selection and stable fusion before calling this.
-        gps: lat/lon/alt/accuracy/fix/receiver_time_us/received
+        Supervisor must establish mission readiness before calling this. In
+        continuous mode GPS is admitted by the bridge, not selected on Cube.
+        gps: lat/lon/alt/accuracy/fix/cube_fix_time_us/received (legacy
+        receiver_time_us is accepted for compatibility, not epoch-time proof).
         pose: ned/received. Both received times use the same monotonic clock.
         """
         if not (surface_confirmed and gps_qualified and ekf_healthy):
@@ -57,11 +58,12 @@ class MissionReference:
         if not (-90 <= lat <= 90 and -180 <= lon <= 180):
             raise ValueError('Invalid geographic coordinates')
         accuracy = float(gps['accuracy'])
-        if (gps['fix'] < 3 or gps['receiver_time_us'] <= 0
+        stamp = gps.get('cube_fix_time_us', gps.get('receiver_time_us', 0))
+        if (gps['fix'] < 3 or stamp <= 0
                 or not math.isfinite(accuracy) or not 0 < accuracy <= max_accuracy_m):
             raise ValueError('GPS fix/accuracy unavailable or unacceptable')
         return cls(str(uuid.uuid4()), run_id, vehicle_epoch, lat, lon, alt,
-                   accuracy, int(gps['receiver_time_us']), vector(pose['ned']), captured_utc)
+                   accuracy, int(stamp), vector(pose['ned']), captured_utc)
 
     def _check_epoch(self, vehicle_epoch):
         if not vehicle_epoch or vehicle_epoch != self.vehicle_epoch:

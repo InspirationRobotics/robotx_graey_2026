@@ -101,15 +101,18 @@ class WaypointRun:
             failure = 'Mission callback missed freshness deadline'
         if o.get('abort'):
             failure = 'Operator aborted; pilot takeover requested'
-        if moving and (o.get('armed') is False or o.get('mode') not in (None, 4)):
+        if (moving and o.get('armed') is False) or (
+                self.stage in self.moving | {'ARM', 'DISARM'} and o.get('mode') not in (None, 4)):
             self.abort(now, 'Pilot changed mode or vehicle disarmed', pilot=True)
             return []
         if now-self.since > (10. if self.stage in ('GUIDED', 'ARM', 'DISARM') else 90.):
             failure = 'Mission stage timed out: '+self.stage
-        if self.origin is not None and tuple(o.get('origin') or ()) != self.origin:
+        # Geographic altitude metadata is independent of calibrated pressure
+        # depth and the frozen local-down offset. Only NE origin defines targets.
+        if self.origin is not None and tuple(o.get('origin') or ())[:2] != self.origin[:2]:
             failure = 'Cube origin unavailable or changed'
         if (moving or self.stage in ('GUIDED', 'ARM')) and (not s.get('navigation_ready') or not s.get('reference_current')
-                       or s.get('confirmed_source') != 'Underwater'
+                       or not (s.get('fusion_policy') == 'continuous')
                        or (s.get('reference') or {}).get('reference_id') != self.reference_id):
             failure = 'Underwater navigation permission or reference lost: '+str(s.get('reason'))
         if s.get('state') == 'Fault':
@@ -124,11 +127,11 @@ class WaypointRun:
                 return self.abort_actions(now, o)
             return []
         if self.stage == 'WAIT_SURFACE':
-            if s.get('surfaced') is True and s.get('confirmed_source') == 'Surface GPS' and s.get('navigation_ready'):
-                self.enter('PREPARE', now, 'Capture surface start and confirm underwater sources')
+            if s.get('surfaced') is True and (s.get('fusion_policy') == 'continuous' and s.get('gps_qualified_input') is True) and s.get('navigation_ready'):
+                self.enter('PREPARE', now, 'Capture surface start and validate continuous navigation')
         elif self.stage == 'PREPARE':
             ref = s.get('reference') or {}
-            if s.get('navigation_ready') and s.get('reference_current') and s.get('confirmed_source') == 'Underwater':
+            if s.get('navigation_ready') and s.get('reference_current') and (s.get('fusion_policy') == 'continuous'):
                 try:
                     origin = tuple(o['origin'])
                     target = geo_to_ne(self.plan['lat'], self.plan['lon'], origin)
@@ -195,7 +198,7 @@ class WaypointRun:
         elif self.stage == 'RECOVER_GPS':
             if o.get('armed'):
                 self.abort(now, 'Vehicle rearmed during GPS recovery', pilot=True)
-            elif s.get('surfaced') is True and s.get('confirmed_source') == 'Surface GPS' and s.get('navigation_ready'):
+            elif s.get('surfaced') is True and (s.get('fusion_policy') == 'continuous' and s.get('gps_qualified_input') is True) and s.get('navigation_ready'):
                 self.enter('COMPLETE', now, 'Surfaced at waypoint and disarmed; GPS recovered')
         return []
 

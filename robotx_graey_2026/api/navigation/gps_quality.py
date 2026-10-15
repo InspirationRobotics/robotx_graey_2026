@@ -45,7 +45,10 @@ class GPSQuality:
             return False, 'GPS coordinates out of range'
         if self.motion_time is None or not 0 <= now-self.motion_time < .5:
             return False, 'Fresh valid DVL motion unavailable'
-        while self.anchors and now-self.anchors[0][0] > self.window:
+        # Retain the last trusted anchor during prolonged rejection. Otherwise
+        # a stationary GPS jump becomes "good" merely by outlasting the window.
+        # Invalid/interrupted DVL motion explicitly clears this history instead.
+        while len(self.anchors) > 1 and now-self.anchors[0][0] > self.window:
             self.anchors.popleft()
         for stamp, lat, lon, distance in self.anchors:
             dn = (fix['lat']-lat)*111320

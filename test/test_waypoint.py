@@ -15,7 +15,7 @@ class WaypointTests(unittest.TestCase):
         self.o = dict(fresh=True, mode=19, armed=False, origin=self.origin, local=(0.,0.,0.),
                       speed=0., depth=0., yaw=0., **{'global': self.origin[:2]},
                       supervisor=dict(run_id='run', navigation_ready=True, surfaced=True,
-                      confirmed_source='Surface GPS', reference_current=True,
+                      fusion_policy='continuous', gps_qualified_input=True, confirmed_source='Continuous fusion', reference_current=True,
                       reference=dict(reference_id='ref', cube_ned=(0.,0.,0.))))
 
     def step(self):
@@ -55,7 +55,7 @@ class WaypointTests(unittest.TestCase):
         self.o['armed'] = False
         self.step()
         self.assertEqual(self.run.phase, 'SURFACE')
-        self.o['supervisor']['confirmed_source'] = 'Surface GPS'
+        self.o['supervisor']['gps_qualified_input'] = True
         self.step()
         self.assertEqual(self.run.stage, 'COMPLETE')
 
@@ -89,7 +89,7 @@ class WaypointTests(unittest.TestCase):
                 self.setUp(); self.dive()
                 if fault == 'fresh': self.o['fresh'] = False
                 if fault == 'origin': self.o['origin'] = (33.,-117.,0.)
-                if fault == 'source': self.o['supervisor']['confirmed_source'] = 'Surface GPS'
+                if fault == 'source': self.o['supervisor']['fusion_policy'] = 'invalid'
                 if fault == 'reference': self.o['supervisor']['reference']['reference_id'] = 'changed'
                 if fault == 'jump': self.o['local'] = (8.,0.,0.)
                 if fault == 'deadline': self.now += 2
@@ -105,6 +105,28 @@ class WaypointTests(unittest.TestCase):
         self.o['mode'] = 4
         self.assertEqual(self.step(), [])
 
+    def test_pilot_mode_change_before_final_disarm_is_respected(self):
+        self.dive()
+        self.run.enter('DISARM', self.now, 'Surface reached')
+        self.o['mode'] = 19
+        self.assertEqual(self.step(), [])
+        self.assertEqual(self.run.stage, 'ABORTED')
+        self.assertTrue(self.run.pilot_takeover)
+
+    def test_pilot_mode_change_during_arm_confirmation(self):
+        self.dive()
+        self.run.enter('ARM', self.now, 'Waiting for arm confirmation')
+        self.o['mode'] = 19
+        self.assertEqual(self.step(), [])
+        self.assertEqual(self.run.stage, 'ABORTED')
+
+    def test_altitude_metadata_update_preserves_pressure_reference(self):
+        self.dive()
+        self.o['origin'] = (*self.origin[:2], 15.)
+        self.step()
+        self.assertEqual(self.run.stage, 'DIVE')
+        self.assertEqual(self.run.surface_down, 0.)
+
     def test_lost_heartbeat_is_not_pilot_takeover(self):
         self.dive();self.o.update(fresh=False, armed=None, mode=None)
         self.assertEqual(self.step()[0][0], 'manual')
@@ -115,7 +137,7 @@ class WaypointTests(unittest.TestCase):
 
     def test_wrong_source_before_arm(self):
         self.step(); self.o['supervisor']['confirmed_source'] = 'Underwater'; self.step()
-        self.o['supervisor']['confirmed_source'] = 'Surface GPS'
+        self.o['supervisor']['fusion_policy'] = 'invalid'
         self.step(); self.assertEqual(self.run.stage, 'ABORTED')
 
     def test_coordinates_and_invalid_inputs(self):
@@ -140,6 +162,12 @@ class WaypointTests(unittest.TestCase):
         p = api.preview(self.plan,nav)
         item, duplicate = api.consume(p['plan_id'],nav)
         self.assertFalse(duplicate)
+        altitude_update = copy.deepcopy(nav)
+        altitude_update['streams']['cube_origin']['data']['alt'] = 15.
+        self.assertFalse(api.consume(p['plan_id'], altitude_update)[1])
+        horizontal_update = copy.deepcopy(nav)
+        horizontal_update['streams']['cube_origin']['data']['lat'] += .000001
+        with self.assertRaises(ValueError): api.consume(p['plan_id'], horizontal_update)
         self.now=31.
         with self.assertRaises(ValueError): api.consume(p['plan_id'],nav)
         self.now=0.; changed=copy.deepcopy(nav);changed['session']=2

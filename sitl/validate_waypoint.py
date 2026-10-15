@@ -23,14 +23,16 @@ def api(body=None):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--abort', action='store_true')
+    parser.add_argument('--continuous', action='store_true', default=True)
     args=parser.parse_args()
     from robotx_graey_2026.api.navigation.waypoint_logic import ne_to_geo
     root=Path(__file__).resolve().parents[1]
     folder=root/'sitl/logs'/('waypoint-'+uuid.uuid4().hex[:10]);folder.mkdir(parents=True)
     env=dict(os.environ,SITL_LOG_DIR=str(folder),SITL_RUN_DIR=str(folder/'runtime'),
              WAYPOINT_INTERACTIVE='true',GRAEY_WAYPOINT_LOG_DIR=str(folder))
+    env['CONTINUOUS_FUSION'] = str(args.continuous).lower()
     env.pop('QGC_HOST',None)
-    result=dict(passed=False,stages=[],gps_outage_seen=False,underwater_cube_seen=False)
+    result=dict(passed=False,continuous=args.continuous,stages=[],gps_outage_seen=False,underwater_cube_seen=False)
     stop=threading.Event()
     def monitor():
         previous=time.monotonic()
@@ -78,6 +80,10 @@ def main():
                             if args.abort and m['stage']=='ABORTED' and streams['heartbeat']['data']['mode_id']!=19:
                                 continue
                             result['mission']=m;result['supervisor']=s
+                            result['final_local']=streams.get('local',{}).get('data',{}).get('ned')
+                            if result['final_local'] and m.get('target_cube'):
+                                import math
+                                result['final_target_error_m']=math.dist(result['final_local'][:2],m['target_cube'][:2])
                             outcome=(m['stage']=='ABORTED' and abort_sent and 'Operator aborted' in m['reason']) if args.abort else (
                                 m['stage']=='COMPLETE' and not streams['heartbeat']['data']['armed'])
                             result['passed']=bool(outcome and result['gps_outage_seen']

@@ -16,7 +16,11 @@ That is how pixhawk_led_node stayed down after QGC had already recovered on
 2026-08-07. Restart=always covers the service; this covers the nodes inside it.
 """
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
+from launch.conditions import IfCondition, UnlessCondition
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 PKG = 'robotx_graey_2026'
 RESPAWN = {'respawn': True, 'respawn_delay': 2.0}
@@ -24,19 +28,26 @@ RESPAWN = {'respawn': True, 'respawn_delay': 2.0}
 
 def generate_launch_description():
     return LaunchDescription([
+        DeclareLaunchArgument('continuous_fusion', default_value='true',
+            description='Pressure-gated external odometry; disabled pending commissioning'),
+        DeclareLaunchArgument('surface_pressure_hpa', default_value='0.0',
+            description='Measured confirmed-surface pressure for experimental bridge; zero disables depth'),
         Node(package=PKG, executable='led_node', name='led_node', output='screen', **RESPAWN),
         Node(package=PKG, executable='pixhawk_led_node', name='pixhawk_led_node', output='screen', **RESPAWN),
         # Belongs in the CORE stack, not the mission: SA must kill whether or not a
         # mission happens to be loaded.
         Node(package=PKG, executable='kill_switch', name='kill_switch', output='screen', **RESPAWN),
         Node(package=PKG, executable='dvl_node', name='dvl_node', output='screen', **RESPAWN),
-        # Operator-requested 90-degree CCW net heading offset, 2026-10-10. Keep the sensor's
-        # separate roll mounting transform; do not add this again in the bridge.
+        # Operator removed the temporary yaw correction on 2026-10-11.
+        # Retain the separate physical roll mounting transform.
         Node(package=PKG, executable='vn100_node', name='vn100_node',
-             parameters=[{'yaw_offset_deg': 90.0}], output='screen', **RESPAWN),
-        Node(package=PKG, executable='nav_ekf_bridge', name='nav_ekf_bridge', output='screen', respawn=False),
+             parameters=[{'yaw_offset_deg': 0.0}], output='screen', **RESPAWN),
+        Node(package=PKG, executable='fused_nav_bridge', name='nav_ekf_bridge',
+             parameters=[{'enabled': False, 'surface_pressure_hpa': ParameterValue(
+                 LaunchConfiguration('surface_pressure_hpa'), value_type=float)}], output='screen', respawn=False),
         Node(package=PKG, executable='navigation_supervisor', name='navigation_supervisor',
-             parameters=[{'active': False}], output='screen', **RESPAWN),
+             parameters=[{'active': False, 'continuous_fusion': ParameterValue(
+                 LaunchConfiguration('continuous_fusion'), value_type=bool)}], output='screen', **RESPAWN),
         Node(package=PKG, executable='gui_node', name='gui_node', output='screen', **RESPAWN),
     ])
 
