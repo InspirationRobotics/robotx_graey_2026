@@ -45,6 +45,11 @@ ABOUT 1.5 M OF THE PIPE:
               1.05 m) whenever the sub got closer than that
   HOLD        hold_s seconds there, then surface where it is
 
+pool_max_pick_m (2.5) ignores shapes farther from the sonar than that: walls. For a
+pool test the scan need not be a full circle - the sonar looks one way, so with the
+pipe ~1.5 m to that side, scan_turn_deg:=90 sweeps along 2-3 m of it, and a sub
+beside the pool wall never looks at the wall (Oct 14).
+
 stop_after:=scan|pick|face|approach ends the run after that stage (hold, then
 surface), so each stage can be tried alone. In a dry run the scan waits for the
 PILOT to turn the sub through scan_turn_deg (read from the Cube's attitude), so
@@ -155,7 +160,10 @@ class PipelineMission(MissionBase):
         p('pool_side', 'left')              # where the sonar looks: 'left' or 'right'
         p('pool_band', '-0.3 0.4')          # m from the sonar; the pipe is about level with it.
                                             # 'off' = every height
-        p('pool_compact', True)             # little dots only: walls make no crumbs
+        p('pool_compact', True)             # little dots only (in water under ~1.5 m deep
+                                            # a pool wall is never tall enough to be dropped)
+        p('pool_max_pick_m', 2.5)           # pick only shapes this close to the sonar: start
+                                            # ~1.5 m from the pipe, so walls farther out are ignored
         p('pool_floor_cut', 0.25)           # the pipe hangs ~0.45 m off the pool floor
         p('approach_range', 1.2)            # m, sonar to pipe at the stop: past the 0.75 m blind
                                             # zone AND its ringing (to ~1.05 m), where the pipe hid
@@ -190,6 +198,7 @@ class PipelineMission(MissionBase):
         band = g('pool_band').strip().lower()
         self.pool_band = 'off' if band in ('', 'off', 'none') else band
         self.pool_compact = bool(g('pool_compact'))
+        self.pool_max_pick = float(g('pool_max_pick_m'))
         if self.plan == 'pool':
             self.depth = g('pool_depth')
             self.max_depth = g('pool_max_depth')
@@ -474,6 +483,14 @@ class PipelineMission(MissionBase):
     # ---------- pool plan: approach the nearest part of the pipe ----------
     def pick_target(self, m):
         found = m.get('outlines') or []
+        if m.get('sonar') and self.pool_max_pick > 0:
+            sx, sy = m['sonar']
+            near = lambda g: min(math.hypot(x - sx, y - sy) for x, y in g['spine'])
+            far = [g for g in found if near(g) > self.pool_max_pick]
+            if far:
+                self.get_logger().info(f'    ignoring {len(far)} shape(s) more than {self.pool_max_pick:.1f} m away '
+                                       f'(best {max(g["score"] for g in far):.0%})')
+            found = [g for g in found if near(g) <= self.pool_max_pick]
         for i, g in enumerate(found[:5]):
             self.get_logger().info(f'    outline {i}: pipe {g["score"]:.0%} {g["parts"]} {g["n"]} crumbs, '
                                    f'{g["length"]:.1f} m long, {g["width"]:.2f} m wide')
