@@ -97,6 +97,7 @@ BELOW_RADIUS_M = 1.0    # echoes this close to straight below count as "below"
 
 SIDE_WINDOW_DEG = 60.0  # pool plan: the pick's nearest point this close to straight out the sonar's side
 BEHIND_M = 0.5          # ... and its middle no farther behind where the scan started
+POOL_FULL_M = 0.8       # pool scan: a shape this long gets full length marks (none below 0.3 m)
 
 
 def pool_candidates(found, sonar_xy, side, max_pick, ignore_flat):
@@ -108,6 +109,7 @@ def pool_candidates(found, sonar_xy, side, max_pick, ignore_flat):
       left (side -1) or right (+1) from there, and its middle no more than
       BEHIND_M behind the start, so a wall behind the sub isn't picked (Oct 14 dry
       runs) while a long pipe reaching far ahead still is (sim);
+    - length counted fully from POOL_FULL_M, since one spot hears only ~1 m of pipe;
     - scored without the 'flat' part when a height band already caps the heights,
       because then a pipe's smear and a wall look the same height-wise (Oct 14).
     Returns (candidates, ignored-for-distance, ignored-for-side)."""
@@ -123,8 +125,14 @@ def pool_candidates(found, sonar_xy, side, max_pick, ignore_flat):
             wrong_side += 1
             continue
         score = g['score']
-        if ignore_flat and g.get('parts'):
-            score = float(np.prod([v for k, v in g['parts'].items() if k != 'flat']))
+        if g.get('parts'):
+            parts = dict(g['parts'])
+            # from one spot the sonar hears only ~1 m of a pipe 1.2-1.5 m away, so a
+            # pool shape is long enough from POOL_FULL_M (the map's own rule wants 1.5 m)
+            parts['length'] = float(np.clip((g['length'] - 0.3) / (POOL_FULL_M - 0.3), 0, 1))
+            if ignore_flat:
+                parts.pop('flat', None)
+            score = float(np.prod(list(parts.values())))
         out.append((score, g))
     out.sort(key=lambda sg: -sg[0])
     return out, far, wrong_side
@@ -142,6 +150,7 @@ class PipelineMission(MissionBase):
         self.map_origin = None              # (n, e, yaw) of map (0,0) and its +y
         self.hold = None                    # (n, e, down, yaw) while scanning
         self.turned = 0.0
+        self.stop_i, self.stop_yaw0, self.still_t, self.look_from = 0, 0.0, None, 0
         self.last_yaw = None
         self.spot = None                    # (n, e, pipe top depth) from the far scan
         self.pipe = None                    # the outline picked, in NED
@@ -195,8 +204,16 @@ class PipelineMission(MissionBase):
         p('pool_side', 'left')              # where the sonar looks: 'left' or 'right'
         p('pool_band', '-0.3 0.4')          # m from the sonar; the pipe is about level with it.
                                             # 'off' = every height
-        p('pool_compact', True)             # little dots only (in water under ~1.5 m deep
-                                            # a pool wall is never tall enough to be dropped)
+        p('pool_compact', True)             # little dots only: drops the pool wall (Ruth, Oct 14:
+                                            # the tall columns 1.2-1.8 m left were the wall)
+        p('pool_near_m', 0.0)               # no crumbs closer than this, m (0 = the blind zone
+                                            # only); 1.05 skips the ringing if the pipe is farther
+        p('pool_far_m', 2.5)                # no crumbs farther than this (0 = no limit): in the pool
+                                            # the wrong dots were mostly 3-5.6 m out (Oct 14)
+        p('scan_mode', 'turn')              # 'turn': one slow turn; 'stops': stop and look
+        p('scan_stops', 20)                 # stops: this many headings round scan_turn_deg
+        p('sweeps_per_stop', 3)             # stops: full sweeps taken still at each (1-5)
+        p('record_scan', True)              # record the scan (Map tab Record), a Mark at each stop
         p('pool_max_pick_m', 2.5)           # pick only shapes this close to the sonar: start
                                             # ~1.5 m from the pipe, so walls farther out are ignored
         p('pool_floor_cut', 0.25)           # the pipe hangs ~0.45 m off the pool floor
@@ -233,6 +250,14 @@ class PipelineMission(MissionBase):
         band = g('pool_band').strip().lower()
         self.pool_band = 'off' if band in ('', 'off', 'none') else band
         self.pool_compact = bool(g('pool_compact'))
+        self.pool_near = float(g('pool_near_m'))
+        self.pool_far = float(g('pool_far_m'))
+        self.scan_mode = g('scan_mode').strip().lower()
+        if self.scan_mode not in ('turn', 'stops'):
+            raise ValueError(f"scan_mode must be turn or stops, not {self.scan_mode!r}")
+        self.scan_stops = max(1, int(g('scan_stops')))
+        self.sweeps_per_stop = min(5, max(1, int(g('sweeps_per_stop'))))
+        self.record_scan = bool(g('record_scan'))
         self.pool_max_pick = float(g('pool_max_pick_m'))
         if self.plan == 'pool':
             self.depth = g('pool_depth')
@@ -338,11 +363,16 @@ class PipelineMission(MissionBase):
             self.map_post('/floorcut', cut)
             pool = self.scan == 'pool'
             self.map_post('/compact', 'on' if pool and self.pool_compact else 'off')
+            self.map_post('/near', str(self.pool_near) if pool else 'off')
+            self.map_post('/far', str(self.pool_far) if pool else 'off')
             if pool:        # keep every crumb of the turn: with fade on the turn wiped 97% of them (sim)
                 self.map_post('/fade', 'off')
             self.map_post('/band', self.pool_band if pool else 'off')
             for cmd in ('reset', 'start', 'resume'):    # whatever state it was in
                 self.map_post('/mapcmd', cmd)
+            if self.record_scan:
+                self.map_post('/record', f'start {self.scan} scan {self.scan_mode}' +
+                              (f' {self.scan_stops}x{self.sweeps_per_stop}' if self.scan_mode == 'stops' else ''))
             self.to_phase(f'{self.scan} scan: map start')
 
         elif ph == 'map start':
@@ -354,7 +384,47 @@ class PipelineMission(MissionBase):
                 else:
                     self.map_origin = (self.cur[0], self.cur[1], self.cur_yaw)
                 self.turned, self.last_yaw = 0.0, self.cur_yaw
-                self.to_phase(f'{self.scan} scan: turn')
+                if self.scan_mode == 'stops':
+                    self.stop_i, self.stop_yaw0 = 0, (self.cur_yaw if self.cur_yaw is not None else self.hold[3])
+                    self.to_phase(f'{self.scan} scan: stop turn')
+                else:
+                    self.to_phase(f'{self.scan} scan: turn')
+
+        elif ph == 'stop turn':
+            # stop i looks at heading yaw0 + i * scan_turn / scan_stops (the first one where it is)
+            step = self.scan_turn / self.scan_stops
+            want = self.stop_yaw0 + self.stop_i * step
+            n, e, down, _ = self.hold
+            self.goto_ned(n, e, down, want, f'stop {self.stop_i + 1}')
+            if self.dry and self.now() - self.state_t0 < 0.3:
+                self.get_logger().info(f'    dry run: turn the sub to heading {math.degrees(want) % 360:.0f} deg '
+                                       f'(stop {self.stop_i + 1} of {self.scan_stops}) and hold it still')
+            err = None if self.cur_yaw is None else abs(wrap_pi(self.cur_yaw - want))
+            still = err is not None and err < math.radians(3) and abs(self.yaw_rate or 0.0) < math.radians(2)
+            if not still:
+                self.still_t = None
+            elif self.still_t is None:
+                self.still_t = self.now()
+            elif self.now() - self.still_t >= 2.0:
+                self.look_from = self.map_get().get('sweep', 0)
+                if self.record_scan:
+                    self.map_post('/mark', f'stop {self.stop_i + 1}/{self.scan_stops} at heading '
+                                           f'{math.degrees(self.cur_yaw) % 360:.0f}: looking {self.sweeps_per_stop} sweeps')
+                self.to_phase(f'{self.scan} scan: stop look')
+
+        elif ph == 'stop look':
+            # full sweeps while still: the one in progress started before the stop, so it doesn't count
+            n, e, down, _ = self.hold
+            want = self.stop_yaw0 + self.stop_i * self.scan_turn / self.scan_stops
+            self.goto_ned(n, e, down, want, f'stop {self.stop_i + 1}')
+            if self.map_get().get('sweep', 0) >= self.look_from + self.sweeps_per_stop + 1:
+                self.stop_i += 1
+                self.still_t = None
+                if self.stop_i >= self.scan_stops:
+                    self.hold_here(self.hold[2], 'hold')
+                    self.to_phase(f'{self.scan} scan: settle')
+                else:
+                    self.to_phase(f'{self.scan} scan: stop turn')
 
         elif ph == 'turn':
             n, e, down, _ = self.hold
@@ -377,6 +447,8 @@ class PipelineMission(MissionBase):
         elif ph == 'settle':
             self.goto_ned(*self.hold, 'hold')
             if self.now() - self.state_t0 >= SETTLE_S:
+                if self.record_scan and self.scan == 'pool':
+                    self.map_post('/record', 'stop')
                 if self.stop_after == 'scan':
                     self.stop_here('scan')
                     return
