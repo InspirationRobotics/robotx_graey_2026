@@ -6,6 +6,43 @@ from robotx_graey_2026.api.navigation.vn_protocol import packet, checked, transa
 
 
 class NorthTests(unittest.TestCase):
+    def test_nine_hz_dvl_brackets_new_gps_without_requalifying(self):
+        e=BridgeEstimator(auto_north_alignment=True)
+        e.set_origin((33.,-117.,0.))
+        deferred=0
+        for i in range(1500):
+            t=100.+i*.01
+            e.gps.clock.offset,e.gps.clock.uncertainty,e.gps.clock.updated=90.,.001,t
+            e.imu(t,(1.,0.,0.,0.),(0.,0.,0.))
+            e.pressure_depth(t,0.)
+            if i%14==0:
+                e.dvl(t,(1.,0.,0.),True)
+            if i%20==0:
+                e.observe_gps(t,dict(cube_fix_time_us=round((t-90.-.02)*1e6),
+                    lat=33.+(t-100.-.02)/111320.,lon=-117.,alt=0.,accuracy=.5,fix=3,
+                    course_deg=0.,speed_mps=1.,speed_accuracy_mps=.05,received=t))
+                deferred+=e.pending_gps is not None
+            e.status(t)
+        self.assertGreater(deferred,0)
+        self.assertTrue(e.heading_validated,e.north_alignment.status())
+        self.assertTrue(e.initialized)
+
+    def test_deferred_fix_expires_without_position_initialization(self):
+        e=BridgeEstimator(heading_validated=True)
+        e.set_origin((33.,-117.,0.))
+        e.gps.clock.offset,e.gps.clock.uncertainty,e.gps.clock.updated=90.,.001,100.
+        e.shallow_since,e.depth_at,e.depth=97.,100.,0.
+        e.imu(100.,(1.,0.,0.,0.),(0.,0.,0.))
+        e.dvl(99.8,(0.,0.,0.),True)
+        fix=dict(cube_fix_time_us=9990000,lat=33.,lon=-117.,alt=0.,accuracy=.5,fix=3)
+        e.apply_gps(100.,fix)
+        self.assertIsNotNone(e.pending_gps)
+        e.imu(100.2,(1.,0.,0.,0.),(0.,0.,0.))
+        e.pressure_depth(100.2,0.)
+        e.dvl(100.2,(0.,0.,0.),True)
+        self.assertIsNone(e.pending_gps)
+        self.assertFalse(e.initialized)
+
     def test_uncertain_stationary_gps_does_not_prompt_surface_acceleration(self):
         a=NorthAlignment()
         a.observe(1.,self.fix(1.,speed=.05,sigma=.439),(0.,0.,0.),(0.,0.,0.),(1.,0.,0.,0.))

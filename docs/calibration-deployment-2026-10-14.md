@@ -104,3 +104,16 @@ keep driving to chase the speed prompt. Reordered alignment checks to show poor
 velocity precision before asking for motion; thresholds unchanged.151 tests pass
 locally, including delayed5Hz packet/20Hz status alignment and rejection priority.
 Live moving alignment and physical mission remain unverified.
+
+2026-10-14 time association follow-up: live last rejection was GPS cannot be
+aligned to DVL/VN history, not DVL-reported uncertainty. Passive ROS topic rate
+about9Hz (intervals85–148ms). A newly received GPS fix can be newer than the last
+DVL history sample beyond the100ms extrapolation limit. Such a fix formerly
+invalidated all GPS qualification. Added bounded deferred association: wait at
+most150ms for a DVL sample, retain original GPS timestamp, recheck measurement
+age<=350ms plus pressure/VN/fault gates, and never apply expired fixes. Missing
+history no longer erases receiver-quality dwell. New rejected fixes clear pending
+work. Simulated low-rate DVL/new GPS ordering completes alignment; queued expired
+fix cannot initialize position.153 tests passed before final queue invalidation
+line; full suite rerun during deployment. GPS velocity uncertainty~0.488m/s remains
+an independent blocker; no accuracy/angular/freshness threshold loosened.
