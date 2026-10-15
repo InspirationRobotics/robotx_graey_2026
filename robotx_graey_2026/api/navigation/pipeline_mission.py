@@ -541,7 +541,9 @@ class PipelineMission(MissionBase):
         h = self.cur_yaw if self.cur_yaw is not None else yaw
         sn, se = self.cur[0] + ahead * math.cos(h), self.cur[1] + ahead * math.sin(h)
         gap = math.hypot(tn - sn, te - se)
-        if gap <= self.approach_range + 0.05 or (left < 0.02 and self.speed() < 0.05):
+        # stop AT approach_range, not anywhere inside it: starting closer than that (the
+        # sim did, 0.87 m) the spot to stand on is farther out, so the sub backs away
+        if abs(gap - self.approach_range) <= 0.05 or (left < 0.02 and self.speed() < 0.05):
             self.get_logger().info(f'at the pipe: sonar {gap:.2f} m from it (aim {self.approach_range} m)'
                                    f' - holding {self.hold_s:.0f} s')
             self.hold_here(self.cur[2], 'hold')
