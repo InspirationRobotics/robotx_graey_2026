@@ -148,7 +148,7 @@ class CrumbMap:
     def __init__(self, threshold=THRESHOLD, max_per_ping=MAX_PER_PING,
                  sonar_fwd_m=S.SONAR_FWD_M, sonar_right_m=S.SONAR_RIGHT_M,
                  max_turn_dps=MAX_TURN_DPS, floor_cut_m=FLOOR_CUT_M, fade=True, band=None,
-                 compact=False):
+                 compact=False, near_m=0.0, far_m=0.0):
         self.threshold = threshold
         self.floor_cut_m = floor_cut_m
         self.max_per_ping = max_per_ping
@@ -158,6 +158,10 @@ class CrumbMap:
         self.fade = fade            # False: crumbs stay until Reset (a faint pipe builds up)
         self.band = band            # (lo, hi) m from the sonar's height, or None = every height
         self.compact = compact      # True: little dots only - wall-like tall echoes make no crumbs
+        self.near_m = near_m        # no crumbs closer than this (m from the sonar); 0 = only the
+                                    # blind zone. 1.05 also drops the ringing just past it (Oct 11)
+        self.far_m = far_m          # no crumbs farther than this; 0 = out to the range. In the pool
+                                    # most wrong dots were 3-5.6 m out, the pipe 0.8-2.1 m (Oct 14)
         self.clear()
 
     def clear(self):
@@ -297,7 +301,9 @@ class CrumbMap:
         floor cut and band applied (sm), and its echoes' bins, strongest first."""
         raw = np.convolve(np.asarray(row, float), np.ones(SMOOTH_BINS) / SMOOTH_BINS, "same")
         sm = raw.copy()
-        sm[:int(math.ceil(S.MIN_RANGE_M / metres_per_bin))] = 0
+        sm[:int(math.ceil(max(S.MIN_RANGE_M, self.near_m) / metres_per_bin))] = 0
+        if self.far_m > 0:
+            sm[int(math.floor(self.far_m / metres_per_bin)) + 1:] = 0
         a = math.radians(a_deg)
         sx, sy, sup, m = self.sonar_at(pose)
         # metres down per metre of range, along the steeper edge of the 2 deg beam:

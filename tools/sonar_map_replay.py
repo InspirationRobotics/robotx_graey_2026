@@ -102,6 +102,8 @@ def main():
     saved = first.get("band_m")                                # nor this
     webview.set_band(tuple(saved) if saved is not None and np.isfinite(saved).all() else None)
     webview.set_compact(bool(first.get("compact", False)))            # not saved before Oct 11
+    webview.set_near(float(first.get("near_m", 0.0)))                  # not saved before Oct 14
+    webview.set_far(float(first.get("far_m", 0.0)))                    # not saved before Oct 15
     print(f"[INFO] replay: http://localhost:{args.port}/map")
 
     play = {"state": "running", "done": False}
@@ -119,7 +121,8 @@ def main():
                 return True
         return (webview.threshold() != cmap.threshold or webview.floor_cut() != cmap.floor_cut_m
                 or webview.fade() != cmap.fade
-                or webview.band() != cmap.band or webview.compact() != cmap.compact)
+                or webview.band() != cmap.band or webview.compact() != cmap.compact
+                or webview.near() != cmap.near_m or webview.far() != cmap.far_m)
 
     outliner = Outliner()
     radar, last_radar = Radar(), [-1e9]
@@ -157,7 +160,8 @@ def main():
             "outlines": outliner.update(c, time.monotonic(), force=play["done"]),
             "sector": [float(v) for v in s["sector"]], "threshold": cmap.threshold,
             "floorCut": cmap.floor_cut_m, "fade": cmap.fade,
-            "band": list(cmap.band) if cmap.band else None, "compact": cmap.compact,
+            "band": list(cmap.band) if cmap.band else None, "compact": cmap.compact, "near": cmap.near_m,
+            "far": cmap.far_m,
             "turning": cmap.turning, "skippedTurning": cmap.skipped_turning,
             "slice": reach(*sector_arc(*s["sector"]), float(s["range_m"]))})
 
@@ -166,7 +170,7 @@ def main():
         play["state"] = "running"
         cmap = CrumbMap(threshold=webview.threshold(), max_turn_dps=args.max_turn,
                         floor_cut_m=webview.floor_cut(), fade=webview.fade(),
-                        band=webview.band(), compact=webview.compact(),
+                        band=webview.band(), compact=webview.compact(), near_m=webview.near(), far_m=webview.far(),
                         sonar_fwd_m=float(first["sonar_fwd_m"]),
                         sonar_right_m=float(first["sonar_right_m"]))
         track, recent, here = [], [], None

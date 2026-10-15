@@ -265,7 +265,7 @@ def main():
             "threshold": cmap.threshold, "floorCut": cmap.floor_cut_m,
             "fade": cmap.fade,
             "band": list(cmap.band) if cmap.band else None,
-            "compact": cmap.compact,
+            "compact": cmap.compact, "near": cmap.near_m, "far": cmap.far_m,
             "turning": cmap.turning and run["state"] == "running",
             "skippedTurning": cmap.skipped_turning,
             "slice": reach(*sector_arc(*cur["sector"]), cur["range"]),
@@ -298,6 +298,8 @@ def main():
         cmap.fade = webview.fade()
         cmap.band = webview.band()
         cmap.compact = webview.compact()
+        cmap.near_m = webview.near()
+        cmap.far_m = webview.far()
         take(partial)
         show(partial)
 
@@ -318,7 +320,7 @@ def main():
             vn_pitch_unflipped=S.VN_PITCH_BACKWARDS,    # pose_roll_pitch already turned round
             fade=cmap.fade,
             band_m=np.array(cmap.band if cmap.band else (np.nan, np.nan), float),
-            compact=cmap.compact,
+            compact=cmap.compact, near_m=cmap.near_m, far_m=cmap.far_m,
             floor_cut_m=cmap.floor_cut_m,
             range_m=cur["range"], sector=np.array(cur["sector"]),
             threshold=cmap.threshold, state=run["state"], map_epoch=cur["epoch"],
@@ -344,6 +346,8 @@ def main():
         cmap.fade = webview.fade()
         cmap.band = webview.band()
         cmap.compact = webview.compact()
+        cmap.near_m = webview.near()
+        cmap.far_m = webview.far()
         cmap.new_sweep()
         run["sweeps"] += 1
         start, end = sector_arc(*cur["sector"])

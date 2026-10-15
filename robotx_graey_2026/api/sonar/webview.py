@@ -68,6 +68,9 @@ _floor_cut = 0.0                     # m above the floor with no crumbs; 0 = off
 _fade = True                         # newer sweeps wipe crumbs they don't see again
 _band = None                         # (lo, hi) m from the sonar's height that make crumbs; None = all
 _compact = False                     # little dots only: wall-like tall echoes make no crumbs
+_far = 0.0                           # no crumbs farther than this, m; 0 = out to the range. Missions set it
+_near = 0.0                          # no crumbs closer than this, m; 0 = the blind zone only. Only
+                                     # missions set it (the pool scan skips the ringing), not the page
 _radar_geom = None                   # {size, range} of the radar picture, for the band's lines
 _radar_dots = []                     # the newest sweep's crumbs [right, up, brightness], to circle
 _probe = None                        # fn(right_m, up_m) -> dict: the echo under a click (Radar.probe)
@@ -266,6 +269,28 @@ def set_compact(flag):
 def compact():
     with _lock:
         return _compact
+
+
+def set_near(metres):
+    global _near
+    with _lock:
+        _near = float(metres)
+
+
+def near():
+    with _lock:
+        return _near
+
+
+def set_far(metres):
+    global _far
+    with _lock:
+        _far = float(metres)
+
+
+def far():
+    with _lock:
+        return _far
 
 
 def set_radar_geom(size, max_range_m):
@@ -729,7 +754,7 @@ class _Handler(BaseHTTPRequestHandler):
         """
         global _target, _range, _sector, _threshold
         if self.path in ('/sector', '/threshold', '/floorcut', '/mapcmd', '/record', '/mark',
-                         '/missionpoint', '/fade', '/band', '/compact'):
+                         '/missionpoint', '/fade', '/band', '/compact', '/near', '/far'):
             self._map_post()
             return
         if self.path == '/view':
@@ -786,7 +811,7 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(b'ok', 'text/plain')
 
     def _map_post(self):
-        global _sector, _threshold, _floor_cut, _mission_point, _fade, _band, _compact
+        global _sector, _threshold, _floor_cut, _mission_point, _fade, _band, _compact, _near, _far
         with _lock:
             on = _map_on
         if not on:
@@ -808,6 +833,22 @@ class _Handler(BaseHTTPRequestHandler):
                 band = (round(lo, 3), round(hi, 3))
             with _lock:
                 _band = band
+            self._send(b'ok', 'text/plain')
+            return
+        if self.path in ('/near', '/far'):
+            try:
+                value = 0.0 if text == 'off' else float(text)
+            except ValueError:
+                self._send(b'say metres, or off', 'text/plain')
+                return
+            if not 0 <= value <= (5 if self.path == '/near' else 100):     # also refuses nan and inf
+                self._send(b'out of range', 'text/plain')
+                return
+            with _lock:
+                if self.path == '/near':
+                    _near = round(value, 3)
+                else:
+                    _far = round(value, 3)
             self._send(b'ok', 'text/plain')
             return
         if self.path in ('/fade', '/compact'):
