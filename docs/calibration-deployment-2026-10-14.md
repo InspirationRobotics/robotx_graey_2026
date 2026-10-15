@@ -184,3 +184,36 @@ rotated with VN; recovered286.318deg is DERIVED from retained reference, not new
 measured true north. Preserve this provenance despite generic GUI method label.
 Automatic DVL dropout fault recovery is NOT added: explicit Prepare now recovers
 Cube without core restart. Underwater missing velocity cannot be silently repaired.
+
+## Bounded DVL reacquisition — 2026-10-14
+
+Live passive ROS capture observed224 DVL samples in25s,2 invalid reports,
+maximum interarrival0.381s, no>=0.5s gaps, no nonadvancing sensor timestamps and
+max observer header age0.009s. Confirms intermittent invalid published measurement,
+not persistent bottom-lock loss or stale transport. It does not distinguish native
+velocity_valid=false from malformed/nonfinite reports; both publish invalid.
+Capture retained on Jetson /root/robotx_ws/logs/dvl-continuity-observer-20261014.json.
+
+Previously one invalid sample latched permanently after initialization. Now an
+invalid measurement immediately withholds odometry, clears GPS qualification/history
+and starts bounded reacquisition. Two subsequent valid velocities must agree to
+within0.2m/s per component, and the entire gap/recovery must finish in<0.5s.
+Missing translation is not invented/caught up. Position variance is enlarged by
+(5m/s * missing interval)^2 on reacquisition: an engineering displacement budget,
+not measured or guaranteed error. Continuing invalid reports restart the valid
+sample count.>=0.5s outage, VN failure, Cube restart and existing hard faults still
+latch and require explicit revalidation. Mission readiness requires healthy inputs;
+this does not guarantee an active waypoint survives a real dropout or auto-restart
+an aborted mission. No arm/mode/kill/watchdog behavior or pool registration changed.
+
+167 regressions pass. Native isolated ROS/GUI/ArduSub waypoint2bbd195be6 completed
+dive/transit/surface with underwater GPS outage and valid Cube estimate; synthetic
+endpoint error0.121m is not physical accuracy. Separate native fault-injection
+run dvl-recovery-efa7bef1 verified brief invalid report recovered to healthy
+transmitting odometry, and sustained invalid reports latched with output withheld.
+Both used ROS domain73/localhost and QGC forwarding disabled; owned processes cleaned.
+Evidence copied to docs/evidence/dvl-recovery-2026-10-14. Reproducible standalone
+injector: sitl/validate_dvl_recovery.py, run from repository root after sourcing ROS.
+Initial nominal launch lacked repository import path; corrected using PYTHONPATH=.
+Injector initially lost ROS import path due environment override; rerun with system
+Python and original sourced ROS paths succeeded. Those attempts are not test passes.

@@ -867,3 +867,11 @@ rotated with VN; recovered286.318deg is DERIVED from retained reference, not new
 measured true north. Preserve this provenance despite generic GUI method label.
 Automatic DVL dropout fault recovery is NOT added: explicit Prepare now recovers
 Cube without core restart. Underwater missing velocity cannot be silently repaired.
+
+2026-10-14 DVL recurrence diagnosed:224 published samples/25s included2 invalid,
+no>=0.5s gaps or regressing timestamps. Added bounded reacquisition: withhold
+invalid odometry; resume after2 consistent valid velocities before0.5s deadline,
+increase uncertainty for unmeasured gap; long loss and other hard faults latch.
+167 tests, native nominal waypoint and native short/long DVL fault injection pass.
+Mission may still abort on real unhealthy data; no silent run restart. See
+ docs/calibration-deployment-2026-10-14.md and committed evidence.
