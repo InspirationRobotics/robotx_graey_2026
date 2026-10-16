@@ -108,7 +108,8 @@ def pool_candidates(found, sonar_xy, side, max_pick, ignore_flat):
       sonar (where the approach goes) must lie within SIDE_WINDOW_DEG of straight
       left (side -1) or right (+1) from there, and its middle no more than
       BEHIND_M behind the start, so a wall behind the sub isn't picked (Oct 14 dry
-      runs) while a long pipe reaching far ahead still is (sim);
+      runs) while a long pipe reaching far ahead still is (sim). side 0 skips this:
+      any side, any direction (Ruth, Oct 15: "look everywhere", sonar looking down);
     - length counted fully from POOL_FULL_M, since one spot hears only ~1 m of pipe;
     - scored without the 'flat' part when a height band already caps the heights,
       because then a pipe's smear and a wall look the same height-wise (Oct 14).
@@ -121,7 +122,8 @@ def pool_candidates(found, sonar_xy, side, max_pick, ignore_flat):
             continue
         bearing = math.degrees(math.atan2(near[0], near[1]))  # 0 ahead, -90 left, +90 right
         mid_y = float(np.mean(np.asarray(g['spine'], float)[:, 1]))
-        if abs((bearing - 90.0 * side + 180.0) % 360.0 - 180.0) > SIDE_WINDOW_DEG or mid_y < -BEHIND_M:
+        if side and (abs((bearing - 90.0 * side + 180.0) % 360.0 - 180.0) > SIDE_WINDOW_DEG
+                     or mid_y < -BEHIND_M):
             wrong_side += 1
             continue
         score = g['score']
@@ -159,6 +161,7 @@ class PipelineMission(MissionBase):
         self.surface_at = None              # pool plan: (n, e, yaw) to surface at
         self.pipe_spine = None              # pool plan: the picked outline, map frame
         self.aim = None                     # pool plan: the point approached, map frame
+        self.recording = False              # a scan recording this mission started and hasn't stopped
         self.approach_yaw = None
         self.retarget_t = 0.0
         self.carrot = None                  # pool plan: the moving target, NED
@@ -202,6 +205,8 @@ class PipelineMission(MissionBase):
         p('pool_range', 6.0)
         p('pool_sector', '140 210')         # Ruth, Oct 14: the left side, a little up and down
         p('pool_side', 'left')              # where the sonar looks: 'left' or 'right'
+        p('pool_pick_any', False)           # pick a shape on any side, not only pool_side's
+                                            # (Ruth, Oct 15: look everywhere); face still puts it there
         p('pool_band', '-0.3 0.4')          # m from the sonar; the pipe is about level with it.
                                             # 'off' = every height
         p('pool_compact', True)             # little dots only: drops the pool wall (Ruth, Oct 14:
@@ -247,6 +252,7 @@ class PipelineMission(MissionBase):
         if self.stop_after not in ('', 'scan', 'pick', 'face', 'approach'):
             raise ValueError(f"stop_after must be scan, pick, face or approach, not {self.stop_after!r}")
         self.side = 1.0 if g('pool_side').strip().lower() == 'right' else -1.0
+        self.pool_pick_any = bool(g('pool_pick_any'))
         band = g('pool_band').strip().lower()
         self.pool_band = 'off' if band in ('', 'off', 'none') else band
         self.pool_compact = bool(g('pool_compact'))
@@ -275,6 +281,12 @@ class PipelineMission(MissionBase):
         if s is S.SURFACE and self.plan == 'pool' and self.cur:
             self.surface_at = (self.cur[0], self.cur[1], self.cur_yaw or 0.0)   # up where it is
             self.post_point(None)
+        if s is S.SURFACE and self.recording:    # an early end (timeout, no map) left it running
+            try:
+                self.map_post('/record', 'stop')
+                self.recording = False
+            except OSError:
+                pass
         super().enter(s)
 
     def goto(self, forward, right, down, label):
@@ -373,6 +385,7 @@ class PipelineMission(MissionBase):
             if self.record_scan:
                 self.map_post('/record', f'start {self.scan} scan {self.scan_mode}' +
                               (f' {self.scan_stops}x{self.sweeps_per_stop}' if self.scan_mode == 'stops' else ''))
+                self.recording = True
             self.to_phase(f'{self.scan} scan: map start')
 
         elif ph == 'map start':
@@ -449,6 +462,7 @@ class PipelineMission(MissionBase):
             if self.now() - self.state_t0 >= SETTLE_S:
                 if self.record_scan and self.scan == 'pool':
                     self.map_post('/record', 'stop')
+                    self.recording = False
                 if self.stop_after == 'scan':
                     self.stop_here('scan')
                     return
@@ -591,7 +605,8 @@ class PipelineMission(MissionBase):
     def pick_target(self, m):
         found = m.get('outlines') or []
         sonar = m.get('sonar') or [0.0, 0.0]
-        cands, far, wrong = pool_candidates(found, sonar, self.side, self.pool_max_pick,
+        cands, far, wrong = pool_candidates(found, sonar, 0.0 if self.pool_pick_any else self.side,
+                                            self.pool_max_pick,
                                             ignore_flat=self.pool_band != 'off')
         for i, (score, g) in enumerate(cands[:5]):
             self.get_logger().info(f'    outline {i}: pipe {score:.0%} {g["parts"]} {g["n"]} crumbs, '
