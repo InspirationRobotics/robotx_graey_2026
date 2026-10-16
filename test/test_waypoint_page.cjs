@@ -14,6 +14,9 @@ async function render(data,options={}){
   assert.match(e.readiness.textContent,/Cube estimate unavailable/);
   const ready={capabilities:{enabled:true,simulation:true},navigation:{streams:{supervisor:{fresh:true,data:{mode:'Active',configuration_verified:true,surfaced:true,state:'GPS aiding admitted'}}},cube_estimate:{valid:true,lat:32.9,lon:-117,heading_deg:0,depth_m:0}}};
   e=await render(ready);
+  const bow=vm.runInNewContext(code.slice(code.indexOf('function bowPoint'),code.indexOf('function mark'))+'; bowPoint');
+  for(const [heading,x,y] of [[0,0,-25],[90,25,0],[180,0,25],[270,-25,0]]){const p=bow([0,0],heading,25);assert(Math.abs(p[0]-x)<1e-8&&Math.abs(p[1]-y)<1e-8)}
+  const northwest=bow([0,0],305,25);assert(northwest[0]<0&&northwest[1]<0);
   assert.match(e.readiness.textContent,/Select a target/);assert(e.start.disabled);
   e.zoomIn.onclick();e.zoomOut.onclick();e.fit.onclick();
   e.map.onclick({clientX:500,clientY:300});assert.equal(e.posts.length,0);assert(!e.start.disabled);
