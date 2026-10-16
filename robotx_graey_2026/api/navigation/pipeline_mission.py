@@ -85,6 +85,7 @@ from robotx_graey_2026.api.sonar import settings as sonar_settings
 from robotx_graey_2026.api.navigation import mission_base
 from robotx_graey_2026.api.navigation.mission_base import MissionBase, S
 from robotx_graey_2026.api.sonar import outlines
+from robotx_graey_2026.api.vision import led_boxes
 
 # The simulator never left the surface with unchanged targets re-sent every 3 s
 # (sim/README.md). Here a target changes when the plan does, and is otherwise
@@ -243,7 +244,17 @@ class PipelineMission(MissionBase):
         p('follow_lost_s', 30.0)            # no pipe under the sonar this long: lost or ended
         p('follow_max_m', 8.0)              # stop after following this far
         p('follow_time_s', 300.0)           # ... or after this long (under phase_timeout)
-        p('follow_both_ways', True)         # at one end, turn round and follow it to the other end
+        p('follow_both_ways', True)         # at one end, follow the rest of the pipe the other way
+        p('follow_turn', 'return')          # 'return': back to where following began, turn 180, back up
+                                            # follow_backup_m, follow the other part (Ruth, Oct 16);
+                                            # 'spot': turn round at the end and follow it all back
+        p('follow_backup_m', 0.85)          # the sonar is 0.42 m ahead of the centre, so turning 180
+                                            # moves it 0.84 m: back up that much and none is missed
+        p('follow_return_speed', 0.15)      # m/s on the way back (blind, DVL only)
+        p('camera_boxes', True)             # count LED boxes in the bottom camera while following (log only)
+        p('camera_url', 'http://127.0.0.1:8080/stream')   # tools/cam_pair.py; DOWN is the left half
+        p('camera_fwd_m', 0.22)             # camera ahead of the sub's centre (sonar 0.42, camera 0.2 behind it)
+        p('boxes_expected', 4)              # the handbook's light boxes
         p('follow_toward', -1.0)            # deg: start along the pipe toward this heading; -1 = its longer part
 
     def read_extra_parameters(self):
@@ -280,6 +291,13 @@ class PipelineMission(MissionBase):
         self.follow_fit, self.follow_lost = float(g('follow_fit_m')), float(g('follow_lost_s'))
         self.follow_max, self.follow_time = float(g('follow_max_m')), float(g('follow_time_s'))
         self.follow_both, self.follow_toward = bool(g('follow_both_ways')), float(g('follow_toward'))
+        self.follow_turn = g('follow_turn').strip().lower()
+        if self.follow_turn not in ('return', 'spot'):
+            raise ValueError(f"follow_turn must be return or spot, not {self.follow_turn!r}")
+        self.follow_backup, self.return_speed = float(g('follow_backup_m')), float(g('follow_return_speed'))
+        self.camera_boxes, self.camera_url = bool(g('camera_boxes')), g('camera_url')
+        self.camera_fwd, self.boxes_expected = float(g('camera_fwd_m')), int(g('boxes_expected'))
+        self.camera = None
         self.side = 1.0 if g('pool_side').strip().lower() == 'right' else -1.0
         self.pool_pick_any = bool(g('pool_pick_any'))
         band = g('pool_band').strip().lower()
@@ -312,6 +330,8 @@ class PipelineMission(MissionBase):
         if s is S.SURFACE and self.plan == 'pool' and self.cur:
             self.surface_at = (self.cur[0], self.cur[1], self.cur_yaw or 0.0)   # up where it is
             self.post_point(None)
+        if s is S.SURFACE:
+            self.stop_camera()                  # the box summary, however the run ends
         if s is S.SURFACE and self.recording:    # an early end (timeout, no map) left it running
             try:
                 self.map_post('/record', 'stop')
@@ -528,6 +548,15 @@ class PipelineMission(MissionBase):
 
         elif ph == 'follow':
             self.follow_step_once(self.map_get())
+
+        elif ph == 'follow return':
+            self.follow_return()
+
+        elif ph == 'follow turn':
+            self.follow_turn_round()
+
+        elif ph == 'follow backup':
+            self.follow_back_up()
 
         elif ph == 'stopped':
             self.goto_ned(*self.hold, 'hold')
@@ -806,6 +835,8 @@ class PipelineMission(MissionBase):
             self.f_dist, self.f_logged, self.f_period, self.f_sweep = 0.0, 0.0, 8.0, m.get('sweep', 0)
             self.f_lat, self.f_known, self.f_box = 0.0, set(), None
             self.f_reversed, self.f_hold_pt, self.f_leg_t0, self.f_creep0 = False, None, self.now(), None
+            self.f_start, self.f_dir0 = (here[0], here[1]), self.f_dir.copy()
+            self.start_camera()
             self.get_logger().info(f'    following: heading {math.degrees(math.atan2(self.f_dir[1], self.f_dir[0])) % 360:.0f} deg, '
                                    f'at most {self.follow_speed:.2f} m/s and {self.follow_step:.2f} m per sweep')
             self.to_phase('follow')
@@ -881,6 +912,18 @@ class PipelineMission(MissionBase):
         seen = self.f_seen if self.f_seen is not None else self.f_leg_t0
         if (now - seen > self.follow_lost and self.follow_both and not self.f_reversed
                 and self.f_dist < self.follow_max and now - self.f_t0 < self.follow_time):
+            if self.follow_turn == 'return':
+                self.get_logger().info(f'    end of the pipe this way after {self.f_dist:.1f} m - going back to '
+                                       f'where following began, then turning round')
+                if self.recording:
+                    try:
+                        self.map_post('/mark', f'end after {self.f_dist:.1f} m: back to the start')
+                    except OSError:
+                        pass
+                self.f_reversed = True
+                self.carrot, self.last_t = (here[0], here[1]), now
+                self.to_phase('follow return')
+                return
             self.get_logger().info(f'    end of the pipe this way after {self.f_dist:.1f} m - turning round '
                                    f'to follow it the other way')
             if self.recording:
@@ -900,6 +943,7 @@ class PipelineMission(MissionBase):
             why = f'{self.follow_time:.0f} s of following'
         if why:
             self.get_logger().info(f'follow done: {why}; {self.f_dist:.1f} m along the pipe - holding, then surfacing')
+            self.stop_camera()
             if self.cur and not self.dry:
                 self.hold_here(self.cur[2], 'hold')
             self.to_phase('stopped')
@@ -945,6 +989,93 @@ class PipelineMission(MissionBase):
                 f'{"right" if self.f_lat >= 0 else "left"} of the sonar, {v:.2f} m/s, sweep {self.f_period:.1f} s'
                 + (f', last seen {now - seen:.0f} s ago' if now - seen > 3 else '')
                 + (' (dry run: drive it there)' if self.dry else ''))
+
+    # ---- the other part, Ruth's way: back to the start, turn 180, back up, follow ----
+    def walk_to(self, goal, speed, yaw_d, label):
+        """Carrot walk toward goal (n, e) at speed, turning toward yaw_d. Returns metres left."""
+        now = self.now()
+        dt, self.last_t = min(now - self.last_t, 0.5), now
+        cn, ce = self.carrot
+        left = math.hypot(goal[0] - cn, goal[1] - ce)
+        step = min(speed * dt, left)
+        ux, uy = ((goal[0] - cn) / left, (goal[1] - ce) / left) if left > 1e-6 else (0.0, 0.0)
+        self.carrot = (cn + ux * step, ce + uy * step)
+        v = speed if left > step else 0.0
+        rate, err = self.yaw_rate_to(yaw_d)
+        self.stream_posvel(self.carrot[0], self.carrot[1], self.hold[2], ux * v, uy * v, rate, label)
+        here = self.cur if self.cur else self.carrot
+        return math.hypot(goal[0] - here[0], goal[1] - here[1]), err
+
+    def follow_return(self):
+        """Back to where following began, keeping the heading (no turning on the way)."""
+        d = self.f_dir0
+        left, _ = self.walk_to(self.f_start, self.return_speed, math.atan2(d[1], d[0]), 'back to the start')
+        if (left < 0.1 and self.speed() < 0.05) or (self.dry and self.now() - self.state_t0 > 5):
+            self.get_logger().info('    back where following began - turning round')
+            self.carrot, self.last_t = self.f_start, self.now()
+            self.to_phase('follow turn')
+
+    def follow_turn_round(self):
+        """Turn 180 deg on the spot, slowly."""
+        d = -self.f_dir0
+        _, err = self.walk_to(self.f_start, self.return_speed, math.atan2(d[1], d[0]), 'turning round')
+        if abs(err) < math.radians(5) or (self.dry and self.now() - self.state_t0 > 5):
+            here = self.cur if self.cur else self.f_start
+            self.f_backup_goal = (self.f_start[0] + self.follow_backup * self.f_dir0[0],
+                                  self.f_start[1] + self.follow_backup * self.f_dir0[1])
+            self.get_logger().info(f'    turned round - backing up {self.follow_backup:.2f} m so the sonar '
+                                   f'starts where it began')
+            self.carrot, self.last_t = (here[0], here[1]), self.now()
+            self.to_phase('follow backup')
+
+    def follow_back_up(self):
+        d = -self.f_dir0
+        left, _ = self.walk_to(self.f_backup_goal, self.follow_speed, math.atan2(d[1], d[0]), 'backing up')
+        if (left < 0.06 and self.speed() < 0.05) or (self.dry and self.now() - self.state_t0 > 5):
+            now = self.now()
+            here = self.cur if self.cur else self.f_backup_goal
+            h = self.cur_yaw if self.cur_yaw is not None else math.atan2(d[1], d[0])
+            ahead = sonar_settings.SONAR_FWD_M
+            self.f_dir = d.copy()
+            self.f_seen, self.f_leg_t0, self.f_lat, self.f_creep0, self.f_hold_pt = None, now, 0.0, None, None
+            self.f_prev = np.array([here[0] + ahead * math.cos(h), here[1] + ahead * math.sin(h)])
+            self.get_logger().info(f'    following the other part: heading {math.degrees(math.atan2(d[1], d[0])) % 360:.0f} deg')
+            if self.recording:
+                try:
+                    self.map_post('/mark', 'following the other part')
+                except OSError:
+                    pass
+            self.to_phase('follow')
+
+    # ---- light boxes in the bottom camera (log only) ----
+    def camera_at(self):
+        if not self.cur or self.cur_yaw is None:
+            return None
+        return (self.cur[0] + self.camera_fwd * math.cos(self.cur_yaw),
+                self.cur[1] + self.camera_fwd * math.sin(self.cur_yaw))
+
+    def on_box(self, b):
+        n = len(self.camera.tracker.boxes) if self.camera else 0
+        self.get_logger().info(f'    camera: {"NEW " if b["new"] else "again: "}{led_boxes.describe(b)} '
+                               f'- {n} of {self.boxes_expected} boxes so far')
+        if self.recording and b['new']:
+            try:
+                self.map_post('/mark', f'camera box {b["number"]}: ' + max(b['colours'], key=b['colours'].get))
+            except OSError:
+                pass
+
+    def start_camera(self):
+        if self.camera_boxes and self.camera is None:
+            self.camera = led_boxes.CameraWatcher(self.camera_url, self.camera_at,
+                                                  lambda t: self.get_logger().info('    ' + t), self.on_box).start()
+
+    def stop_camera(self):
+        if self.camera is None:
+            return
+        boxes = self.camera.close()
+        self.get_logger().info(f'camera: {len(boxes)} of {self.boxes_expected} light boxes seen'
+                               + ''.join(f'\n      {led_boxes.describe(b)}' for b in boxes))
+        self.camera = None
 
     def look_again(self, why):
         """Nothing picked: turn retry_turn_deg more and look again (the map keeps every
