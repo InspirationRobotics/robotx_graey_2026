@@ -941,3 +941,15 @@ heading difference and raw GPS separation. Withholds stale/missing derived value
 marks whether bridge odometry is transmitting. Uses existing telemetry only.
 Node page regression passes, including heading wrap across north and stale-data
 withholding. Static UI change; local/online toggle update, Jetson deployment pending.
+
+2026-10-15 deployment verified over tether: merged current navigation/UI through
+44731b2 with Jetson sonar history17397c8 as2029343. Backup20261015-waypoint-223525.
+Build and173 regressions passed on Jetson. Stopped hand-started August bridge;
+one normal continuous bridge/supervisor/pilot node observed. Restored sole profile
+mismatch EK3_SRC1_POSZ from1 to6; complete profile readback verified and running
+bridge reports configuration verified. Bar30 pressure and VN/DVL inputs fresh.
+Refreshed stale installed waypoint HTML; served map controls/Cube stats verified.
+Killed/disarmed ESC-off confirmed; restart selected RF (previously TETHER_LOST).
+Operator will Calibrate/Prepare personally; baseline0 and output withheld at final
+snapshot. No physical mission or post-calibration accuracy measurement yet. See
+ docs/waypoint-deployment-2026-10-15.md. Local clone includes preserved sonar history.
