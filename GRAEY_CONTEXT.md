@@ -975,3 +975,12 @@ resume. 179 Python regressions and both Node page suites pass; isolated native
 SITL explicit ROS recovery resumes GPS-anchored odometry with reset counter+1.
 See docs/dvl-position-recovery-2026-10-15.md. Installation restart requires one new
 Prepare; routine recovery thereafter does not restart sensors or bridge.
+
+2026-10-15 DVL recovery deployed through140a9c8. Backup20261015-dvl-recovery-230552.
+Caught stale installed Python despite successful build; backed up/refreshed3
+modules, verified actual Trigger recovery service/status field, and179 tests pass
+against installed runtime from/tmp. Page recovery controls visually verified.
+Killed/disarmed ESC-off, RF selected. Restart leaves baseline0/north unaligned;
+operator needs one Prepare now. Magnetic calibration was not run/erased. No
+physical recovery or mission started. Routine DVL-only recovery then retains
+alignment. See docs/dvl-position-recovery-2026-10-15.md for provenance/limits.

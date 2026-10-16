@@ -55,3 +55,24 @@ QGC forwarding disabled; ROS domain73/localhost only. A simulated maintenance
 status publisher was used after verifying the simulated vehicle was disarmed;
 this tests the software path, not physical kill enforcement. No real recovery or
 waypoint mission is claimed by this simulation result.
+
+## Deployment
+
+Installed on Jetson through `140a9c8`, tether branch, with fresh kill engaged,
+disarmed MANUAL and ESC-off checks. Backup:
+`/home/graey/deployment-backups/20261015-dvl-recovery-230552`.
+Build and 179 source-tree regressions passed. Initial verification caught that
+three installed Python modules were still old despite the successful build.
+Explicitly backed up and refreshed bridge_estimator.py, fused_nav_bridge.py and
+calibration_jobs.py. Other recent pilot/mission modules already matched source.
+Installed-module backups: `/root/robotx_ws/logs/installed-before-dvl-recovery-20261015`.
+Then 179 regressions passed from `/tmp`, importing the installed runtime.
+Future deployments must compare installed contents, not rely on build success.
+
+Read-only ROS discovery confirmed `/graey/navigation/recover_dvl` as Trigger.
+Live bridge publishes `heading_continuity_lost`, profile verified, VN/DVL inputs
+fresh, controller killed/disarmed ESC-off. Browser confirmed the served recovery
+panel and instructions. No physical recovery was invoked: restart intentionally
+left baseline0, north unaligned, supervisor Observation and odometry withheld.
+Operator needs one Prepare/north alignment now; VN magnetic calibration was not
+started or erased by the deployment. RF is selected after restart.
