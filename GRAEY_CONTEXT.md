@@ -984,3 +984,15 @@ Killed/disarmed ESC-off, RF selected. Restart leaves baseline0/north unaligned;
 operator needs one Prepare now. Magnetic calibration was not run/erased. No
 physical recovery or mission started. Routine DVL-only recovery then retains
 alignment. See docs/dvl-position-recovery-2026-10-15.md for provenance/limits.
+
+2026-10-15 heading graphic clarified at operator request: dot/line replaced by
+explicit Cube bow arrow, exact Cube angle label and north/east legend. Cardinal
+geometry and305deg NW checks pass. Deployed static HTML through89f1e99 without
+restarting navigation; controller/bridge/job identities preserved. Live screenshot
+shows299.7deg arrow pointing NW. No sensor yaw offset or DVL tuning applied.
+12 live samples saved Jetson logs/map-consistency-20261015.json; Cube/bridge NE
+separation roughly0.05–0.08m, GPS separation roughly0.07–0.11m in sampled endpoints.
+These measure consistency only; no independent physical heading/displacement
+reference supplied. Operator says DVL error slight, prioritize graphic heading.
+Also deployed recovery disabled-reason textb70df32: initial post-restart Prepare
+required when no baseline/north exists; no fault bypass introduced.
