@@ -964,3 +964,14 @@ clearance, but supervisor Fault/navigation_ready=false. Old Prepare job ready
 label is historical; do not treat it as current mission permission. No mission.
 Single earlier snapshot Cube172.2/corrected VN171.6, GPS separation0.11m is only
 consistency evidence, not absolute accuracy. See deployment session document.
+
+2026-10-15 implemented explicit surfaced DVL position recovery. New calibration
+page action retains bridge-session north alignment/heading bias and pressure
+baseline, requires killed/disarmed ESC-off plus stationary bottom lock and VN
+continuity, discards uncertain position and waits for new qualified GPS. Generic
+Prepare still resets alignment; recovery avoids magnetic recalibration and north
+recapture for DVL-only faults. No underwater recovery or automatic old mission
+resume. 179 Python regressions and both Node page suites pass; isolated native
+SITL explicit ROS recovery resumes GPS-anchored odometry with reset counter+1.
+See docs/dvl-position-recovery-2026-10-15.md. Installation restart requires one new
+Prepare; routine recovery thereafter does not restart sensors or bridge.

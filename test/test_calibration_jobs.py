@@ -8,6 +8,28 @@ from robotx_graey_2026.api.navigation.vn_calibration import VNCalibration
 
 
 class CalibrationJobsTests(unittest.TestCase):
+    def test_dvl_recovery_requires_surface_confirmation_and_safe_controller(self):
+        with self.assertRaisesRegex(ValueError,'floating stationary'):
+            self.job.request(dict(action='recover_dvl',confirmed=True))
+        self.c['armed']=True
+        with self.assertRaisesRegex(ValueError,'disarmed'):
+            self.job.request(dict(action='recover_dvl',confirmed=True,surface_confirmed=True))
+        self.assertEqual(self.calls,[])
+
+    def test_dvl_recovery_uses_retained_alignment_without_pause_or_heading_capture(self):
+        self.put('supervisor',dict(state='DVL continuation',north_alignment=dict(aligned=True)))
+        self.job.job=dict(busy=True,cancel=False,alignment_mode='known',true_heading_deg=90.)
+        def service(name,value=None):
+            self.calls.append((name,value))
+            if name=='recover_dvl':self.put('bridge',dict(published_monotonic=self.now,fault=''))
+            if name=='suspend' and self.now>=.6:
+                self.put('supervisor',dict(state='DVL continuation',north_alignment=dict(aligned=True)))
+            return 'ok'
+        self.job.service=service
+        self.job.run('recover_dvl')
+        self.assertEqual(self.calls,[('suspend',None),('recover_dvl',None),('suspend',None),('commission',None)])
+        self.assertTrue(self.job.waypoint_permission)
+
     def test_recovery_clears_old_latch_only_after_clean_bridge_reset(self):
         self.put('supervisor',dict(state='Fault',reason='DVL continuity lost'))
         self.job.job=dict(busy=True,cancel=False)
