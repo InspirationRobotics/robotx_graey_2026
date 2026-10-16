@@ -915,3 +915,20 @@ plans, separate from old approximate screenshot view. Shows Cube/GPS/track/route
 loading/errors and provider attribution; offline grid retained. No fusion or live
 mission permission gates bypassed. Browser internet required. Node tests cover
 projection inversion, tile readiness and geographic target submission. See sessiondoc.
+
+2026-10-15 local waypoint/map follow-up (not deployed): user requested finish
+locally and deploy later. Satellite page now defaults to a visually inspected,
+clearer Esri Wayback release 2023-08-31, with current-layer choice, Find pool and
+Reload imagery. Geographic clicks retain live target validation; old screenshot
+remains view-only. Find pool changes viewport only. Image date/position and GPS
+accuracy are not surveyed guarantees. Full-page browser localhost preview timed
+out; direct tile visual inspection and page JavaScript checks passed.
+Fixed demonstrated stale pilot arm/disarm retries fighting mission GUIDED under
+RF or TETHER: cancel retries on new mission claim; static SB level cannot force
+mode/arm/disarm during ownership. New SB disarm edge and SA kill remain effective.
+Added pilot-control evidence to mission stage logs. No firmware failsafe bypass.
+173 Python regressions and Node page checks pass; native GUI-API continuous SITL
+completed 0.5m dive/transit/surface/disarm/GPS recovery, simulated target error
+0.153m, QGC forwarding disabled. Native fixture excludes hardware kill node;
+production pilot callbacks tested with mocked transport. Live cause confirmation
+and deployment pending. See docs/waypoint-map-control-session-2026-10-15.md.

@@ -6,7 +6,7 @@ async function render(data,options={}){
     const ctx={document:{getElementById:el},window:{},Image:class{complete=!!options.tilesLoaded;naturalWidth=options.tilesLoaded?256:0},devicePixelRatio:1,
     location:{pathname:'/waypoint'},performance:{now:()=>now},AbortSignal:{timeout:()=>null},
     setTimeout:()=>{},fetch:async(url,request)=>{if(!request?.body)return{ok:true,json:async()=>data};const body=JSON.parse(request.body);posts.push(body);if(body.action==='start'&&++starts===1&&options.timeoutStart)throw Error('Timeout');return{ok:!options.reject,json:async()=>options.reject?{ok:false,msg:'Target rejected'}:{ok:true,plan_id:'single-plan',run_id:'run'}}}};
-  vm.runInNewContext(code,ctx);await new Promise(setImmediate);elements.posts=posts;elements.refreshAt=async t=>{now=t;await ctx.poll()};elements.tileXY=ctx.tileXY;elements.tileGeo=ctx.tileGeo;return elements;
+  vm.runInNewContext(code,ctx);await new Promise(setImmediate);elements.posts=posts;elements.refreshAt=async t=>{now=t;await ctx.poll()};elements.tileXY=ctx.tileXY;elements.tileGeo=ctx.tileGeo;elements.tileURL=ctx.tileURL;return elements;
 }
 (async()=>{
   let e=await render({capabilities:{enabled:false},navigation:{streams:{},cube_estimate:{valid:false}}});
@@ -28,6 +28,13 @@ async function render(data,options={}){
   assert(e.useGrid.hidden);assert(!e.attribution.hidden);assert.match(e.tileStatus.textContent,/Satellite imagery loaded/);
   e.map.onclick({clientX:500,clientY:300});assert(!e.start.disabled);await e.start.onclick();assert.equal(e.posts[0].plan.map,'geographic');
   for(const p of [{lat:32.9236125,lon:-117.0385235},{lat:-33.5,lon:151.2}]){const xy=e.tileXY(p,20),q=e.tileGeo(xy.x,xy.y,20);assert(Math.abs(q.lat-p.lat)<1e-10);assert(Math.abs(q.lon-p.lon)<1e-10)}
+  e=await render(ready,{tilesLoaded:true});e.maptype.value='satellite';e.maptype.onchange();
+  assert.match(e.tileURL(183388,422631,20),/tile\/64776\/20\/422631\/183388$/);
+  e.findPool.onclick();e.retryTiles.onclick();e.map.onclick({clientX:450,clientY:300});
+  assert.match(e.target.textContent,/32\.9236125, -117\.0385235/);assert.equal(e.posts.length,0);
+  e.imagery.value='current';e.imagery.onchange();assert(e.start.disabled);
+  assert.equal(e.tileURL(183388,422631,20),'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/20/422631/183388');
+  e.map.onclick({clientX:450,clientY:300});await e.start.onclick();assert.equal(e.posts[0].plan.map,'geographic');
   e=await render(ready);e.maptype.value='satellite';e.maptype.onchange();e.map.onclick({clientX:500,clientY:300});assert(e.start.disabled);assert.match(e.message.textContent,/Wait for satellite/);assert.equal(e.posts.length,0);
   console.log('Waypoint rendering, readiness explanations and zoom controls pass');
 })().catch(e=>{console.error(e);process.exit(1)});
