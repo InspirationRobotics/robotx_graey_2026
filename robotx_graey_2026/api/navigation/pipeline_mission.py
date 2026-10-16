@@ -50,7 +50,18 @@ pool test the scan need not be a full circle - the sonar looks one way, so with 
 pipe ~1.5 m to that side, scan_turn_deg:=90 sweeps along 2-3 m of it, and a sub
 beside the pool wall never looks at the wall (Oct 14).
 
-stop_after:=scan|pick|face|approach ends the run after that stage (hold, then
+SPOT CHECK (spot_check, Ruth, Oct 16). Her labels of every Oct 15 sweep: from
+beside the pipe it showed in 9 of 94 sweeps, from over it in 22 of 28, and best
+with the sub facing along it. So after the scan the top spot_count shapes scoring
+spot_min_score become spots: the sonar goes over each, facing along the shape,
+and the sub turns -spot_turn_deg/2, +spot_turn_deg/2 and back, slowly, with the
+map looking straight down. Following starts from the spot whose sweeps showed
+pipe dots within spot_radius_m most often (at least spot_min_frac of them).
+
+start_with:=follow skips the scan: the pilot leaves the sub over the pipe, facing
+along it, and following starts there.
+
+stop_after:=scan|pick|face|approach|over|spots ends the run after that stage (hold, then
 surface), so each stage can be tried alone. In a dry run the scan waits for the
 PILOT to turn the sub through scan_turn_deg (read from the Cube's attitude), so
 a dry run while someone drives tests the real pick.
@@ -166,6 +177,8 @@ class PipelineMission(MissionBase):
         self.approach_yaw = None
         self.retarget_t = 0.0
         self.carrot = None                  # pool plan: the moving target, NED
+        self.spots, self.spot_i = [], 0     # spot check: the likely shapes to look at again
+        self.spot_active = None             # ... the one being gone to / looked at
         self.last_t = 0.0
         self.step_z = None                  # DESCEND's current target
         self.altitude = None                # (metres above the bottom, time); -1 = no lock
@@ -256,6 +269,16 @@ class PipelineMission(MissionBase):
         p('camera_fwd_m', 0.22)             # camera ahead of the sub's centre (sonar 0.42, camera 0.2 behind it)
         p('boxes_expected', 4)              # the handbook's light boxes
         p('follow_toward', -1.0)            # deg: start along the pipe toward this heading; -1 = its longer part
+        # ---- after the scan: look again from over the likely spots (Ruth, Oct 16) ----
+        p('spot_check', True)               # pool_after_pick:=follow only
+        p('spot_count', 3)                  # at most this many spots, best scoring first
+        p('spot_min_score', 0.2)            # worth a look (a pick without the check needs min_score)
+        p('spot_turn_deg', 30.0)            # turn half each way over a spot, then back
+        p('spot_rate_dps', 2.0)
+        p('spot_radius_m', 0.3)             # pipe dots this close to the spot count for it
+        p('spot_min_frac', 0.3)             # follow only from a spot that showed the pipe in this share of sweeps
+        p('start_with', 'scan')             # 'follow': no scan - the pilot leaves the sub over the pipe,
+                                            # facing along it, and it follows from there (Ruth, Oct 16)
 
     def read_extra_parameters(self):
         g = lambda n: self.get_parameter(n).value
@@ -278,8 +301,8 @@ class PipelineMission(MissionBase):
         self.approach_range, self.approach_speed = g('approach_range'), g('approach_speed')
         self.hold_s = g('hold_s')
         self.stop_after = g('stop_after').strip().lower()
-        if self.stop_after not in ('', 'scan', 'pick', 'face', 'approach', 'over'):
-            raise ValueError(f"stop_after must be scan, pick, face, approach or over, not {self.stop_after!r}")
+        if self.stop_after not in ('', 'scan', 'pick', 'face', 'approach', 'over', 'spots'):
+            raise ValueError(f"stop_after must be scan, pick, face, approach, over or spots, not {self.stop_after!r}")
         self.after_pick = g('pool_after_pick').strip().lower()
         if self.after_pick not in ('follow', 'approach'):
             raise ValueError(f"pool_after_pick must be follow or approach, not {self.after_pick!r}")
@@ -298,6 +321,13 @@ class PipelineMission(MissionBase):
         self.camera_boxes, self.camera_url = bool(g('camera_boxes')), g('camera_url')
         self.camera_fwd, self.boxes_expected = float(g('camera_fwd_m')), int(g('boxes_expected'))
         self.camera = None
+        self.spot_check, self.spot_count = bool(g('spot_check')), max(1, int(g('spot_count')))
+        self.spot_min_score, self.spot_turn = float(g('spot_min_score')), float(g('spot_turn_deg'))
+        self.spot_rate = math.radians(max(0.5, float(g('spot_rate_dps'))))
+        self.spot_radius, self.spot_min_frac = float(g('spot_radius_m')), float(g('spot_min_frac'))
+        self.start_with = g('start_with').strip().lower()
+        if self.start_with not in ('scan', 'follow'):
+            raise ValueError(f"start_with must be scan or follow, not {self.start_with!r}")
         self.side = 1.0 if g('pool_side').strip().lower() == 'right' else -1.0
         self.pool_pick_any = bool(g('pool_pick_any'))
         band = g('pool_band').strip().lower()
@@ -414,6 +444,9 @@ class PipelineMission(MissionBase):
     def search(self):
         if self.phase is None:
             self.hold_here(self.z_surf + self.depth, 'hold')
+            if self.plan == 'pool' and self.start_with == 'follow':
+                self.start_follow_here()
+                return
             self.start_scan('pool' if self.plan == 'pool' else 'far')
         ph = self.phase.split(': ')[-1]
 
@@ -542,6 +575,12 @@ class PipelineMission(MissionBase):
                 self.stop_here('pick')
                 return
             self.go_over()
+
+        elif ph == 'spot anchor':
+            self.spot_anchor()
+
+        elif ph == 'spot look':
+            self.spot_look(self.map_get())
 
         elif ph == 'follow start':
             self.follow_anchor()
@@ -687,6 +726,9 @@ class PipelineMission(MissionBase):
         if far or wrong:
             self.get_logger().info(f'    ignored {far} shape(s) more than {self.pool_max_pick:.1f} m away and '
                                    f'{wrong} on the other side of where the scan started')
+        if self.after_pick == 'follow' and self.spot_check:
+            self.check_spots(cands, m)
+            return
         best = cands[0][1] if cands else None
         if best is None or cands[0][0] < self.min_score:
             self.look_again(f'no outline scores {self.min_score:.0%}')
@@ -715,10 +757,9 @@ class PipelineMission(MissionBase):
     # last ~1 m of those dots gives the pipe's direction (bends included) and how far
     # to the side of the sonar it lies. The sonar is SONAR_FWD_M ahead of the sub's
     # centre; the bottom camera is ~0.2 m behind the sonar (Ruth).
-    def start_over(self, best, tn, te, here, score):
-        """The picked pipe's direction at the aim point, toward its longer part, and
-        the sonar's target: right above that point."""
-        sp = np.array([self.map_to_ned(x, y) for x, y in best['spine']], float)
+    def pipe_dir(self, sp, tn, te, here):
+        """Along spine sp (NED) at (tn, te): the direction toward its longer part (or
+        follow_toward), and the metres of it before and after that point."""
         k = int(np.argmin(np.hypot(sp[:, 0] - tn, sp[:, 1] - te)))
         seg = np.hypot(*np.diff(sp, axis=0).T) if len(sp) > 1 else np.zeros(0)
         before, after = float(seg[:k].sum()), float(seg[k:].sum())
@@ -733,6 +774,13 @@ class PipelineMission(MissionBase):
             want = math.radians(self.follow_toward)
             if d @ np.array([math.cos(want), math.sin(want)]) < 0:
                 d = -d
+        return d, before, after
+
+    def start_over(self, best, tn, te, here, score):
+        """The picked pipe's direction at the aim point, toward its longer part, and
+        the sonar's target: right above that point."""
+        sp = np.array([self.map_to_ned(x, y) for x, y in best['spine']], float)
+        d, before, after = self.pipe_dir(sp, tn, te, here)
         self.f_dir, self.over_pt = d, (tn, te)
         self.carrot = (here[0], here[1])
         self.last_t = self.now()
@@ -767,18 +815,144 @@ class PipelineMission(MissionBase):
                 self.get_logger().info(f'    dry run: put the sonar over NED ({tn:.2f}, {te:.2f}), '
                                        f'heading {math.degrees(yaw_d) % 360:.0f} deg')
             if self.now() - self.state_t0 > 5:
-                self.follow_map()
+                self.arrived_over()
             return
         h = self.cur_yaw if self.cur_yaw is not None else yaw_d
         sn, se = self.cur[0] + ahead * math.cos(h), self.cur[1] + ahead * math.sin(h)
         if (math.hypot(tn - sn, te - se) < 0.15 and abs(err) < math.radians(8)
                 and left < 0.02 and self.speed() < 0.05):
-            self.get_logger().info(f'    over the pipe: sonar {math.hypot(tn - sn, te - se):.2f} m from the '
-                                   f'picked point, heading {math.degrees(h) % 360:.0f} deg')
-            if self.stop_after == 'over':
-                self.stop_here('over')
-                return
-            self.follow_map()
+            self.get_logger().info(f'    over the {"spot" if self.spot_active else "pipe"}: sonar '
+                                   f'{math.hypot(tn - sn, te - se):.2f} m from the picked point, '
+                                   f'heading {math.degrees(h) % 360:.0f} deg')
+            self.arrived_over()
+
+    def arrived_over(self):
+        if self.spot_active is not None:
+            self.look_view(f'spot {self.spot_i + 1}')
+            self.to_phase('spot anchor')
+            return
+        if self.stop_after == 'over':
+            self.stop_here('over')
+            return
+        self.follow_map()
+
+    # ---- spot check: look again from over the likely spots (Ruth, Oct 16) ----
+    def spot_from(self, g, score, m):
+        """A likely shape as a spot: its dot nearest the sonar, in NED, and the shape's
+        direction there. None when no dots lie along it."""
+        if not m.get('crumbs') or not m.get('sonar'):
+            return None
+        c = np.array(m['crumbs'], float)[:, :2]
+        spine = np.array(g['spine'], float)
+        on = outlines.dist_to_polyline(c, spine) < 0.4
+        if not on.any():
+            return None
+        sx, sy = m['sonar']
+        x, y = c[on][np.argmin(np.hypot(c[on, 0] - sx, c[on, 1] - sy))]
+        tn, te = self.map_to_ned(x, y)
+        sp = np.array([self.map_to_ned(a, b) for a, b in spine], float)
+        d, _, _ = self.pipe_dir(sp, tn, te, self.cur if self.cur else self.hold)
+        return {'pt': (tn, te), 'd': d, 'score': score, 'length': g['length']}
+
+    def check_spots(self, cands, m):
+        """The scan's likely shapes, best first, become spots to look at again."""
+        spots = []
+        for score, g in cands:
+            if score < self.spot_min_score or len(spots) >= self.spot_count:
+                break
+            s = self.spot_from(g, score, m)
+            if s and all(math.dist(s['pt'], o['pt']) > 0.4 for o in spots):
+                spots.append(s)
+        if not spots:
+            self.look_again(f'no outline scores {self.spot_min_score:.0%}')
+            return
+        self.spots, self.spot_i = spots, 0
+        self.get_logger().info(f'likely spots to look at again: ' + ', '.join(
+            f'{k + 1}) {s["score"]:.0%} {s["length"]:.1f} m at NED ({s["pt"][0]:.2f}, {s["pt"][1]:.2f})'
+            for k, s in enumerate(spots)))
+        self.go_spot(spots[0])
+
+    def go_spot(self, s, look=True):
+        """Put the sonar over spot s, facing along its shape; then look at it (or follow from it)."""
+        here = self.cur if self.cur else self.hold
+        self.f_dir, self.over_pt = s['d'], s['pt']
+        self.carrot, self.last_t = (here[0], here[1]), self.now()
+        self.spot_active = s if look else None
+        self.get_logger().info(
+            f'{"spot " + str(self.spot_i + 1) + ": going over" if look else "following from the best spot: going over"} '
+            f'NED ({s["pt"][0]:.2f}, {s["pt"][1]:.2f}), {math.hypot(s["pt"][0] - here[0], s["pt"][1] - here[1]):.2f} m '
+            f'away, heading {math.degrees(math.atan2(s["d"][1], s["d"][0])) % 360:.0f} deg')
+        self.to_phase('to pipe')
+
+    def spot_anchor(self):
+        """Hold still until the reset map runs from (0, 0), tie it to NED, then turn and look."""
+        n, e, down, h = self.f_hold
+        self.stream_posvel(n, e, down, 0.0, 0.0, 0.0, 'over the spot')
+        m = self.map_get()
+        if m['state'] == 'running' and m['pose'] and math.hypot(*m['pose'][:2]) < 0.05:
+            if self.dry or self.cur is None:
+                self.map_origin = (n, e, h)
+            else:
+                self.map_origin = (self.cur[0], self.cur[1], self.cur_yaw)
+            half = math.radians(self.spot_turn) / 2
+            self.sl = {'targets': [h - half, h + half, h], 'k': 0, 'k_t': self.now(), 'sweep0': m.get('sweep', 0),
+                       'known': set(), 'hits': set(), 'dots': 0}
+            self.get_logger().info(f'    spot {self.spot_i + 1}: turning {self.spot_turn / 2:.0f} deg each way, '
+                                   f'looking straight down' + (' (dry run: the pilot turns the sub)' if self.dry else ''))
+            self.to_phase('spot look')
+
+    def spot_look(self, m):
+        """Turn slowly through the targets while counting the sweeps with pipe dots near the spot."""
+        n, e, down, _ = self.f_hold
+        L, s = self.sl, self.spot_active
+        want = L['targets'][L['k']]
+        err = wrap_pi(want - (self.cur_yaw if self.cur_yaw is not None else want))
+        rate = max(-self.spot_rate, min(self.spot_rate, 0.8 * err))
+        self.stream_posvel(n, e, down, 0.0, 0.0, rate, 'look at the spot')
+        for x, y, z in (np.array(m['crumbs'], float)[:, [0, 1, 4]] if m.get('crumbs') else []):
+            key = (round(x, 2), round(y, 2), round(z, 2))
+            if key in L['known']:
+                continue
+            L['known'].add(key)
+            dn, de = self.map_to_ned(x, y)
+            if math.hypot(dn - s['pt'][0], de - s['pt'][1]) <= self.spot_radius:
+                L['dots'] += 1
+                L['hits'].add(m.get('sweep', 0))
+        t = self.now() - L['k_t']
+        if (abs(err) < math.radians(2) or t > 2 * math.radians(self.spot_turn) / self.spot_rate + 10
+                or (self.dry and t > 8)):
+            L['k'], L['k_t'] = L['k'] + 1, self.now()
+            if L['k'] >= len(L['targets']):
+                self.spot_done(m)
+
+    def spot_done(self, m):
+        L, s = self.sl, self.spot_active
+        sweeps = max(1, m.get('sweep', 0) - L['sweep0'])
+        s['frac'], s['sweeps'], s['dots'] = min(1.0, len(L['hits']) / sweeps), sweeps, L['dots']
+        msg = (f'spot {self.spot_i + 1}: pipe dots within {self.spot_radius:.1f} m of it in {len(L["hits"])} of '
+               f'{sweeps} sweeps ({s["frac"]:.0%}), {L["dots"]} dots')
+        self.get_logger().info(msg)
+        if self.recording:
+            try:
+                self.map_post('/mark', msg)
+            except OSError:
+                pass
+        self.spot_i += 1
+        if self.spot_i < len(self.spots):
+            self.go_spot(self.spots[self.spot_i])
+            return
+        best = max(self.spots, key=lambda x: (x['frac'], x['dots']))
+        k = self.spots.index(best) + 1
+        if best['frac'] < self.spot_min_frac:
+            self.get_logger().warn(f'spot check: no spot showed the pipe in {self.spot_min_frac:.0%} of its sweeps '
+                                   f'(best: spot {k}, {best["frac"]:.0%}) - surfacing')
+            self.enter(S.SURFACE)
+            return
+        self.get_logger().info(f'spot check: spot {k} showed the pipe most ({best["frac"]:.0%} of its sweeps)')
+        if self.stop_after == 'spots':
+            self.stop_here('spots')
+            return
+        self.go_spot(best, look=False)
 
     def follow_band_now(self):
         """follow_band (m above the floor) as the map wants it: m from the sonar, up +."""
@@ -788,8 +962,27 @@ class PipelineMission(MissionBase):
         floor_up = -(alt + self.sonar_above_dvl)
         return (round(floor_up + self.follow_band[0], 2), round(floor_up + self.follow_band[1], 2))
 
+    def start_follow_here(self):
+        """start_with:=follow: the sub is over the pipe, facing along it - follow from here."""
+        h = self.cur_yaw if self.cur_yaw is not None else self.hold[3]
+        self.f_dir = np.array([math.cos(h), math.sin(h)])
+        if self.record_scan:
+            try:
+                self.map_post('/record', 'start follow from where the pilot left the sub')
+                self.recording = True
+            except OSError:
+                pass
+        self.get_logger().info(f'start_with:=follow - no scan; following from here, heading '
+                               f'{math.degrees(h) % 360:.0f} deg')
+        self.follow_map()
+
     def follow_map(self):
-        """The map's follow settings, then a reset so the map holds only this run's pipe."""
+        self.look_view('follow start')
+        self.to_phase('follow start')
+
+    def look_view(self, what):
+        """The map's follow settings (straight down, the band from the floor), then a reset
+        so the map holds only what this look sees; f_hold = where to hold meanwhile."""
         _, sector, threshold, _ = self.scans['pool']
         self.map_post('/range', self.follow_range)
         self.map_post('/sector', self.follow_sector)
@@ -806,16 +999,15 @@ class PipelineMission(MissionBase):
             self.map_post('/mapcmd', cmd)
         if self.recording:
             try:
-                self.map_post('/mark', 'follow start: sonar straight down, band '
+                self.map_post('/mark', f'{what}: sonar straight down, band '
                               + (f'{self.follow_band[0]}-{self.follow_band[1]} m above the floor' if band else 'off (no DVL)'))
             except OSError:
                 pass
         if band is None:
-            self.get_logger().warn('    no DVL altitude: following with no height band (the floor may make dots)')
+            self.get_logger().warn('    no DVL altitude: looking with no height band (the floor may make dots)')
         h = self.cur_yaw if self.cur_yaw is not None else math.atan2(self.f_dir[1], self.f_dir[0])
         here = self.cur if self.cur else self.hold
         self.f_hold = (here[0], here[1], self.hold[2], h)
-        self.to_phase('follow start')
 
     def follow_anchor(self):
         """Hold still until the reset map runs from (0, 0), then tie its frame to NED."""
