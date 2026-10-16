@@ -953,3 +953,14 @@ Killed/disarmed ESC-off confirmed; restart selected RF (previously TETHER_LOST).
 Operator will Calibrate/Prepare personally; baseline0 and output withheld at final
 snapshot. No physical mission or post-calibration accuracy measurement yet. See
  docs/waypoint-deployment-2026-10-15.md. Local clone includes preserved sonar history.
+
+2026-10-15 satellite blank desktop reproduced and fixed: archive level21 requests
+failed at1440x900 while level20 rendered. Cap archived tile requests at20 and
+upscale; current provider retains21. Node desktop regression and live screenshot
+pass. Static HTML deployed with controller/bridge/Prepare identities preserved.
+Operator had calibrated/prepared (known true heading102 captured). Later live
+DVL continuity fault latched with4 dropouts; DVL subsequently fresh/valid at0.729m
+clearance, but supervisor Fault/navigation_ready=false. Old Prepare job ready
+label is historical; do not treat it as current mission permission. No mission.
+Single earlier snapshot Cube172.2/corrected VN171.6, GPS separation0.11m is only
+consistency evidence, not absolute accuracy. See deployment session document.

@@ -58,3 +58,28 @@ yet been collected in this session.
 
 Next: complete calibration/Prepare, verify the chosen controller source and fresh
 navigation, document comparisons, then supervise a short clear waypoint mission.
+
+## Satellite desktop fix after operator Prepare
+
+Operator reported calibration and Prepare completed. Reproduced missing background
+at 1440x900: desktop selected archive level 21, whose requested tiles failed here;
+the narrow view at level 20 showed imagery. Capped the archived layer at native
+level 20 and upscale on larger canvases; current imagery keeps level 21. Also
+avoid reporting loaded when zero tiles are drawn. Node regression covers both
+desktop providers and zooming. Visually verified the live pool background at
+1440x900 after deploying static HTML. Screenshot in project output:
+`satellite-desktop-fixed-20261015.png`. Controller session, bridge instance and
+Prepare job ID were unchanged; no navigation/sensor process restarted.
+
+Earlier page snapshot after Prepare showed Cube172.2 degrees, corrected VN171.6,
+difference0.6 degrees, and Cube/raw-GPS separation0.11m. These are single-sample
+consistency observations, not independent heading or position accuracy results.
+True-heading102 degrees had been captured earlier; physical heading at the later
+snapshot was not supplied, so no absolute-heading accuracy claim is possible.
+
+By map verification, bridge had latched DVL continuity loss (4 dropouts recorded).
+Subsequent readback showed fresh valid DVL, approximately0.729m clearance and
+stationary velocity, but navigation_ready=false and odometry withheld pending
+revalidation. The historical Prepare job still says ready; live supervisor Fault
+takes precedence. Operator must re-Prepare after stable bottom lock. Do not
+interpret the static map fix as mission clearance. No wet mission started.
