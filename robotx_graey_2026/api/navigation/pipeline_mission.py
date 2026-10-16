@@ -196,9 +196,9 @@ class PipelineMission(MissionBase):
                                             # crumbs from the metre above the floor
         p('scan_threshold', 100)              # the map's own default
         p('scan_turn_deg', 360.0)
-        p('scan_rate_dps', 4.0)
+        p('scan_rate_dps', 3.0)             # Ruth, Oct 15 (the sub turns ~1 deg/s slower than asked)
         p('min_score', 0.5)
-        p('phase_timeout', 240.0)
+        p('phase_timeout', 360.0)
         p('plan', 'harbor')                 # or 'pool': one sideways scan, then approach
         p('pool_depth', 0.3)                # m below the surface (the pool is 0.9 m)
         p('pool_max_depth', 0.6)            # m; no pool target ever goes deeper
@@ -216,6 +216,9 @@ class PipelineMission(MissionBase):
         p('pool_far_m', 2.5)                # no crumbs farther than this (0 = no limit): in the pool
                                             # the wrong dots were mostly 3-5.6 m out (Oct 14)
         p('scan_mode', 'turn')              # 'turn': one slow turn; 'stops': stop and look
+                                            # (stops shelved Oct 15: the sub slid at each heading jump)
+        p('scan_time_s', 300.0)             # pool: give up searching (turns + picks) after this
+        p('retry_turn_deg', 180.0)          # pool: nothing picked -> turn this much more and look again
         p('scan_stops', 20)                 # stops: this many headings round scan_turn_deg
         p('sweeps_per_stop', 3)             # stops: full sweeps taken still at each (1-5)
         p('record_scan', True)              # record the scan (Map tab Record), a Mark at each stop
@@ -259,6 +262,8 @@ class PipelineMission(MissionBase):
         self.pool_near = float(g('pool_near_m'))
         self.pool_far = float(g('pool_far_m'))
         self.scan_mode = g('scan_mode').strip().lower()
+        self.scan_time = float(g('scan_time_s'))
+        self.retry_turn = math.radians(g('retry_turn_deg'))
         if self.scan_mode not in ('turn', 'stops'):
             raise ValueError(f"scan_mode must be turn or stops, not {self.scan_mode!r}")
         self.scan_stops = max(1, int(g('scan_stops')))
@@ -397,6 +402,7 @@ class PipelineMission(MissionBase):
                 else:
                     self.map_origin = (self.cur[0], self.cur[1], self.cur_yaw)
                 self.turned, self.last_yaw = 0.0, self.cur_yaw
+                self.scan_t0, self.turn_goal, self.turn_no = self.now(), self.scan_turn, 1
                 if self.scan_mode == 'stops':
                     self.stop_i, self.stop_yaw0 = 0, (self.cur_yaw if self.cur_yaw is not None else self.hold[3])
                     self.to_phase(f'{self.scan} scan: stop turn')
@@ -447,22 +453,22 @@ class PipelineMission(MissionBase):
                 self.turned += wrap_pi(self.cur_yaw - self.last_yaw)
                 if int(abs(self.turned) // math.radians(45)) > int(before // math.radians(45)):
                     self.get_logger().info(f'    turned {math.degrees(abs(self.turned)):.0f} of '
-                                           f'{math.degrees(self.scan_turn):.0f} deg'
+                                           f'{math.degrees(self.turn_goal):.0f} deg'
                                            + (' (dry run: the pilot turns the sub)' if self.dry else ''))
             self.last_yaw = self.cur_yaw
             # a dry run sends nothing, so it waits for the pilot to turn the sub; with
             # no attitude at all (no Cube) it stops waiting after 5 s
             no_yaw = self.dry and self.cur_yaw is None and self.now() - self.state_t0 > 5
-            if abs(self.turned) >= self.scan_turn or no_yaw:
+            out_of_time = self.scan == 'pool' and self.now() - self.scan_t0 >= self.scan_time
+            if out_of_time:
+                self.get_logger().warn(f'    search time {self.scan_time:.0f} s used up mid-turn - last look')
+            if abs(self.turned) >= self.turn_goal or no_yaw or out_of_time:
                 self.hold_here(self.hold[2], 'hold')
                 self.to_phase(f'{self.scan} scan: settle')
 
         elif ph == 'settle':
             self.goto_ned(*self.hold, 'hold')
             if self.now() - self.state_t0 >= SETTLE_S:
-                if self.record_scan and self.scan == 'pool':
-                    self.map_post('/record', 'stop')
-                    self.recording = False
                 if self.stop_after == 'scan':
                     self.stop_here('scan')
                     return
@@ -616,13 +622,11 @@ class PipelineMission(MissionBase):
                                    f'{wrong} on the other side of where the scan started')
         best = cands[0][1] if cands else None
         if best is None or cands[0][0] < self.min_score:
-            self.get_logger().warn(f'pool scan: no outline scores {self.min_score:.0%} - surfacing')
-            self.enter(S.SURFACE)
+            self.look_again(f'no outline scores {self.min_score:.0%}')
             return
         self.pipe_spine = np.array(best['spine'], float)
         if not self.retarget(m):
-            self.get_logger().warn('pool scan: no crumbs along the picked outline - surfacing')
-            self.enter(S.SURFACE)
+            self.look_again('no crumbs along the picked outline')
             return
         tn, te = self.map_to_ned(*self.aim)
         here = self.cur if self.cur else self.hold     # a dry run on a sub with no position yet
@@ -634,6 +638,21 @@ class PipelineMission(MissionBase):
             f'strafing to it, heading {math.degrees(self.approach_yaw) % 360:.0f} deg')
         self.retarget_t = self.now()
         self.to_phase('face')
+
+    def look_again(self, why):
+        """Nothing picked: turn retry_turn_deg more and look again (the map keeps every
+        dot so far), until scan_time_s is used up (Ruth, Oct 15)."""
+        used = self.now() - getattr(self, 'scan_t0', self.now())
+        if self.scan_mode != 'turn' or used >= self.scan_time:
+            self.get_logger().warn(f'pool scan: {why}; searched {used:.0f} s - surfacing')
+            self.enter(S.SURFACE)
+            return
+        self.turn_no += 1
+        self.get_logger().info(f'pool scan: {why} after {used:.0f} s - turning another '
+                               f'{math.degrees(self.retry_turn):.0f} deg (turn {self.turn_no})'
+                               + (' (dry run: the pilot turns the sub)' if self.dry else ''))
+        self.turned, self.last_yaw, self.turn_goal = 0.0, self.cur_yaw, self.retry_turn
+        self.to_phase('pool scan: turn')            # still holding the spot the scan began at
 
     def retarget(self, m):
         """Aim at the crumb along the picked outline nearest the sonar. New crumbs
