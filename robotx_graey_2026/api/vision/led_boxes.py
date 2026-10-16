@@ -7,10 +7,17 @@ the LED boxes filled up to 36% (red) and 24% (green) of the down camera's
 picture; with no box in view, 0-0.6%. A trained model (YOLO) would be the next
 step if daylight washes the colours out, or to see a box with its LED off.
 
-A SIGHTING starts when one colour covers min_frac of the picture and ends after
-gap_s with none. Each sighting is placed where the camera was when its colour
-peaked; sightings within same_m of an earlier box are the same box (the sub
-hovers and comes back), so BoxTracker.boxes counts boxes, not sightings.
+Each COLOUR is tracked on its own: a sighting of a colour starts when it covers
+min_frac of the picture and ends after gap_s without it, so two boxes of
+different colours in view one after the other stay two boxes (sim, Oct 16: boxes
+0.5-0.75 m apart merged when one sighting took any colour). A sighting is placed
+where the camera was when that colour peaked; a sighting of the same colour
+within same_m of an earlier box is that box again (the sub hovers and comes
+back), so BoxTracker.boxes counts boxes, not sightings. Two filters from the
+Oct 15 footage: a colour only counts in a frame where it is at least
+minor_share of the strongest colour (a red LED's yellow fringe is not a yellow
+box), and a NEW box needs a peak of at least new_frac (glimpses at the picture's
+edge peaked at 2%; real boxes at 5-38%).
 """
 import math
 import threading
@@ -39,49 +46,53 @@ def colour_fractions(rgb):
 
 
 class BoxTracker:
-    def __init__(self, min_frac=0.02, gap_s=1.0, same_m=0.5):
+    def __init__(self, min_frac=0.02, gap_s=1.0, same_m=0.5, new_frac=0.04, minor_share=0.35):
         self.min_frac, self.gap_s, self.same_m = min_frac, gap_s, same_m
-        self.boxes = []            # dicts: n, e, colours {colour: peak share}, sightings, first_t, last_t
-        self._cur = None           # the sighting in progress
+        self.new_frac, self.minor_share = new_frac, minor_share
+        self.boxes = []            # dicts: n, e, colour, colours {colour: peak share}, sightings, first_t, last_t
+        self._cur = {}             # colour -> the sighting of it in progress
 
     def update(self, t, rgb, pos):
         """One frame at time t (s); pos = (north, east) of the camera, or None.
-        Returns the box a sighting just ended on (new or seen again), else None."""
+        Returns the boxes whose sightings just ended (new or seen again): a list."""
         f = colour_fractions(rgb)
-        colour = max(f, key=f.get)
-        if f[colour] >= self.min_frac:
-            if self._cur is None:
-                self._cur = {'t0': t, 'peak': {}, 'pos': pos, 'best': 0.0}
-            c = self._cur
-            c['last'] = t
-            c['peak'][colour] = max(c['peak'].get(colour, 0.0), f[colour])
-            if f[colour] > c['best'] and pos is not None:
-                c['best'], c['pos'] = f[colour], pos
-            return None
-        if self._cur is not None and t - self._cur['last'] > self.gap_s:
-            c, self._cur = self._cur, None
-            return self._finish(c)
-        return None
+        top = max(f.values())
+        done = []
+        for colour, share in f.items():
+            c = self._cur.get(colour)
+            if share >= self.min_frac and share >= self.minor_share * top:
+                if c is None:
+                    c = self._cur[colour] = {'t0': t, 'best': 0.0, 'pos': pos}
+                c['last'] = t
+                if share > c['best']:
+                    c['best'] = share
+                    if pos is not None:
+                        c['pos'] = pos
+            elif c is not None and t - c['last'] > self.gap_s:
+                done.append(self._finish(colour, self._cur.pop(colour)))
+        return [b for b in done if b is not None]
 
     def flush(self):
-        """End a sighting still in view (the mission is stopping)."""
-        if self._cur is None:
-            return None
-        c, self._cur = self._cur, None
-        return self._finish(c)
+        """End the sightings still in view (the mission is stopping)."""
+        done = [self._finish(k, c) for k, c in self._cur.items()]
+        self._cur = {}
+        return [b for b in done if b is not None]
 
-    def _finish(self, c):
+    def _finish(self, colour, c):
         pos = c['pos']
         for b in self.boxes:
-            if pos is not None and b['n'] is not None and math.hypot(pos[0] - b['n'], pos[1] - b['e']) <= self.same_m:
+            if (b['colour'] == colour and pos is not None and b['n'] is not None
+                    and math.hypot(pos[0] - b['n'], pos[1] - b['e']) <= self.same_m):
                 b['sightings'] += 1
                 b['last_t'] = c['last']
-                for k, v in c['peak'].items():
-                    b['colours'][k] = max(b['colours'].get(k, 0.0), v)
+                b['colours'][colour] = max(b['colours'][colour], c['best'])
                 b['new'] = False
                 return b
-        b = {'n': pos[0] if pos else None, 'e': pos[1] if pos else None, 'colours': dict(c['peak']),
-             'sightings': 1, 'first_t': c['t0'], 'last_t': c['last'], 'new': True, 'number': len(self.boxes) + 1}
+        if c['best'] < self.new_frac:
+            return None                     # a glimpse, not a box
+        b = {'n': pos[0] if pos else None, 'e': pos[1] if pos else None, 'colour': colour,
+             'colours': {colour: c['best']}, 'sightings': 1, 'first_t': c['t0'], 'last_t': c['last'],
+             'new': True, 'number': len(self.boxes) + 1}
         self.boxes.append(b)
         return b
 
@@ -155,9 +166,9 @@ class CameraWatcher:
                     self.frames += 1
                     if self.frames == 1:
                         self.report(f'camera: watching for light boxes on {self.url}')
-                    b = self.tracker.update(t, rgb, self.where())
-                    if b is not None and self.on_box:
-                        self.on_box(b)
+                    for b in self.tracker.update(t, rgb, self.where()):
+                        if self.on_box:
+                            self.on_box(b)
             except Exception as ex:                  # no stream yet, cv2 missing, stream dropped
                 if not warned:
                     self.report(f'camera: no picture from {self.url} ({ex}) - is tools/cam_pair.py running? '
@@ -167,7 +178,7 @@ class CameraWatcher:
 
     def close(self):
         self.stop.set()
-        b = self.tracker.flush()
-        if b is not None and self.on_box:
-            self.on_box(b)
+        for b in self.tracker.flush():
+            if self.on_box:
+                self.on_box(b)
         return self.tracker.boxes

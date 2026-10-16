@@ -208,6 +208,7 @@ class SimSonar:
             self.solid = pipeline_world(*place)
         self.world, self.centre_line = build_world(*place, height)
         self.truth_boxes = [c for c, _ in _geometry(*place, height)["boxes"]]
+        self.boxes_geo = _geometry(*place, height)["boxes"]          # (centre, along-pipe direction), sim_camera
         self.metres_per_bin = None
         self.settings = {"simulated": True}
         self._state = None
