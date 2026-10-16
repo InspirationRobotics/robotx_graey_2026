@@ -229,7 +229,22 @@ class PipelineMission(MissionBase):
                                             # zone AND its ringing (to ~1.05 m), where the pipe hid
         p('approach_speed', 0.15)           # m/s
         p('hold_s', 15.0)
-        p('stop_after', '')                 # '' = the whole plan; or scan, pick, face, approach
+        p('stop_after', '')                 # '' = the whole plan; or scan, pick, face, approach, over
+        # ---- after the pick: ride over the pipe and follow it (Ruth, Oct 15) ----
+        p('pool_after_pick', 'follow')      # 'follow': over the pipe, along it; 'approach': stop beside it
+        p('follow_sector', '240 300')       # sonar looks straight down +-30 deg: one cross-section per sweep
+        p('follow_range', 2.5)              # m; short range, quicker pings
+        p('follow_band', '0.12 0.65')       # m ABOVE THE FLOOR (DVL altitude): pipe top ~0.3, box top ~0.45
+        p('sonar_above_dvl_m', 0.3)         # the floor shows at DVL altitude + this (every pool session)
+        p('follow_speed', 0.08)             # m/s at most
+        p('follow_step_m', 0.3)             # ... and at most this far per sonar sweep
+        p('follow_yaw_dps', 5.0)            # turn no faster (fast turns made GUIDED slide, Oct 15)
+        p('follow_fit_m', 1.2)              # line fit: pipe dots this far behind the sonar
+        p('follow_lost_s', 30.0)            # no pipe under the sonar this long: lost or ended
+        p('follow_max_m', 8.0)              # stop after following this far
+        p('follow_time_s', 300.0)           # ... or after this long (under phase_timeout)
+        p('follow_both_ways', True)         # at one end, turn round and follow it to the other end
+        p('follow_toward', -1.0)            # deg: start along the pipe toward this heading; -1 = its longer part
 
     def read_extra_parameters(self):
         g = lambda n: self.get_parameter(n).value
@@ -252,8 +267,19 @@ class PipelineMission(MissionBase):
         self.approach_range, self.approach_speed = g('approach_range'), g('approach_speed')
         self.hold_s = g('hold_s')
         self.stop_after = g('stop_after').strip().lower()
-        if self.stop_after not in ('', 'scan', 'pick', 'face', 'approach'):
-            raise ValueError(f"stop_after must be scan, pick, face or approach, not {self.stop_after!r}")
+        if self.stop_after not in ('', 'scan', 'pick', 'face', 'approach', 'over'):
+            raise ValueError(f"stop_after must be scan, pick, face, approach or over, not {self.stop_after!r}")
+        self.after_pick = g('pool_after_pick').strip().lower()
+        if self.after_pick not in ('follow', 'approach'):
+            raise ValueError(f"pool_after_pick must be follow or approach, not {self.after_pick!r}")
+        self.follow_sector, self.follow_range = g('follow_sector'), float(g('follow_range'))
+        self.follow_band = tuple(float(v) for v in g('follow_band').split())
+        self.sonar_above_dvl = float(g('sonar_above_dvl_m'))
+        self.follow_speed, self.follow_step = float(g('follow_speed')), float(g('follow_step_m'))
+        self.follow_yaw = math.radians(g('follow_yaw_dps'))
+        self.follow_fit, self.follow_lost = float(g('follow_fit_m')), float(g('follow_lost_s'))
+        self.follow_max, self.follow_time = float(g('follow_max_m')), float(g('follow_time_s'))
+        self.follow_both, self.follow_toward = bool(g('follow_both_ways')), float(g('follow_toward'))
         self.side = 1.0 if g('pool_side').strip().lower() == 'right' else -1.0
         self.pool_pick_any = bool(g('pool_pick_any'))
         band = g('pool_band').strip().lower()
@@ -491,6 +517,18 @@ class PipelineMission(MissionBase):
         elif ph == 'approach':
             self.approach(self.map_get())
 
+        elif ph == 'to pipe':
+            if self.stop_after == 'pick':
+                self.stop_here('pick')
+                return
+            self.go_over()
+
+        elif ph == 'follow start':
+            self.follow_anchor()
+
+        elif ph == 'follow':
+            self.follow_step_once(self.map_get())
+
         elif ph == 'stopped':
             self.goto_ned(*self.hold, 'hold')
             if self.now() - self.state_t0 >= 5.0:
@@ -630,6 +668,9 @@ class PipelineMission(MissionBase):
             return
         tn, te = self.map_to_ned(*self.aim)
         here = self.cur if self.cur else self.hold     # a dry run on a sub with no position yet
+        if self.after_pick == 'follow':
+            self.start_over(best, tn, te, here, cands[0][0])
+            return
         # turn so the pipe is on pool_side: to the right means heading 90 deg left of it
         self.approach_yaw = math.atan2(te - here[1], tn - here[0]) - self.side * math.pi / 2
         self.get_logger().info(
@@ -638,6 +679,272 @@ class PipelineMission(MissionBase):
             f'strafing to it, heading {math.degrees(self.approach_yaw) % 360:.0f} deg')
         self.retarget_t = self.now()
         self.to_phase('face')
+
+    # ---------- pool plan: ride over the pipe and follow it (Ruth, Oct 15) ----------
+    # The Ping360's slice runs across the sub, so with the sub lined up along the pipe
+    # every sweep cuts the pipe once: one dot where it crosses. A line through the
+    # last ~1 m of those dots gives the pipe's direction (bends included) and how far
+    # to the side of the sonar it lies. The sonar is SONAR_FWD_M ahead of the sub's
+    # centre; the bottom camera is ~0.2 m behind the sonar (Ruth).
+    def start_over(self, best, tn, te, here, score):
+        """The picked pipe's direction at the aim point, toward its longer part, and
+        the sonar's target: right above that point."""
+        sp = np.array([self.map_to_ned(x, y) for x, y in best['spine']], float)
+        k = int(np.argmin(np.hypot(sp[:, 0] - tn, sp[:, 1] - te)))
+        seg = np.hypot(*np.diff(sp, axis=0).T) if len(sp) > 1 else np.zeros(0)
+        before, after = float(seg[:k].sum()), float(seg[k:].sum())
+        if len(sp) < 2:
+            d = np.array([math.cos(here[3] if len(here) > 3 and here[3] is not None else 0.0), 0.0])
+        elif after >= before:
+            d = sp[min(k + 1, len(sp) - 1)] - sp[k] if k + 1 < len(sp) else sp[k] - sp[k - 1]
+        else:
+            d = sp[k - 1] - sp[k]
+        d = d / max(np.linalg.norm(d), 1e-6)
+        if self.follow_toward >= 0:
+            want = math.radians(self.follow_toward)
+            if d @ np.array([math.cos(want), math.sin(want)]) < 0:
+                d = -d
+        self.f_dir, self.over_pt = d, (tn, te)
+        self.carrot = (here[0], here[1])
+        self.last_t = self.now()
+        self.get_logger().info(
+            f'picked: pipe {score:.0%}, {best["length"]:.1f} m; nearest part at NED ({tn:.2f}, {te:.2f}), '
+            f'{math.hypot(tn - here[0], te - here[1]):.2f} m away - going over it, then following it '
+            f'toward heading {math.degrees(math.atan2(d[1], d[0])) % 360:.0f} deg '
+            f'({max(before, after):.1f} m of it that way)')
+        self.to_phase('to pipe')
+
+    def yaw_rate_to(self, yaw_d):
+        h = self.cur_yaw if self.cur_yaw is not None else yaw_d
+        return max(-self.follow_yaw, min(self.follow_yaw, 0.8 * wrap_pi(yaw_d - h))), wrap_pi(yaw_d - h)
+
+    def go_over(self):
+        """Walk a carrot to where the SONAR is over the pipe, turning (slowly) to face along it."""
+        d, (tn, te) = self.f_dir, self.over_pt
+        yaw_d = math.atan2(d[1], d[0])
+        ahead = sonar_settings.SONAR_FWD_M
+        gn, ge = tn - ahead * math.cos(yaw_d), te - ahead * math.sin(yaw_d)
+        dt, self.last_t = min(self.now() - self.last_t, 0.5), self.now()
+        cn, ce = self.carrot
+        left = math.hypot(gn - cn, ge - ce)
+        step = min(self.follow_speed * 1.5 * dt, left)
+        ux, uy = ((gn - cn) / left, (ge - ce) / left) if left > 1e-6 else (0.0, 0.0)
+        self.carrot = (cn + ux * step, ce + uy * step)
+        v = self.follow_speed * 1.5 if left > step else 0.0
+        rate, err = self.yaw_rate_to(yaw_d)
+        self.stream_posvel(self.carrot[0], self.carrot[1], self.hold[2], ux * v, uy * v, rate, 'over the pipe')
+        if self.dry:
+            if self.now() - self.state_t0 < 0.3:
+                self.get_logger().info(f'    dry run: put the sonar over NED ({tn:.2f}, {te:.2f}), '
+                                       f'heading {math.degrees(yaw_d) % 360:.0f} deg')
+            if self.now() - self.state_t0 > 5:
+                self.follow_map()
+            return
+        h = self.cur_yaw if self.cur_yaw is not None else yaw_d
+        sn, se = self.cur[0] + ahead * math.cos(h), self.cur[1] + ahead * math.sin(h)
+        if (math.hypot(tn - sn, te - se) < 0.15 and abs(err) < math.radians(8)
+                and left < 0.02 and self.speed() < 0.05):
+            self.get_logger().info(f'    over the pipe: sonar {math.hypot(tn - sn, te - se):.2f} m from the '
+                                   f'picked point, heading {math.degrees(h) % 360:.0f} deg')
+            if self.stop_after == 'over':
+                self.stop_here('over')
+                return
+            self.follow_map()
+
+    def follow_band_now(self):
+        """follow_band (m above the floor) as the map wants it: m from the sonar, up +."""
+        alt = self.floor_clearance()
+        if alt is None:
+            return None
+        floor_up = -(alt + self.sonar_above_dvl)
+        return (round(floor_up + self.follow_band[0], 2), round(floor_up + self.follow_band[1], 2))
+
+    def follow_map(self):
+        """The map's follow settings, then a reset so the map holds only this run's pipe."""
+        _, sector, threshold, _ = self.scans['pool']
+        self.map_post('/range', self.follow_range)
+        self.map_post('/sector', self.follow_sector)
+        self.map_post('/threshold', threshold)
+        self.map_post('/floorcut', 0.0)
+        self.map_post('/compact', 'on' if self.pool_compact else 'off')
+        self.map_post('/near', 'off')
+        self.map_post('/far', 'off')
+        self.map_post('/fade', 'off')
+        band = self.follow_band_now()
+        self.map_post('/band', f'{band[0]} {band[1]}' if band else 'off')
+        self.f_band, self.f_band_t = band, self.now()
+        for cmd in ('reset', 'start', 'resume'):
+            self.map_post('/mapcmd', cmd)
+        if self.recording:
+            try:
+                self.map_post('/mark', 'follow start: sonar straight down, band '
+                              + (f'{self.follow_band[0]}-{self.follow_band[1]} m above the floor' if band else 'off (no DVL)'))
+            except OSError:
+                pass
+        if band is None:
+            self.get_logger().warn('    no DVL altitude: following with no height band (the floor may make dots)')
+        h = self.cur_yaw if self.cur_yaw is not None else math.atan2(self.f_dir[1], self.f_dir[0])
+        here = self.cur if self.cur else self.hold
+        self.f_hold = (here[0], here[1], self.hold[2], h)
+        self.to_phase('follow start')
+
+    def follow_anchor(self):
+        """Hold still until the reset map runs from (0, 0), then tie its frame to NED."""
+        n, e, down, h = self.f_hold
+        self.stream_posvel(n, e, down, 0.0, 0.0, 0.0, 'over the pipe')
+        m = self.map_get()
+        if m['state'] == 'running' and m['pose'] and math.hypot(*m['pose'][:2]) < 0.05:
+            if self.dry or self.cur is None:
+                self.map_origin = (n, e, h)
+            else:
+                self.map_origin = (self.cur[0], self.cur[1], self.cur_yaw)
+            here = self.cur if self.cur else self.f_hold
+            ahead = sonar_settings.SONAR_FWD_M
+            self.f_prev = np.array([here[0] + ahead * math.cos(h), here[1] + ahead * math.sin(h)])
+            self.f_t0 = self.f_sweep_t = self.f_log_t = self.now()
+            self.f_seen = None                  # nothing moves until the pipe shows under the sonar
+            self.f_dist, self.f_logged, self.f_period, self.f_sweep = 0.0, 0.0, 8.0, m.get('sweep', 0)
+            self.f_lat, self.f_known, self.f_box = 0.0, set(), None
+            self.f_reversed, self.f_hold_pt, self.f_leg_t0, self.f_creep0 = False, None, self.now(), None
+            self.get_logger().info(f'    following: heading {math.degrees(math.atan2(self.f_dir[1], self.f_dir[0])) % 360:.0f} deg, '
+                                   f'at most {self.follow_speed:.2f} m/s and {self.follow_step:.2f} m per sweep')
+            self.to_phase('follow')
+
+    def follow_step_once(self, m):
+        now = self.now()
+        here = self.cur if self.cur else self.f_hold
+        h = self.cur_yaw if self.cur_yaw is not None else math.atan2(self.f_dir[1], self.f_dir[0])
+        ahead = sonar_settings.SONAR_FWD_M
+        sonar = np.array([here[0] + ahead * math.cos(h), here[1] + ahead * math.sin(h)])
+        # sonar sweep period, for the speed limit
+        sw = m.get('sweep', 0)
+        if sw != self.f_sweep:
+            dt = now - self.f_sweep_t
+            if 0.5 < dt < 60:
+                self.f_period = 0.6 * self.f_period + 0.4 * dt
+            self.f_sweep, self.f_sweep_t = sw, now
+        # the height band follows the floor
+        band = self.follow_band_now()
+        if band and (self.f_band is None or max(abs(band[0] - self.f_band[0]), abs(band[1] - self.f_band[1])) > 0.05) \
+                and now - self.f_band_t > 2.0:
+            try:
+                self.map_post('/band', f'{band[0]} {band[1]}')
+                self.f_band, self.f_band_t = band, now
+            except OSError:
+                pass
+        d = self.f_dir
+        right = np.array([-d[1], d[0]])
+        if m.get('crumbs'):
+            raw = np.array(m['crumbs'], float)
+            c = np.array([self.map_to_ned(x, y) for x, y in raw[:, :2]])
+            up = raw[:, 4]
+            keys = [(round(x, 2), round(y, 2), round(z, 2)) for x, y, z in raw[:, [0, 1, 4]]]
+            fresh = np.array([k not in self.f_known for k in keys])     # dots the latest sweeps added
+            self.f_known.update(keys)
+            rel = c - sonar
+            along, across = rel @ d, rel @ right
+            corridor = (np.abs(across) <= 0.8) & (along >= -self.follow_fit) & (along <= 0.4)
+            if corridor.sum() >= 4 and np.ptp(along[corridor]) >= 0.3:
+                pts = c[corridor]
+                _, _, vt = np.linalg.svd(pts - pts.mean(axis=0))
+                nd = vt[0] if vt[0] @ d >= 0 else -vt[0]
+                if nd @ d > math.cos(math.radians(35)):          # one fit never swings it far
+                    d = 0.6 * d + 0.4 * nd
+                    d = d / np.linalg.norm(d)
+                    self.f_dir, right = d, np.array([-d[1], d[0]])
+            # only FRESH dots say the pipe is under the sonar now; old ones linger behind it
+            under = fresh & (np.abs(along) <= 0.2) & (np.abs(across) <= 0.6)
+            if under.any():
+                self.f_lat = float(np.median((c[under] - sonar) @ right))
+                self.f_seen = now
+                # a box sits on the pipe (~0.15 m tall): a fresh dot clearly above the pipe's line
+                level = corridor & ~fresh
+                if level.sum() >= 5:
+                    pipe_up = float(np.median(up[level]))
+                    hi = under & (up >= pipe_up + 0.10)
+                    if hi.any():
+                        k = int(np.argmax(np.where(hi, up, -9)))
+                        bn, be = c[k]
+                        if self.f_box is None or math.hypot(bn - self.f_box[0], be - self.f_box[1]) > 0.4:
+                            self.f_box = (bn, be)
+                            self.get_logger().info(f'    possible box: echo {up[k] - pipe_up:.2f} m above the pipe at '
+                                                   f'NED ({bn:.2f}, {be:.2f}), {self.f_dist:.1f} m along')
+                            if self.recording:
+                                try:
+                                    self.map_post('/mark', f'possible box {up[k] - pipe_up:.2f} m above the pipe')
+                                except OSError:
+                                    pass
+        # done?
+        self.f_dist += max(0.0, float((sonar - self.f_prev) @ d))
+        self.f_prev = sonar
+        why = None
+        seen = self.f_seen if self.f_seen is not None else self.f_leg_t0
+        if (now - seen > self.follow_lost and self.follow_both and not self.f_reversed
+                and self.f_dist < self.follow_max and now - self.f_t0 < self.follow_time):
+            self.get_logger().info(f'    end of the pipe this way after {self.f_dist:.1f} m - turning round '
+                                   f'to follow it the other way')
+            if self.recording:
+                try:
+                    self.map_post('/mark', f'turning round after {self.f_dist:.1f} m')
+                except OSError:
+                    pass
+            self.f_dir, self.f_reversed = -self.f_dir, True
+            self.f_seen, self.f_leg_t0, self.f_lat, self.f_creep0, self.f_hold_pt = None, now, 0.0, None, None
+            return
+        if now - seen > self.follow_lost:
+            why = (f'no pipe under the sonar for {self.follow_lost:.0f} s (it ended, or it was lost)'
+                   if self.f_seen is not None else f'the pipe never showed under the sonar in {self.follow_lost:.0f} s')
+        elif self.f_dist >= self.follow_max:
+            why = f'followed {self.follow_max:.1f} m'
+        elif now - self.f_t0 > self.follow_time:
+            why = f'{self.follow_time:.0f} s of following'
+        if why:
+            self.get_logger().info(f'follow done: {why}; {self.f_dist:.1f} m along the pipe - holding, then surfacing')
+            if self.cur and not self.dry:
+                self.hold_here(self.cur[2], 'hold')
+            self.to_phase('stopped')
+            return
+        # steer: along the line at v, sliding toward it; heading along it, slowly
+        v = min(self.follow_speed, self.follow_step / max(self.f_period, 1.0))
+        yaw_d = math.atan2(d[1], d[0])
+        rate, err = self.yaw_rate_to(yaw_d)
+        waiting = self.f_seen is None or now - self.f_seen > 1.0 * self.f_period
+        since = now - (self.f_seen if self.f_seen is not None else self.f_leg_t0)
+        creep = False
+        if abs(err) > math.radians(20) and self.f_seen is None:
+            self.f_leg_t0 = now                 # the lost clock starts once it has turned round
+        if (self.f_reversed and self.f_seen is None and abs(err) <= math.radians(20)
+                and since > 2 * self.f_period):
+            # just turned round at an end and the pipe isn't under the sonar yet:
+            # creep back along the line, at most 1 m, to find it again. (Not at a gap on
+            # the way: creeping on past a real end only overshoots it - sim, Oct 16.)
+            if self.f_creep0 is None:
+                self.f_creep0 = sonar.copy()
+            creep = float(np.linalg.norm(sonar - self.f_creep0)) < 1.0
+        if creep:
+            v *= 0.5
+            self.f_hold_pt = None
+            goal = sonar + d * v
+            tn, te = goal[0] - ahead * math.cos(h), goal[1] - ahead * math.sin(h)
+        elif waiting or abs(err) > math.radians(20):
+            # waiting for the next sweep, or still turning (round): stay on one spot
+            v = 0.0
+            if self.f_hold_pt is None:
+                self.f_hold_pt = (here[0], here[1])
+            tn, te = self.f_hold_pt
+        else:
+            self.f_hold_pt, self.f_creep0 = None, None
+            goal = sonar + self.f_lat * right + d * v                # where the sonar should be in ~1 s
+            tn, te = goal[0] - ahead * math.cos(h), goal[1] - ahead * math.sin(h)
+        self.stream_posvel(tn, te, self.hold[2], v * d[0], v * d[1], rate, 'follow')
+        if self.f_dist - self.f_logged >= 0.5 or now - self.f_log_t >= (2.0 if self.dry else 10.0):
+            self.f_logged, self.f_log_t = self.f_dist, now
+            self.get_logger().info(
+                f'    follow: sonar at NED ({sonar[0]:.2f}, {sonar[1]:.2f}), {self.f_dist:.1f} m along, pipe heading {math.degrees(yaw_d) % 360:.0f} deg '
+                f'(sub {math.degrees(h) % 360:.0f}), pipe {abs(self.f_lat):.2f} m '
+                f'{"right" if self.f_lat >= 0 else "left"} of the sonar, {v:.2f} m/s, sweep {self.f_period:.1f} s'
+                + (f', last seen {now - seen:.0f} s ago' if now - seen > 3 else '')
+                + (' (dry run: drive it there)' if self.dry else ''))
 
     def look_again(self, why):
         """Nothing picked: turn retry_turn_deg more and look again (the map keeps every
