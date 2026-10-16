@@ -1,12 +1,12 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const code=fs.readFileSync('tools/waypoint.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 async function render(data,options={}){
-  const elements={},posts=[],ctx2d=new Proxy({},{get:()=>()=>{}});let now=100,starts=0;
-  const el=id=>elements[id]??=(id==='map'?{getContext:()=>ctx2d,getBoundingClientRect:()=>({width:900,height:600,left:0,top:0})}:{value:id==='maptype'?'geographic':id==='depth'?'0.5':'',textContent:''});
-    const ctx={document:{getElementById:el},window:{},Image:class{complete=!!options.tilesLoaded;naturalWidth=options.tilesLoaded?256:0},devicePixelRatio:1,
+  const elements={},posts=[],imageSources=[],ctx2d=new Proxy({},{get:()=>()=>{}});let now=100,starts=0;
+  const el=id=>elements[id]??=(id==='map'?{getContext:()=>ctx2d,getBoundingClientRect:()=>({width:900,height:600,...options.viewport,left:0,top:0})}:{value:id==='maptype'?'geographic':id==='depth'?'0.5':'',textContent:''});
+    const ctx={document:{getElementById:el},window:{},Image:class{complete=!!options.tilesLoaded;naturalWidth=options.tilesLoaded?256:0;set src(url){imageSources.push(url)}},devicePixelRatio:1,
     location:{pathname:'/waypoint'},performance:{now:()=>now},AbortSignal:{timeout:()=>null},
     setTimeout:()=>{},fetch:async(url,request)=>{if(!request?.body)return{ok:true,json:async()=>data};const body=JSON.parse(request.body);posts.push(body);if(body.action==='start'&&++starts===1&&options.timeoutStart)throw Error('Timeout');return{ok:!options.reject,json:async()=>options.reject?{ok:false,msg:'Target rejected'}:{ok:true,plan_id:'single-plan',run_id:'run'}}}};
-  vm.runInNewContext(code,ctx);await new Promise(setImmediate);elements.posts=posts;elements.refreshAt=async t=>{now=t;await ctx.poll()};elements.tileXY=ctx.tileXY;elements.tileGeo=ctx.tileGeo;elements.tileURL=ctx.tileURL;return elements;
+  vm.runInNewContext(code,ctx);await new Promise(setImmediate);elements.posts=posts;elements.imageSources=imageSources;elements.refreshAt=async t=>{now=t;await ctx.poll()};elements.tileXY=ctx.tileXY;elements.tileGeo=ctx.tileGeo;elements.tileURL=ctx.tileURL;return elements;
 }
 (async()=>{
   let e=await render({capabilities:{enabled:false},navigation:{streams:{},cube_estimate:{valid:false}}});
@@ -47,5 +47,9 @@ async function render(data,options={}){
   assert.equal(e.headingOffsets.textContent,'90.0° / 2.0°');assert.equal(e.cubeSpeed.textContent,'0.50');assert.equal(e.gpsSeparation.textContent,'0.00');assert.match(e.estimateAge.textContent,/local: 0.10 s/);
   e=await render({...telemetry,navigation:{...telemetry.navigation,streams:{...telemetry.navigation.streams,bridge:{fresh:false,age:4,data:telemetry.navigation.streams.bridge.data},local:{fresh:false,age:4,data:telemetry.navigation.streams.local.data}}}});
   assert.match(e.alignedHeading.textContent,/Unavailable/);assert.equal(e.headingDifference.textContent,'—');assert.equal(e.cubeSpeed.textContent,'—');assert.match(e.estimateAge.textContent,/4.00 s · stale/);
-  console.log('Waypoint map, readiness, Start retry and estimate stats checks pass');
+  e=await render(ready,{tilesLoaded:true,viewport:{width:1440,height:900}});e.maptype.value='satellite';e.maptype.onchange();
+  assert(e.imageSources.some(s=>s.includes('/tile/64776/20/')));assert(!e.imageSources.some(s=>s.includes('/tile/64776/21/')));
+  assert.match(e.tileStatus.textContent,/zoom 20/);e.zoomIn.onclick();assert(!e.imageSources.some(s=>s.includes('/tile/64776/21/')));
+  e.imagery.value='current';e.imagery.onchange();assert(e.imageSources.some(s=>s.includes('/MapServer/tile/21/')));
+  console.log('Waypoint map, desktop archive resolution, readiness, Start retry and estimate stats checks pass');
 })().catch(e=>{console.error(e);process.exit(1)});

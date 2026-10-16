@@ -31,7 +31,9 @@ function tileKey(x,y,z){return `${imageryLayer()}/${z}/${y}/${x}`}
 function tileURL(x,y,z){const base=imageryLayer()==='current'?'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/':'https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/1.0.0/default028mm/MapServer/tile/64776/';return base+`${z}/${y}/${x}`}
 function tileLoaded(p){const q=tileXY(p,tileZoom),t=tiles.get(tileKey(Math.floor(q.x),Math.floor(q.y),tileZoom));return !!(t?.image.complete&&t.image.naturalWidth>0&&!t.failed)}
 function drawSatellite(c,r){
-tileZoom=Math.max(15,Math.min(21,Math.floor(Math.log2(156543.033928*Math.cos(c.lat*Math.PI/180)*transform.scale))));
+// The dated pool imagery is available through level 20. Larger canvases must
+// upscale that imagery rather than request missing level-21 archive tiles.
+tileZoom=Math.max(15,Math.min(imageryLayer()==='current'?21:20,Math.floor(Math.log2(156543.033928*Math.cos(c.lat*Math.PI/180)*transform.scale))));
 const a=tileXY(transform.from(0,0),tileZoom),b=tileXY(transform.from(r.width,r.height),tileZoom);let loaded=0,pending=0,failed=0;
 for(let x=Math.floor(a.x);x<=Math.floor(b.x);x++)for(let y=Math.floor(a.y);y<=Math.floor(b.y);y++){
 const key=tileKey(x,y,tileZoom);let t=tiles.get(key);
@@ -39,7 +41,7 @@ if(!t){if(tiles.size>=96)tiles.delete(tiles.keys().next().value);const im=new Im
 if(t.failed){failed++;continue}if(!t.image.complete||!t.image.naturalWidth){pending++;continue}
 const nw=transform.to(tileGeo(x,y,tileZoom)),se=transform.to(tileGeo(x+1,y+1,tileZoom));ctx.drawImage(t.image,nw[0],nw[1],se[0]-nw[0]+.5,se[1]-nw[1]+.5);loaded++;
 }
-$('tileStatus').textContent=failed?'Satellite tiles unavailable in part of the view. Check internet or use the geographic grid.':pending?'Loading satellite imagery…':`Satellite imagery loaded · north up · zoom ${tileZoom}. Click inside the pool to choose a waypoint.`;
+$('tileStatus').textContent=failed?'Satellite tiles unavailable in part of the view. Check internet or use the geographic grid.':pending?'Loading satellite imagery…':loaded?`Satellite imagery loaded · north up · zoom ${tileZoom}. Click inside the pool to choose a waypoint.`:'No satellite tiles visible. Press Find pool or Fit map / vehicle.';
 }
 function ne(p,o){return [(p.lat-o.lat)*Math.PI/180*R,(p.lon-o.lon)*Math.PI/180*R*Math.cos(o.lat*Math.PI/180)]}
 function geo(n,e,o){return {lat:o.lat+n/R*180/Math.PI,lon:o.lon+e/(R*Math.cos(o.lat*Math.PI/180))*180/Math.PI}}
