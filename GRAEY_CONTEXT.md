@@ -1004,3 +1004,12 @@ DVL or stale VN/pressure releases hold. Raw GPS stays visible/quality checked.
 No Cube origin reset, direct GPS fusion or heading tuning.182 regressions and
 page check passed; native mission/deployment results in stationary-position-hold
 session document. Very slow actual movement below3cm/s may be treated as rest.
+
+2026-10-15 stationary-hold implementation/SITL complete throughd90e7f5. First
+native test exposed supervisor applied_recently dependency, fixed with separate
+fresh stationary GPS validation plus healthy/transmitting guards; rerun full
+mission passes (0.152m simulated error). Deployment staged but STOPPED before any
+changes: live armed MANUAL, kill released, ESC-on, TETHER. Await user disarm/kill.
+Retry /home/graey/deploy-stationary-hold.py with sudo after fresh safety check;
+script then installs changed estimator/supervisor and forces verified runtime
+copies. Requires new Prepare after restart. See stationary-position-hold doc.

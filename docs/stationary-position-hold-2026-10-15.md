@@ -44,3 +44,15 @@ SURFACE/DISARM/RECOVER_GPS/COMPLETE. GPS outage and valid underwater Cube pose
 were observed; final simulated target error0.152m. GPS-decision logs include the
 stationary-hold withholding event before movement. QGC forwarding disabled.
 Evidence: `docs/evidence/stationary-hold-waypoint-pass-2026-10-15.json`.
+
+## Deployment checkpoint
+
+Code commit `d90e7f5` is staged on Graey as `/home/graey/stationary-hold.bundle`
+with `/home/graey/deploy-stationary-hold.py`. The script checks fresh killed,
+disarmed, ESC-off, no mission and no busy calibration, then backs up/fast-forwards,
+builds, explicitly verifies/copies changed installed modules and runs installed
+regressions before restarting. It stopped at the initial safety assertion:
+fresh telemetry was armed MANUAL, kill released, ESC power on, TETHER selected.
+No backup/merge/stop/write occurred. Operator asked to disarm/kill before retry.
+After successful installation, a new Prepare/north alignment is required, with
+magnetic calibration retained. Do not describe this feature as active yet.
