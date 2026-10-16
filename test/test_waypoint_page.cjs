@@ -36,5 +36,16 @@ async function render(data,options={}){
   assert.equal(e.tileURL(183388,422631,20),'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/20/422631/183388');
   e.map.onclick({clientX:450,clientY:300});await e.start.onclick();assert.equal(e.posts[0].plan.map,'geographic');
   e=await render(ready);e.maptype.value='satellite';e.maptype.onchange();e.map.onclick({clientX:500,clientY:300});assert(e.start.disabled);assert.match(e.message.textContent,/Wait for satellite/);assert.equal(e.posts.length,0);
-  console.log('Waypoint rendering, readiness explanations and zoom controls pass');
+  const telemetry={...ready,navigation:{...ready.navigation,streams:{...ready.navigation.streams,
+    local:{fresh:true,age:.1,data:{ned:[1,2,.5],velocity:[.3,.4,0]}},
+    attitude:{fresh:true,age:.1,data:{rpy:[2,-3,359]}},
+    bridge:{fresh:true,age:.1,data:{inputs:{vn:true},heading_reference_validated:true,transmitting:true,heading_vn:{yaw:1},north_alignment:{offset_deg:90},heading_bias_deg:2}},
+    ekf:{fresh:true,age:.2,data:{flags:3,velocity_variance:.1,horizontal_variance:.2,vertical_variance:.3}},
+    gps:{fresh:true,age:.2,data:{valid:true,lat:32.9,lon:-117}}
+  }}};
+  e=await render(telemetry);assert.equal(e.headingDifference.textContent,'-2.0°');assert.match(e.alignedHeading.textContent,/1.0° · transmitting/);
+  assert.equal(e.headingOffsets.textContent,'90.0° / 2.0°');assert.equal(e.cubeSpeed.textContent,'0.50');assert.equal(e.gpsSeparation.textContent,'0.00');assert.match(e.estimateAge.textContent,/local: 0.10 s/);
+  e=await render({...telemetry,navigation:{...telemetry.navigation,streams:{...telemetry.navigation.streams,bridge:{fresh:false,age:4,data:telemetry.navigation.streams.bridge.data},local:{fresh:false,age:4,data:telemetry.navigation.streams.local.data}}}});
+  assert.match(e.alignedHeading.textContent,/Unavailable/);assert.equal(e.headingDifference.textContent,'—');assert.equal(e.cubeSpeed.textContent,'—');assert.match(e.estimateAge.textContent,/4.00 s · stale/);
+  console.log('Waypoint map, readiness, Start retry and estimate stats checks pass');
 })().catch(e=>{console.error(e);process.exit(1)});

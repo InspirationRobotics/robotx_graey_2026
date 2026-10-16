@@ -932,3 +932,12 @@ completed 0.5m dive/transit/surface/disarm/GPS recovery, simulated target error
 0.153m, QGC forwarding disabled. Native fixture excludes hardware kill node;
 production pilot callbacks tested with mocked transport. Live cause confirmation
 and deployment pending. See docs/waypoint-map-control-session-2026-10-15.md.
+
+2026-10-15 added collapsible Cube estimate stats on /waypoint, open by default.
+Displays Cube geographic/local position, attitude, velocity and speed, calibrated
+pressure depth, EKF reported metrics/flags and stream ages. Also shows validated
+corrected VN bridge heading, north offset/GPS heading adjustment, wrapped Cube/VN
+heading difference and raw GPS separation. Withholds stale/missing derived values;
+marks whether bridge odometry is transmitting. Uses existing telemetry only.
+Node page regression passes, including heading wrap across north and stale-data
+withholding. Static UI change; local/online toggle update, Jetson deployment pending.
