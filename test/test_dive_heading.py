@@ -41,6 +41,13 @@ class HeadingTests(unittest.TestCase):
         self.assertFalse(self.sample(0, vn=None)['allowed'])
         self.assertFalse(self.sample(0, cube=dict(received=0, yaw=90, rate=0))['allowed'])
 
+    def test_missing_or_nonfinite_measurement_timestamps_never_crash(self):
+        for stamp in (None,math.nan,math.inf,'unknown'):
+            for name, payload in (('vn',dict(yaw=0.,rate=0.)),('cube',dict(yaw=0.,rate=0.)),
+                                   ('dvl',dict(valid=True,velocity=(0.,0.,0.)))):
+                self.assertFalse(self.sample(0.,**{name:dict(payload,received=stamp)})['allowed'])
+            self.assertEqual(self.sample(0.,gps=dict(received=stamp))['state'],'Skipped')
+
     def test_turning_and_uncertain_course_skip(self):
         self.assertEqual(self.sample(0, vn=dict(received=0, yaw=0, rate=10))['state'], 'Skipped')
         for acc in [None, 0.0, 0.5, math.nan]:

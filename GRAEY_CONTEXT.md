@@ -735,3 +735,183 @@ DVL invalid and depth/GPS/heading readiness unconfirmed on land. User requested
 waiting until floating with bottom lock. No parameter writes, output enablement,
 arming or mission. See docs/deployment-2026-10-13.md; current physical status must
 be checked again, and mission-process-death safeguard remains outstanding.
+
+2026-10-13 continuous-only deployment: navigation commit81fd138 merged on Jetson
+as35eaec8, preserving sonar history.117 current regressions passed locally and
+on Jetson; native GUI/API nominal and Abort simulations passed with underwater
+GPS outage. Legacy switching runtime and executable registration removed; stale
+installed launcher archived outside executable directory. User confirmed floating,
+killed/disarmed. Session pressure baseline997.84228515625hPa applied. Initial DVL
+continuity fault required controlled core restart; subsequent passive check passed
+bridge health, DVL/VN, surface depthabout0.032m, GPS admission and Cube profile.
+Output and supervisor remain disabled. Physical heading reported68deg; observed
+VN263deg and Cube12deg disagree. VN yaw offset readback0.0, roll flipTrue. Heading
+NOT commissioned; no arbitrary correction, arming or mission performed. Persistent
+startup stays continuous observation; surface baseline is session-only. See
+ docs/continuous-only-2026-10-13.md. These are dated observations, not live status.
+
+October 13 rotation check: user ready at requested approximately124deg after
+stationary34deg reference. Fresh VN334.090deg and Cube98.422deg; previous
+VN261.746deg/Cube22.106deg. Observed clockwise changes72.344deg/76.316deg,
+versus requested approximately90deg. Both respond in the same direction, but
+absolute heading remains unvalidated. Approximate physical endpoints do not
+establish sensor scale or justify a fixed yaw offset. No parameter writes.
+
+2026-10-14 offline VN workflow: user reports teammate restored relative mode for
+magnetic interference and selected GPS/DVL surface movement for north alignment.
+Production VN driver now verifies relative mode at connection without saving flash.
+New guided tools/vn_calibrate.py acquires sole-reader lock, backs up registers,
+collects slow3D HSI/six-face coverage and stops learning on interruption; volatile
+only, hardware bench validation pending. Every new core bridge session now needs
+GPS/DVL velocity-vector north alignment before position initialization/odometry.
+No stationary GPS yaw assumption; timing/pressure/GPS/DVL/tilt/rate/speed/dwell gates
+apply. GUI shows alignment status. New checked session commissioning service enables
+supervisor after healthy Cube fusion/aligned odometry and fresh kill/disarm/ESC-off,
+without restarting bridge. Launch flags default output and mission off.130 regression
+tests, browser checks, nominal and Abort native GUI/SITL runs pass; injected40deg
+relative-reference error recovered as-40deg. These are simulated results, not live
+accuracy. Graey offline; SSH timed out. No deployment, live sensor writes, odometry
+activation, arming or vehicle mission. See docs/vn-pretest-workflow-2026-10-14.md.
+Earlier relative-mode diagnosis was overstated: relative mode alone does not prove
+arbitrary yaw/no north reference. Compass disabled/external yaw meant Cube yaw was
+not an independent compass reference in October13 comparisons. North-reference,
+magnetic calibration, mounting/body axes and timing require separate validation.
+
+2026-10-14 GUI follow-up: user explicitly prefers VN-100 as primary external
+attitude source over Cube-derived attitude. This is a design priority, not proof
+that VN is accurate under interference; no covariance weighting was tightened.
+Added /calibration page and main/Waypoint links. GUI jobs suspend mission permission
+and odometry, run HSI calibration in the existing VN reader (no competing serial
+owner), show120s/six-face progress and stop/fail on safety/link/readback problems.
+Prepare requires explicit floating-surface confirmation and stable fresh pressure,
+starts new relative-VN/GPS/DVL north alignment, and waits for killed/disarmed Cube
+fusion verification before checked session mission activation. No arm/mode/ESC
+commands. Bridge reset counter increments on controlled preparation; Cube origin
+stays continuous. Hardware kill/watchdog faults are not cleared by preparation.
+Reproduced/fixed supervisor crash on None VN/DVL received timestamp; regression
+added. New GUI physical calibration/positive commissioning paths await hardware;
+Graey remains offline and changes are not deployed. See docs/calibration-gui-2026-10-14.md.
+
+2026-10-14 tether deployment: navigation through9faf100 merged into Jetson sonar
+history as45b9525; ROS build and142 tests passed on Jetson. Calibration page/API
+HTTP200 and six new maintenance services verified. One fused bridge/supervisor,
+VN relative mode, fresh valid DVL, Cube bridge profile verified. Core remains
+continuous Observation, output disabled, baseline0; no physical calibration,
+preparation, arming or mission. Restart controller selected RF; killed/disarmed
+MANUAL/ESC-off confirmed. Sonar relay and untracked work preserved. Jetson sonar
+history remains additional to online navigation branch, not fully Git-identical.
+See docs/calibration-deployment-2026-10-14.md. These are dated observations.
+
+2026-10-14 repeated Prepare failure resolved: supervisor latched the intentional
+bridge maintenance sentinel. d664f93 skips only that sentinel when supervisor
+inactive AND bridge output disabled; real/active faults remain latched. Source
+merge/restart alone did not update the installed Python copy on this Jetson.
+Rebuilt package, verified installed supervisor maintenance_pause and GUI
+prepared_at code using inspect from /tmp, then restarted supervisor/GUI only.
+147 tests passed on Jetson. Live API Prepare remained busy/preparing after5s,
+GPS qualifying, supervisor no longer Fault. Bridge instance and collected VN
+calibration preserved. No arming/movement/mission; manual north alignment pending.
+Future deployments must rebuild and verify installed imports, not assume symlinks.
+
+2026-10-14 GPS qualification follow-up: d161c6f deployed on Jetson as051877b,
+150 tests passed there. Fix withholds expired measurements but retains good dwell
+within the unchanged receipt-continuity limit; actual quality failures still reset.
+Added progress and last rejection diagnostics. Full observation restart reset
+baseline/north alignment; VN reader reconnects relative without saving flash or
+resetting learned HSI registers, but in-memory six-face coverage returns idle.
+Fresh passive read on continuation: killed/disarmed MANUAL/ESC-off, output off,
+baseline0, GPS position accuracy1.736m, velocity uncertainty0.433m/s. Automatic
+north alignment requires<=0.20m/s, so this receiver reading cannot pass; do not
+keep driving to chase the speed prompt. Reordered alignment checks to show poor
+velocity precision before asking for motion; thresholds unchanged.151 tests pass
+locally, including delayed5Hz packet/20Hz status alignment and rejection priority.
+Live moving alignment and physical mission remain unverified.
+
+2026-10-14 time association follow-up: live last rejection was GPS cannot be
+aligned to DVL/VN history, not DVL-reported uncertainty. Passive ROS topic rate
+about9Hz (intervals85–148ms). A newly received GPS fix can be newer than the last
+DVL history sample beyond the100ms extrapolation limit. Such a fix formerly
+invalidated all GPS qualification. Added bounded deferred association: wait at
+most150ms for a DVL sample, retain original GPS timestamp, recheck measurement
+age<=350ms plus pressure/VN/fault gates, and never apply expired fixes. Missing
+history no longer erases receiver-quality dwell. New rejected fixes clear pending
+work. Simulated low-rate DVL/new GPS ordering completes alignment; queued expired
+fix cannot initialize position.153 tests passed before final queue invalidation
+line; full suite rerun during deployment. GPS velocity uncertainty~0.488m/s remains
+an independent blocker; no accuracy/angular/freshness threshold loosened.
+
+2026-10-14 added stationary known true-heading method to Calibration Prepare,
+with explicit measured-heading confirmation, independent bridge kill/disarm,
+surface/stationary checks and session-only provenance. Does not relax GPS position
+or mission/Cube health gates. GPS velocity precision is not needed for operator
+north reference.161 regressions and Node page check pass; physical capture requires
+user's actual true bearing. See docs/calibration-deployment-2026-10-14.md.
+
+2026-10-14 known-heading feature deployed over tether: navigation through236815a
+merged on Jetson asa2a7ed7, package rebuilt,161 tests passed there. Installed
+service/client imports and served Calibration HTML verified. Live unconfirmed
+known-heading request rejected409 with no job/reference change. Fresh controller
+killed/disarmed MANUAL/ESC-off. Core observation output off, no heading captured;
+operator must supply actual independent true bearing. Backup at
+/home/graey/deployment-backups/20261014-known-heading-234523. Main untouched.
+
+2026-10-14 explicit recovery verified: fixed Prepare's supervisor old-fault race
+in afb9b1f, rebuilt/deployed GUI only (bridge/sensors preserved),163 tests passed
+on Jetson. Recovery using retained true frame completed Ready; bridge fault empty,
+healthy/transmitting, reset_counter3. Cube LOCAL_POSITION_NED fresh age0.171s,
+EKF flags831 accepted, Cube estimate valid and heading288.4deg at that sample.
+Killed/disarmed/ESC-off throughout; no Cube reboot or source/firmware parameter
+write. First stationary check aborted without mutation; subsequent recovery attempt
+failed old supervisor latch before the fix. Original known20deg reference had
+rotated with VN; recovered286.318deg is DERIVED from retained reference, not newly
+measured true north. Preserve this provenance despite generic GUI method label.
+Automatic DVL dropout fault recovery is NOT added: explicit Prepare now recovers
+Cube without core restart. Underwater missing velocity cannot be silently repaired.
+
+2026-10-14 DVL recurrence diagnosed:224 published samples/25s included2 invalid,
+no>=0.5s gaps or regressing timestamps. Added bounded reacquisition: withhold
+invalid odometry; resume after2 consistent valid velocities before0.5s deadline,
+increase uncertainty for unmeasured gap; long loss and other hard faults latch.
+167 tests, native nominal waypoint and native short/long DVL fault injection pass.
+Mission may still abort on real unhealthy data; no silent run restart. See
+ docs/calibration-deployment-2026-10-14.md and committed evidence.
+
+2026-10-14 bounded DVL recovery deployed through ebdcf9c on Jetson as9f100a3.
+ROS build and167 regressions passed on Jetson. Fresh API exposes dvl_continuity,
+VN/DVL inputs fresh, no bridge fault; killed/disarmed ESC-off, RF selected.
+Restart intentionally baseline0/output disabled; known-heading Prepare required.
+Backup /home/graey/deployment-backups/20261014-bounded-dvl-001311. Native simulation
+validated recovery; live postinitialization dropout recovery still awaits wet test.
+No real mission started, no main changes; sonar history/untracked files preserved.
+
+2026-10-14 waypoint interaction simplified: removed user-facing Preview and30s
+selection expiry. Map click retains selected coordinates/depth without POST.
+Start performs fresh server target validation then consumes the returned single-use
+plan; network-ambiguous retries retain the same plan/run identity. Definitively
+rejected validation clears cached token for next explicit Start. Existing backend
+frame/age/readiness/map registration checks remain; no new arm/mode permissions.
+Page tests cover selection surviving60s, no command on map click, validation failure
+not starting, and timeout retry using same plan.167 Python regressions pass; updated
+Node page check passes. Static page deploy needs no GUI/core restart or re-Prepare.
+
+2026-10-14 Start/displacement investigation: user confirmed Pool image mode.
+Live Prepare Ready, bridge healthy/transmitting, Cube local/global fresh, mission
+capability enabled, no active waypoint. Therefore live pool-image restriction and
+selected target are the remaining page blockers, not current supervisor failure.
+Pool screenshot registration is approximate; no registration block bypassed.
+Added explicit view-only dropdown/watermark, disabled-button reason and Use live
+navigation grid button that switches mode and clears old image-derived target;
+operator must select a new target on the grid. Node tests cover this transition.
+GUI Cube marker reads GLOBAL_POSITION_INT, matching QGC Vehicle::_handleGlobalPositionInt
+in official https://github.com/mavlink/qgroundcontrol/blob/master/src/Vehicle/Vehicle.cc.
+Actual user's QGC feed/version was not inspected. Observed Cube global vs local NED
+about[-0.323,-1.055]m vs[-0.324,-1.057]m using Cube origin at one snapshot, consistent
+within centimetres. Pool image displacement mismatch is suspected map registration/
+scale, not a demonstrated EKF scale defect; physical/QGC movement comparison remains.
+
+2026-10-14 added georeferenced online satellite background for live pool waypoint
+selection. Esri World_Imagery tiles use EPSG3857; clicked points become geographic
+plans, separate from old approximate screenshot view. Shows Cube/GPS/track/route,
+loading/errors and provider attribution; offline grid retained. No fusion or live
+mission permission gates bypassed. Browser internet required. Node tests cover
+projection inversion, tile readiness and geographic target submission. See sessiondoc.

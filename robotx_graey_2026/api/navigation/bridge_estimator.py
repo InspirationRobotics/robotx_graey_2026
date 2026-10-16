@@ -7,6 +7,7 @@ No Cube position is used as a measurement. Origin is immutable frame metadata.
 from collections import deque
 import math
 from .gps_admission import GPSAdmission
+from .north_alignment import NorthAlignment
 
 
 def wrap(deg):
@@ -35,9 +36,13 @@ def rotate(q, v, inverse=False):
 
 
 class BridgeEstimator:
-    def __init__(self, heading_validated=False):
+    def __init__(self, heading_validated=False, auto_north_alignment=False):
         self.gps = GPSAdmission()
         self.heading_validated = heading_validated
+        self.north_alignment = NorthAlignment() if auto_north_alignment else None
+        if auto_north_alignment:
+            self.heading_validated = False
+        self.north_offset = 0.
         self.origin = None
         self.initialized = False
         self.position = [0., 0., 0.]
@@ -48,6 +53,10 @@ class BridgeEstimator:
         self.heading_bias = 0.
         self.imu_at = self.motion_at = self.depth_at = None
         self.motion_valid = False
+        self.dvl_good_at = None
+        self.dvl_gap_start = None
+        self.dvl_recovery_count = 0
+        self.dvl_dropouts = 0
         self.depth = None
         self.surface = None
         self.shallow_since = self.deep_since = None
@@ -55,6 +64,8 @@ class BridgeEstimator:
         self.horizontal_variance = 9.
         self.distance_travelled = 0.
         self.last_fix = None
+        self.last_observed_gps = None
+        self.pending_gps = None
         self.last_correction = None
         self.heading_since = None
         self.heading_count = 0
@@ -118,12 +129,35 @@ class BridgeEstimator:
         if not valid or (dt is not None and not 0 < dt < .5):
             self.gps.invalidate('DVL continuity lost; GPS must requalify')
             self.history.clear()
-            if self.initialized:
+            if self.initialized and self.dvl_gap_start is None:
+                self.dvl_gap_start = self.dvl_good_at if self.dvl_good_at is not None else self.motion_at
+                self.dvl_dropouts += 1
+                self.dvl_recovery_count = 0
+            if self.initialized and (self.dvl_gap_start is None or now-self.dvl_gap_start >= .5):
                 self.fault = 'DVL continuity lost; position uncertainty requires revalidation'
         self.motion_valid = bool(valid)
         self.motion_at = now
         if not valid:
+            self.pending_gps = None
+            self.dvl_recovery_count = 0
             return
+        recovering = self.dvl_gap_start is not None
+        if recovering:
+            gap = now-self.dvl_gap_start
+            if gap >= .5:
+                self.fault = 'DVL continuity lost; position uncertainty requires revalidation'
+            elif not self.fault:
+                if self.dvl_recovery_count and max(abs(a-b) for a,b in zip(velocity,self.raw_velocity))>.2:
+                    self.dvl_recovery_count=0
+                if self.dvl_recovery_count == 0:
+                    # No invented velocity or catch-up translation for the gap.
+                    # Conservative 5m/s displacement budget, not measured error.
+                    self.horizontal_variance = min(10000.,self.horizontal_variance+(5.*gap)**2)
+                    dt = None
+                self.dvl_recovery_count += 1
+                if self.dvl_recovery_count >= 2:
+                    self.dvl_gap_start = None
+        self.dvl_good_at = now
         self.raw_velocity = tuple(velocity)
         if self.initialized and not self.fresh(self.imu_at, now):
             self.fault = 'VN stale; position propagation stopped'
@@ -136,9 +170,54 @@ class BridgeEstimator:
                 self.horizontal_variance = min(10000., self.horizontal_variance+.02*dt+.01*dt*dt)
         self.history.append(dict(t=now, position=tuple(self.position), q=self.orientation(),
                                  raw_velocity=self.raw_velocity, rates=self.rates))
+        if self.pending_gps is not None:
+            received, fix = self.pending_gps
+            age = self.gps.clock.age(fix['cube_fix_time_us'],now)
+            if (now-received > .15 or age is None or age > self.gps.max_age
+                    or not self.gps_eligible(now) or self.fault
+                    or not self.fresh(self.imu_at,now)):
+                self.pending_gps = None
+            else:
+                self.apply_gps(now,fix)
 
     def orientation(self):
-        return yaw_rotate(self.raw_q, self.heading_bias)
+        return yaw_rotate(self.raw_q, self.north_offset+self.heading_bias)
+
+    def align_known_heading(self, now, degrees):
+        if (isinstance(degrees,bool) or not isinstance(degrees,(int,float))
+                or not math.isfinite(degrees) or not 0 <= degrees < 360):
+            raise ValueError('Enter a true heading from 0 inclusive to 360 exclusive')
+        if self.initialized or self.heading_validated or self.north_alignment is None:
+            raise ValueError('Run Prepare again before changing the north reference')
+        if self.fault or not self.gps_eligible(now):
+            raise ValueError(self.fault or 'Prepare at the floating surface first')
+        rows=[r for r in self.history if 0 <= now-r['t'] <= 2.]
+        if (len(rows)<10 or rows[-1]['t']-rows[0]['t']<1.5
+                or now-rows[-1]['t']>.25 or not self.fresh(self.imu_at,now)
+                or not self.motion_valid):
+            raise ValueError('Hold stationary for two seconds with fresh VN and DVL bottom lock')
+        for row in rows:
+            w,x,y,z=row['q']
+            if (math.sqrt(sum(v*v for v in row['raw_velocity']))>.05
+                    or max(abs(math.degrees(v)) for v in row['rates'])>2.
+                    or 1-2*(x*x+y*y)<math.cos(math.radians(15))):
+                raise ValueError('Keep Graey level and stationary while capturing true heading')
+            if abs(wrap(yaw(row['q'])-yaw(self.raw_q)))>3.:
+                raise ValueError('VN heading changing; hold the nose still before capture')
+        offset=wrap(degrees-yaw(self.raw_q))
+        self.north_offset=offset
+        self.heading_validated=True
+        self.north_alignment.offset=offset
+        self.north_alignment.method='Operator measured true heading'
+        self.north_alignment.reference=dict(true_heading_deg=degrees,vn_heading_deg=yaw(self.raw_q),
+                                            captured_monotonic=now)
+        self.north_alignment.reason=f'True heading {degrees:.1f} deg captured; independently verify alignment'
+        self.position[:2]=[0.,0.]
+        self.pending_gps=None
+        for row in self.history:
+            row['position']=(0.,0.,row['position'][2])
+            row['q']=yaw_rotate(row['q'],offset)
+        return self.north_alignment.reason
 
     def velocity(self):
         return tuple(a+b for a, b in zip(self.raw_velocity, self.velocity_bias))
@@ -157,6 +236,7 @@ class BridgeEstimator:
         return None
 
     def observe_gps(self, now, fix):
+        self.last_observed_gps = dict(fix)
         duplicate = fix['cube_fix_time_us'] == self.gps.last_fix and fix['fix'] >= 3
         self._previous_anchors = self.gps.quality.anchors.copy()
         eligible = self.gps_eligible(now) and not self.fault
@@ -167,14 +247,51 @@ class BridgeEstimator:
                           age_upper_s=self.gps.age_bound, depth_m=self.depth)
         if not good:
             if not duplicate:
+                self.pending_gps = None
+            if self.north_alignment and not self.heading_validated and not duplicate:
+                self.north_alignment.reject(self.gps.reason)
+            if not duplicate:
                 self.heading_since, self.heading_count = None, 0
             return False
+        self.pending_gps = None
+        return self.apply_gps(now,fix)
+
+    def apply_gps(self, now, fix):
         if self.origin is None:
             return self.reject('Cube geographic origin unavailable')
         sample_time = fix['cube_fix_time_us']/1e6+self.gps.clock.offset
         sample = self.at(sample_time)
         if sample is None:
-            return self.reject('GPS cannot be aligned to DVL/VN history')
+            # A fix may precede the next ~9Hz DVL publication. Wait for a
+            # bracketing sample instead of extrapolating or resetting GPS dwell.
+            if self.history and self.history[-1]['t'] < sample_time <= now:
+                if self.pending_gps is None:
+                    self.pending_gps = (now,dict(fix))
+                reason='Waiting for next DVL sample to time-align GPS'
+            else:
+                self.pending_gps = None
+                reason='GPS cannot be aligned to DVL/VN history'
+            self.event.update(decision='deferred',reason=reason)
+            if self.north_alignment and not self.heading_validated:
+                self.north_alignment.reason=reason
+            return False
+        self.pending_gps = None
+        if self.north_alignment and not self.heading_validated:
+            aligned = self.north_alignment.observe(now, fix,
+                rotate(sample['q'], sample['raw_velocity']), sample['rates'], sample['q'])
+            if not aligned:
+                self.event.update(decision='aligning', reason=self.north_alignment.reason)
+                return False
+            # No external output/position initialization is permitted before
+            # alignment. Discard coordinates integrated in the relative frame;
+            # the first admitted fix anchors north/east in the corrected frame.
+            self.north_offset = self.north_alignment.offset
+            self.heading_validated = True
+            self.position[:2] = [0., 0.]
+            for row in self.history:
+                row['position'] = (0., 0., row['position'][2])
+                row['q'] = yaw_rotate(row['q'], self.north_offset)
+            sample = self.at(sample_time)
         lat, lon, _ = self.origin
         gps_ne = ((fix['lat']-lat)*111320.,
                   ((fix['lon']-lon+180)%360-180)*111320.*math.cos(math.radians(lat)))
@@ -246,23 +363,33 @@ class BridgeEstimator:
         if not self.gps_eligible(now):
             self.gps.invalidate('Pressure surface eligibility unavailable')
             self.heading_since, self.heading_count = None, 0
-        if self.initialized and (not self.fresh(self.motion_at, now) or not self.fresh(self.imu_at, now)):
-            self.fault = self.fault or 'DVL/VN freshness lost; revalidate navigation'
+        if self.initialized and not self.fresh(self.imu_at, now):
+            self.fault = self.fault or 'VN freshness lost; revalidate navigation'
+        if self.initialized and self.dvl_good_at is not None and now-self.dvl_good_at >= .5:
+            self.fault = self.fault or 'DVL continuity lost; position uncertainty requires revalidation'
         healthy = (self.initialized and not self.fault and self.motion_valid
+                   and self.dvl_gap_start is None
                    and self.fresh(self.motion_at, now) and self.fresh(self.imu_at, now)
                    and self.fresh(self.depth_at, now))
         gps = self.gps.status(now)
         gps.update(fix=self.last_fix, applied_recently=self.last_correction is not None
                    and 0 <= now-self.last_correction <= .35)
+        if self.north_alignment and not self.heading_validated:
+            healthy = False
         return dict(healthy=bool(healthy), navigation_valid=bool(healthy and self.horizontal_variance <= 25.),
                     fault=self.fault, initialized=self.initialized,
+                    dvl_continuity=dict(recovering=self.dvl_gap_start is not None,
+                        dropouts=self.dvl_dropouts,valid_recovery_samples=self.dvl_recovery_count,
+                        maximum_gap_s=.5, missing_displacement_budget_mps=5.),
                     depth_m=self.depth if self.fresh(self.depth_at, now) else None,
                     surfaced=self.surface if self.fresh(self.depth_at, now) else None,
                     gps_eligible=self.gps_eligible(now), gps_admission=gps,
+                    gps_observation=self.last_observed_gps,
                     position_ned=list(self.position), distance_travelled_m=self.distance_travelled,
                     position_sigma_m=math.sqrt(self.horizontal_variance),
                     heading_bias_deg=self.heading_bias, velocity_bias_mps=list(self.velocity_bias),
-                    heading_reference_validated=self.heading_validated)
+                    heading_reference_validated=self.heading_validated,
+                    north_alignment=self.north_alignment.status() if self.north_alignment else None)
 
     def covariance(self):
         cov = [0.]*21

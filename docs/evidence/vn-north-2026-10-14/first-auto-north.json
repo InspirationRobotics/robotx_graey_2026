@@ -1,0 +1,161 @@
+{
+  "passed": true,
+  "continuous": true,
+  "stages": [
+    "STARTING",
+    "WAIT_SURFACE",
+    "PREPARE",
+    "GUIDED",
+    "ARM",
+    "DIVE",
+    "TRANSIT",
+    "SURFACE",
+    "DISARM",
+    "RECOVER_GPS",
+    "COMPLETE"
+  ],
+  "gps_outage_seen": true,
+  "underwater_cube_seen": true,
+  "last_retry": "<urlopen error [Errno 111] Connection refused>",
+  "alignment_progress": {
+    "aligned": false,
+    "offset_deg": null,
+    "reason": "Collecting north alignment: 4.8/5 s; 3.9/2.5 m",
+    "samples": 25,
+    "method": "GPS/DVL velocity vectors",
+    "persistence": "bridge session only"
+  },
+  "north_alignment": {
+    "aligned": true,
+    "offset_deg": -40.0,
+    "reason": "North aligned from GPS/DVL velocity; session reference, not surveyed accuracy",
+    "samples": 27,
+    "method": "GPS/DVL velocity vectors",
+    "persistence": "bridge session only"
+  },
+  "duplicate_idempotent": true,
+  "mission": {
+    "run_id": "f579acf153294adc9ce8342af8c68558",
+    "stage": "COMPLETE",
+    "reason": "Surfaced at waypoint and disarmed; GPS recovered",
+    "plan": {
+      "lat": 32.92371217472927,
+      "lon": -117.03851279806408,
+      "depth_m": 0.5,
+      "map": "geographic"
+    },
+    "surface_start": [
+      32.9237033,
+      -117.0385235
+    ],
+    "start_cube": [
+      10.113105773925781,
+      0.0034622924868017435,
+      -0.09188924729824066
+    ],
+    "target_cube": [
+      11.095740107327735,
+      1.0000009750026415,
+      0.40811075270175934
+    ],
+    "surface_down": -0.09188924729824066,
+    "heading_rad": 0.0010043985676020384,
+    "complete": true,
+    "simulation": true,
+    "published_monotonic": 63.357181964,
+    "telemetry_fresh": true,
+    "confirmed_source": "Continuous fusion"
+  },
+  "supervisor": {
+    "state": "GPS aiding admitted",
+    "reason": "GPS admitted",
+    "mode": "Active",
+    "fusion_policy": "continuous",
+    "requested_source": "Continuous fusion",
+    "confirmed_source": "Continuous fusion",
+    "navigation_ready": true,
+    "surfaced": true,
+    "surface_state": "Surfaced",
+    "run_id": "f579acf153294adc9ce8342af8c68558",
+    "reference": {
+      "schema": 1,
+      "reference_id": "542efd53-e9c1-4919-b37a-3f45b45724c0",
+      "run_id": "f579acf153294adc9ce8342af8c68558",
+      "vehicle_epoch": "e4cc972c-f1e8-4f98-80c7-ea1a01d49b15",
+      "gps_lat": 32.9237035,
+      "gps_lon": -117.0385235,
+      "gps_msl_alt": -0.13,
+      "gps_accuracy_m": 0.3,
+      "gps_time_us": 35420000,
+      "cube_ned": [
+        10.106236457824707,
+        0.0031532265711575747,
+        -0.09204139560461044
+      ],
+      "captured_utc": "2026-10-15T02:43:37.054009+00:00"
+    },
+    "mission_ned": [
+      0.8926792144775391,
+      0.8936751268338412,
+      -0.00608748197555542
+    ],
+    "reference_current": true,
+    "depth_m": 0.0,
+    "gps_qualified_input": true,
+    "gps_quality_reason": "GPS admitted; Cube-fix timing approximation",
+    "configuration_verified": true,
+    "target_gps": {
+      "lat": 32.92371217472927,
+      "lon": -117.03851279806408,
+      "depth_m": 0.5,
+      "map": "geographic"
+    },
+    "gps_admission": {
+      "qualified": true,
+      "reason": "GPS admitted; Cube-fix timing approximation",
+      "cube_fix_age_upper_s": 0.1572732465542015,
+      "timing_basis": "Cube last-fix time; not receiver epoch",
+      "receiver_delay_bound_s": null,
+      "fault": "",
+      "fix": {
+        "cube_fix_time_us": 56220000,
+        "received": 63.328705019,
+        "lat": 32.9237115,
+        "lon": -117.0385138,
+        "alt": -0.17,
+        "fix": 6,
+        "accuracy": 0.3,
+        "speed_mps": 0.04,
+        "course_deg": 219.71,
+        "speed_accuracy_mps": 0.04
+      },
+      "applied_recently": true
+    },
+    "dive_heading_check": {
+      "state": "Skipped",
+      "allowed": true,
+      "reason": "GPS course unreliable at this speed; using validated attitude",
+      "course_deg": null,
+      "vn_error_deg": null,
+      "cube_error_deg": null,
+      "correction_applied": false
+    },
+    "north_alignment": {
+      "aligned": true,
+      "offset_deg": -40.0,
+      "reason": "North aligned from GPS/DVL velocity; session reference, not surveyed accuracy",
+      "samples": 27,
+      "method": "GPS/DVL velocity vectors",
+      "persistence": "bridge session only"
+    },
+    "published_monotonic": 63.415085729
+  },
+  "final_local": [
+    10.998915672302246,
+    0.8968283534049988,
+    -0.09812887758016586
+  ],
+  "final_target_error_m": 0.1414904981450541,
+  "independent_clock_gaps": [],
+  "wall_clock_adjustments": []
+}

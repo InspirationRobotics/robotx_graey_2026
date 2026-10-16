@@ -18,8 +18,10 @@ enable odometry and verify healthy stable Cube position/depth/heading; disarmed
 submerged/surfaced continuity check; enable commissioned supervisor/mission;
 validate map target and abort; short dive/transit/surface mission with logs.
 
-Pending before live mission: full ROS/native integration and moving waypoint
-simulation; actual heading and map validation. Stationary native SITL passed,
-but does not satisfy these. Temporary runtime launch overrides expire at reboot;
+Native ROS/GUI nominal and Abort moving missions passed October 13; see continuous-only-2026-10-13.md. Still pending: physical heading and map validation, live Cube odometry commissioning and submerged continuity checks. Temporary runtime launch overrides expire at reboot;
 Cube external-only parameters persist, so never assume reboot restores the old
 working navigation path. No output must be mistaken for a ready Cube estimate.
+
+
+
+October14 update: use vn-pretest-workflow-2026-10-14.md for the current relative-VN north-alignment and checked activation workflow. Graey remains undeployed/offline in this session.

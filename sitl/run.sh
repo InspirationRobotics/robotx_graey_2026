@@ -110,6 +110,8 @@ source install/setup.bash
 ros2 launch robotx_graey_2026 sitl.launch.py \
   interactive_waypoint:="${WAYPOINT_INTERACTIVE:-false}" \
   continuous_fusion:="true" \
+  auto_north_alignment:="${AUTO_NORTH_ALIGNMENT:-false}" \
+  relative_yaw_offset_deg:="${RELATIVE_YAW_OFFSET_DEG:-0.0}" \
   surface_pressure_hpa:="${SURFACE_PRESSURE_HPA:-1013.25}" \
   supervisor_mavlink:="${SUPERVISOR_MAVLINK:-udpout:127.0.0.1:14557}" \
   result_file:="$LOG_DIR/scenario-result.json" \

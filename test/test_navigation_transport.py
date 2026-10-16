@@ -32,7 +32,7 @@ class TelemetryTests(unittest.TestCase):
         self.s.settings = dict(pressure_message='SCALED_PRESSURE2', surface_pressure_hpa=0.0, water_density=1025.0)
         self.s.boot_ms = self.s.cube_origin = self.s.last_gps = self.s.last_gps_time = None
         self.s.epoch = 'original'
-        self.s.logic = NS(fault='')
+        self.s.logic = NS(fault='',active=False)
         self.s.logic.pending = None
         self.s.switch_trace = None
         self.s.get_logger = Mock(return_value=Mock())
@@ -63,6 +63,28 @@ class TelemetryTests(unittest.TestCase):
         self.receive('GPS_GLOBAL_ORIGIN', latitude=1, longitude=2, altitude=3)
         self.receive('GPS_GLOBAL_ORIGIN', latitude=2, longitude=2, altitude=3)
         self.assertIn('origin changed', self.s.logic.fault)
+
+    def test_observation_maintenance_pause_does_not_latch_but_real_faults_do(self):
+        row=dict(instance='one',fusion_policy='bridge_odometry',published_monotonic=10.,
+                 enabled=False,fault='Navigation maintenance; Prepare required before reuse')
+        self.s.bridge_status(NS(data=json.dumps(row)))
+        self.assertEqual(self.s.logic.fault,'')
+        row.update(enabled=True,fault='')
+        self.s.bridge_status(NS(data=json.dumps(row)))
+        self.assertEqual(self.s.logic.fault,'')
+        row.update(enabled=False,fault='DVL continuity fault')
+        self.s.bridge_status(NS(data=json.dumps(row)))
+        self.assertEqual(self.s.logic.fault,'DVL continuity fault')
+        row['fault']='Navigation maintenance; Prepare required before reuse'
+        self.s.bridge_status(NS(data=json.dumps(row)))
+        self.assertEqual(self.s.logic.fault,'DVL continuity fault')
+
+    def test_maintenance_pause_during_active_navigation_still_latches(self):
+        self.s.logic.active=True
+        row=dict(instance='one',fusion_policy='bridge_odometry',published_monotonic=10.,
+                 enabled=False,fault='Navigation maintenance; Prepare required before reuse')
+        self.s.bridge_status(NS(data=json.dumps(row)))
+        self.assertEqual(self.s.logic.fault,row['fault'])
 
     def test_uninitialized_or_constant_position_ekf_is_not_healthy(self):
         for flags in (1 | 2 | 8 | 32 | 32768, 1 | 2 | 8 | 32 | 128):

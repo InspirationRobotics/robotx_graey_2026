@@ -55,6 +55,7 @@
   <button data-panel="sensors" onclick="show('sensors')">Sensors</button>
   <button data-panel="gps" onclick="show('gps')">Navigation</button>
   <button data-panel="waypoint" onclick="show('waypoint')">Waypoint mission</button>
+  <button onclick="location.href='/calibration'">Calibrate / Prepare</button>
   <button data-panel="supervisor" onclick="show('supervisor')">Navigation Supervisor</button>
   <button data-panel="camera" onclick="show('camera')">Camera</button>
   <button data-panel="sonar" onclick="show('sonar')">Sonar</button>
@@ -274,7 +275,7 @@ async function refreshStatus(){
       ['DVL A50',   s.dvl_lock ? ('bottom lock, ' + s.altitude.toFixed(2) + ' m altitude')
                                : 'no bottom lock', s.dvl_age],
       ['VN-100',    (s.heading === null) ? 'no data'
-                                         : (s.heading.toFixed(1) + '° heading'), s.hdg_age],
+                                         : (s.heading.toFixed(1) + '° sensor heading; north alignment shown on Waypoint'), s.hdg_age],
       ['Depth (Bar30)', s.depth.toFixed(2) + ' m', s.mav_age],
       ['Pixhawk',   (s.armed ? 'ARMED' : 'disarmed') + ', ' + s.mode, s.mav_age],
       ['Status LED', s.led, s.led_age]
