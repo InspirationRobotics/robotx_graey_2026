@@ -162,7 +162,10 @@ class NavigationSupervisor(Node):
             self.put('heading_vn', d.get('heading_vn'))
             self.put('heading_dvl', d.get('heading_dvl'))
             gps = d.get('gps_admission') or {}
-            good = bool(gps.get('qualified') and gps.get('applied_recently') and d.get('transmitting'))
+            stationary_fix = bool((d.get('stationary_hold') or {}).get('active')
+                                  and gps.get('stationary_validated_recently') and d.get('healthy'))
+            good = bool(gps.get('qualified') and (gps.get('applied_recently') or stationary_fix)
+                        and d.get('transmitting'))
             self.put('gps_good', good)
             self.put('gps_reason', gps.get('reason', 'Bridge GPS unavailable'))
             self.put('gps_admission', gps)

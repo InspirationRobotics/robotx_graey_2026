@@ -188,6 +188,40 @@ class EstimatorTests(unittest.TestCase):
             self.step(heading=10.)
         self.assertEqual(self.e.heading_bias, 0.)
 
+    def test_stationary_dvl_blocks_slow_gps_drift_without_freezing_movement(self):
+        self.acquire()
+        for _ in range(50):self.step()
+        self.assertTrue(self.e.status(self.t)['stationary_hold']['active'])
+        before=tuple(self.e.position[:2]);correction=self.e.last_correction
+        for i in range(200):self.step(north=i*.005)
+        self.assertEqual(tuple(self.e.position[:2]),before)
+        self.assertEqual(self.e.velocity(),(0.,0.,0.))
+        self.assertEqual(self.e.last_correction,correction)
+        self.assertTrue(self.e.status(self.t)['healthy'])
+        self.assertTrue(self.e.status(self.t)['gps_admission']['stationary_validated_recently'])
+        self.assertFalse(self.e.status(self.t)['gps_admission']['applied_recently'])
+        self.step(gps=False,speed=.2)
+        self.assertFalse(self.e.status(self.t)['stationary_hold']['active'])
+        self.assertGreater(self.e.position[0],before[0])
+
+    def test_stationary_hold_releases_on_invalid_dvl_or_stale_vn(self):
+        self.acquire()
+        for _ in range(50):self.step()
+        self.e.dvl(self.t+.05,(),False)
+        self.assertIsNone(self.e.stationary_anchor)
+        for _ in range(60):self.step()
+        self.assertTrue(self.e.status(self.t)['stationary_hold']['active'])
+        self.e.status(self.t+.6)
+        self.assertIsNone(self.e.stationary_anchor)
+
+    def test_stationary_hold_never_prevents_first_gps_anchor(self):
+        for _ in range(100):self.step(gps=False)
+        self.assertFalse(self.e.initialized)
+        self.assertIsNone(self.e.stationary_anchor)
+        for _ in range(100):self.step(north=3.)
+        self.assertTrue(self.e.initialized)
+        self.assertAlmostEqual(self.e.position[0],3.,places=2)
+
     def test_heading_and_velocity_updates_need_sustained_forward_motion(self):
         # Exercise the motion update independently of the geographic trajectory.
         e = self.e

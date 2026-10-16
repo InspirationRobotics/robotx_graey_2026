@@ -996,3 +996,11 @@ These measure consistency only; no independent physical heading/displacement
 reference supplied. Operator says DVL error slight, prioritize graphic heading.
 Also deployed recovery disabled-reason textb70df32: initial post-restart Prepare
 required when no baseline/north exists; no fault bypass introduced.
+
+2026-10-15 implemented DVL stationary position hold: after initialization, two
+seconds of fresh valid bottom lock <=0.03m/s and low VN rotation holds bridge NE
+and zero velocity, withholding GPS translation/bias corrections. Movement, invalid
+DVL or stale VN/pressure releases hold. Raw GPS stays visible/quality checked.
+No Cube origin reset, direct GPS fusion or heading tuning.182 regressions and
+page check passed; native mission/deployment results in stationary-position-hold
+session document. Very slow actual movement below3cm/s may be treated as rest.

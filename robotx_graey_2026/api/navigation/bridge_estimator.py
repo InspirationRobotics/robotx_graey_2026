@@ -52,6 +52,9 @@ class BridgeEstimator:
         self.velocity_bias = [0., 0., 0.]
         self.heading_bias = 0.
         self.heading_continuity_lost = False
+        self.stationary_since = None
+        self.stationary_anchor = None
+        self.last_stationary_fix_at = None
         self.imu_at = self.motion_at = self.depth_at = None
         self.motion_valid = False
         self.dvl_good_at = None
@@ -131,6 +134,7 @@ class BridgeEstimator:
         dt = now-self.motion_at if self.motion_at is not None else None
         self.gps.quality.motion(now, velocity, valid)
         if not valid or (dt is not None and not 0 < dt < .5):
+            self.stationary_since = self.stationary_anchor = None
             self.gps.invalidate('DVL continuity lost; GPS must requalify')
             self.history.clear()
             if self.initialized and self.dvl_gap_start is None:
@@ -165,6 +169,16 @@ class BridgeEstimator:
         self.raw_velocity = tuple(velocity)
         if self.initialized and not self.fresh(self.imu_at, now):
             self.fault = 'VN stale; position propagation stopped'
+        still = (self.initialized and not self.fault and self.dvl_gap_start is None
+                 and self.fresh(self.imu_at, now) and self.fresh(self.depth_at, now)
+                 and math.sqrt(sum(v*v for v in velocity)) <= .03
+                 and max(abs(math.degrees(v)) for v in self.rates) <= 2.)
+        if still:
+            self.stationary_since = now if self.stationary_since is None else self.stationary_since
+            if now-self.stationary_since >= 2. and self.stationary_anchor is None:
+                self.stationary_anchor = tuple(self.position[:2])
+        else:
+            self.stationary_since = self.stationary_anchor = None
         if self.fresh(self.imu_at, now) and dt is not None and 0 < dt < .5 and not self.fault:
             world = rotate(self.orientation(), self.velocity())
             for i in (0, 1):
@@ -208,6 +222,7 @@ class BridgeEstimator:
         self.gps = GPSAdmission()
         self.gps.clock = clock
         self.initialized = False
+        self.stationary_since = self.stationary_anchor = None
         self.position[:2] = [0., 0.]
         self.horizontal_variance = 9.
         self.velocity_bias = [0., 0., 0.]
@@ -255,6 +270,8 @@ class BridgeEstimator:
         return self.north_alignment.reason
 
     def velocity(self):
+        if self.stationary_anchor is not None:
+            return (0., 0., 0.)
         return tuple(a+b for a, b in zip(self.raw_velocity, self.velocity_bias))
 
     def at(self, stamp):
@@ -336,6 +353,11 @@ class BridgeEstimator:
             limit = min(5., max(2., 3*math.sqrt(self.horizontal_variance+fix['accuracy']**2)))
             if magnitude > limit:
                 return self.reject('GPS disagrees with propagated position; no reset applied')
+            if self.stationary_anchor is not None:
+                self.last_fix = dict(fix)
+                self.last_stationary_fix_at = now
+                self.event.update(decision='withheld', reason='DVL stationary hold; GPS position correction withheld')
+                return False
             gain = min(self.horizontal_variance/(self.horizontal_variance+fix['accuracy']**2),
                        .1/max(magnitude, .000001))
             delta = [gain*v for v in residual]
@@ -395,6 +417,9 @@ class BridgeEstimator:
                 self.velocity_bias[i] = max(-.15, min(.15, self.velocity_bias[i]+.05*innovation))
 
     def status(self, now):
+        if (not self.motion_valid or not self.fresh(self.motion_at,now)
+                or not self.fresh(self.imu_at,now) or not self.fresh(self.depth_at,now) or self.fault):
+            self.stationary_since = self.stationary_anchor = None
         if not self.gps_eligible(now):
             self.gps.invalidate('Pressure surface eligibility unavailable')
             self.heading_since, self.heading_count = None, 0
@@ -409,7 +434,9 @@ class BridgeEstimator:
                    and self.fresh(self.depth_at, now))
         gps = self.gps.status(now)
         gps.update(fix=self.last_fix, applied_recently=self.last_correction is not None
-                   and 0 <= now-self.last_correction <= .35)
+                   and 0 <= now-self.last_correction <= .35,
+                   stationary_validated_recently=self.stationary_anchor is not None
+                   and self.last_stationary_fix_at is not None and 0 <= now-self.last_stationary_fix_at <= .35)
         if self.north_alignment and not self.heading_validated:
             healthy = False
         return dict(healthy=bool(healthy), navigation_valid=bool(healthy and self.horizontal_variance <= 25.),
@@ -426,6 +453,10 @@ class BridgeEstimator:
                     heading_bias_deg=self.heading_bias, velocity_bias_mps=list(self.velocity_bias),
                     heading_reference_validated=self.heading_validated,
                     heading_continuity_lost=self.heading_continuity_lost,
+                    stationary_hold=dict(active=self.stationary_anchor is not None,
+                        dwell_s=max(0.,now-self.stationary_since) if self.stationary_since is not None else 0.,
+                        anchor_ne=self.stationary_anchor, speed_threshold_mps=.03,
+                        reason='DVL stationary; GPS translation withheld' if self.stationary_anchor is not None else 'Waiting for two seconds of stationary valid DVL/VN'),
                     north_alignment=self.north_alignment.status() if self.north_alignment else None)
 
     def covariance(self):
