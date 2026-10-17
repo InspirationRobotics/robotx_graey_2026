@@ -105,6 +105,7 @@ mission_base.RESEND_S = 20.0
 SETTLE_S = 6.0          # after a scan: the last sweep lands and the outlines refresh
 DESCEND_SECTOR = '240 300'   # +-30 deg either side of straight down, so sweeps come fast
 BELOW_RADIUS_M = 1.0    # echoes this close to straight below count as "below"
+MODE_POSHOLD = 16       # ArduSub custom mode number (mode.h)
 
 
 SIDE_WINDOW_DEG = 60.0  # pool plan: the pick's nearest point this close to straight out the sonar's side
@@ -276,6 +277,8 @@ class PipelineMission(MissionBase):
         p('camera_fwd_m', 0.22)             # camera ahead of the sub's centre (sonar 0.42, camera 0.2 behind it)
         p('boxes_expected', 4)              # the handbook's light boxes
         p('follow_toward', -1.0)            # deg: start along the pipe toward this heading; -1 = its longer part
+        p('follow_end', 'poshold')          # 'poshold': hand over armed in POSHOLD when the follow ends (Ruth,
+                                            # Oct 16: GUIDED drifted into the wall at the end); 'surface': disarm
         # ---- after the scan: look again from over the likely spots (Ruth, Oct 16) ----
         p('spot_check', True)               # pool_after_pick:=follow only
         p('spot_count', 3)                  # at most this many spots, best scoring first
@@ -326,6 +329,9 @@ class PipelineMission(MissionBase):
         self.follow_max, self.follow_time = float(g('follow_max_m')), float(g('follow_time_s'))
         self.follow_both, self.follow_toward = bool(g('follow_both_ways')), float(g('follow_toward'))
         self.follow_turn = g('follow_turn').strip().lower()
+        self.follow_end = g('follow_end').strip().lower()
+        if self.follow_end not in ('poshold', 'surface'):
+            raise ValueError(f"follow_end must be poshold or surface, not {self.follow_end!r}")
         if self.follow_turn not in ('return', 'spot'):
             raise ValueError(f"follow_turn must be return or spot, not {self.follow_turn!r}")
         self.follow_backup, self.return_speed = float(g('follow_backup_m')), float(g('follow_return_speed'))
@@ -607,6 +613,11 @@ class PipelineMission(MissionBase):
 
         elif ph == 'follow backup':
             self.follow_back_up()
+
+        elif ph == 'poshold':
+            if self.now() - self.poshold_t > 1.0:     # a dropped command: ask again
+                self.link.set_mode(MODE_POSHOLD)
+                self.poshold_t = self.now()
 
         elif ph == 'stopped':
             self.goto_ned(*self.hold, 'hold')
@@ -1157,8 +1168,13 @@ class PipelineMission(MissionBase):
         elif now - self.f_t0 > self.follow_time:
             why = f'{self.follow_time:.0f} s of following'
         if why:
-            self.get_logger().info(f'follow done: {why}; {self.f_dist:.1f} m along the pipe - holding, then surfacing')
+            poshold = self.follow_end == 'poshold' and not self.dry
+            self.get_logger().info(f'follow done: {why}; {self.f_dist:.1f} m along the pipe - '
+                                   + ('switching to POSHOLD, take over with the remote' if poshold else 'holding, then surfacing'))
             self.stop_camera()
+            if poshold:
+                self.end_in_poshold()
+                return
             if self.cur and not self.dry:
                 self.hold_here(self.cur[2], 'hold')
             self.to_phase('stopped')
@@ -1210,6 +1226,19 @@ class PipelineMission(MissionBase):
                 f'{"right" if self.f_lat >= 0 else "left"} of the sonar, {v:.2f} m/s, sweep {self.f_period:.1f} s'
                 + (f', last seen {now - seen:.0f} s ago' if now - seen > 3 else '')
                 + (' (dry run: drive it there)' if self.dry else ''))
+
+    def end_in_poshold(self):
+        """Hand the sub over armed and holding: MissionBase sees the mode leave GUIDED and
+        ends the mission without disarming, as when the pilot takes over."""
+        if self.recording:
+            try:
+                self.map_post('/record', 'stop')
+                self.recording = False
+            except OSError:
+                pass
+        self.link.set_mode(MODE_POSHOLD)
+        self.poshold_t = self.now()
+        self.to_phase('poshold')
 
     # ---- the other part, Ruth's way: back to the start, turn 180, back up, follow ----
     def walk_to(self, goal, speed, yaw_d, label):
