@@ -32,6 +32,15 @@ async function render(state){
  const recovery={controller:safe,job:{phase:'ready'},navigation:{streams:{bridge:{fresh:true,data:{fault:'DVL continuity lost; position uncertainty requires revalidation',heading_reference_validated:true,heading_continuity_lost:false,inputs:{vn:true,dvl:true}}}}}};
  page=await render(recovery);e=page.elements;assert(e.recoverDvl.disabled);e.surfaceConfirm.checked=true;e.surfaceConfirm.onchange();assert(!e.recoverDvl.disabled);
  await e.recoverDvl.onclick();assert.equal(page.posts[0].action,'recover_dvl');assert(page.posts[0].surface_confirmed);
+ const auto={controller:{...safe,armed:true,sa_active:false,esc_commanded_on:true,mode:'MANUAL'},job:{action:'prepare',alignment_mode:'gps',busy:true},navigation:{streams:{bridge:{fresh:true,data:{gps_eligible:true,inputs:{vn:true,dvl:true},gps_admission:{qualified:true}}}}}};
+ page=await render(auto);e=page.elements;assert(e.alignAuto.disabled);
+ e.alignmentDistance.value='6';e.clearanceConfirm.checked=true;e.clearanceConfirm.onchange();assert(!e.alignAuto.disabled);
+ await e.alignAuto.onclick();assert.equal(page.posts[0].action,'align_auto');assert.equal(page.posts[0].max_distance_m,6);assert(page.posts[0].clearance_confirmed);
+ page=await render({...auto,controller:safe});e=page.elements;e.clearanceConfirm.checked=true;e.alignmentDistance.value='6';e.clearanceConfirm.onchange();assert(e.alignAuto.disabled);
+ const blocked={controller:{...safe,sa_active:false,inhibit:'RF_LOST'},job:{action:'calibrate',phase:'collected',busy:false,alignment_mode:'gps'},navigation:{streams:{bridge:{fresh:true,data:{fault:'Navigation maintenance; Prepare required before reuse',inputs:{vn:true,dvl:false},profile_mismatches:{EK3_SRC1_POSZ:{actual:1,expected:6}}}}}}};
+ page=await render(blocked);e=page.elements;assert(e.alignAuto.disabled);
+ for(const reason of ['Prepare Navigation first','RF_LOST','DVL bottom lock','EK3_SRC1_POSZ: 1; required 6'])assert(e.alignmentStatus.textContent.includes(reason),reason);
+ assert(e.alignAuto.title.includes('RF_LOST'));
  page=await render({...recovery,controller:{...safe,armed:true}});e=page.elements;e.surfaceConfirm.checked=true;e.surfaceConfirm.onchange();assert(e.recoverDvl.disabled);
  console.log('Calibration/recovery page confirmations, stale/armed controls, progress and instructions pass');
 })().catch(error=>{console.error(error);process.exit(1)});

@@ -1,0 +1,234 @@
+{
+  "limits": {
+    "WPNAV_SPEED_DN": 150.0,
+    "WPNAV_SPEED_UP": 250.0,
+    "WPNAV_ACCEL_Z": 100.0,
+    "PSC_POSZ_P": 3.0,
+    "PSC_VELZ_P": 8.0,
+    "PSC_ACCZ_P": 0.5,
+    "PSC_ACCZ_I": 0.10000000149011612,
+    "PSC_ACCZ_D": 0.0
+  },
+  "bridge": {
+    "healthy": false,
+    "navigation_valid": false,
+    "fault": "DVL continuity lost; position uncertainty requires revalidation",
+    "initialized": true,
+    "dvl_continuity": {
+      "recovering": true,
+      "state": "POSITION_UNCERTAIN",
+      "prediction_active": false,
+      "missing_distance_bound_m": 8.182002266576752,
+      "dropouts": 24,
+      "valid_recovery_samples": 0,
+      "maximum_gap_s": 1.0,
+      "position_sigma_limit_m": 5.0,
+      "position_sigma_m": 5.004112872626781,
+      "requires_position_revalidation": true
+    },
+    "depth_m": 0.11930692139549438,
+    "surfaced": true,
+    "gps_eligible": false,
+    "gps_admission": {
+      "qualified": false,
+      "reason": "Pressure surface eligibility unavailable",
+      "qualifying_s": 0.0,
+      "required_dwell_s": 3.0,
+      "last_rejection": "Pressure surface eligibility unavailable",
+      "cube_fix_age_upper_s": 0.16448011449715594,
+      "timing_basis": "Cube last-fix time; not receiver epoch",
+      "receiver_delay_bound_s": null,
+      "fault": "",
+      "fix": {
+        "cube_fix_time_us": 10604336000,
+        "received": 10590.063829536,
+        "lat": 32.9236071,
+        "lon": -117.0385574,
+        "alt": 222.57,
+        "fix": 4,
+        "accuracy": 1.367,
+        "speed_mps": 0.07,
+        "course_deg": 349.94,
+        "speed_accuracy_mps": 0.468
+      },
+      "applied_recently": false,
+      "stationary_validated_recently": false
+    },
+    "gps_observation": {
+      "cube_fix_time_us": 10657541000,
+      "received": 10643.284716736,
+      "lat": 32.9234283,
+      "lon": -117.0385219,
+      "alt": 219.9,
+      "fix": 4,
+      "accuracy": 6.808,
+      "speed_mps": 7.59,
+      "course_deg": 201.87,
+      "speed_accuracy_mps": 3.962
+    },
+    "position_ned": [
+      -32.09727416977502,
+      -4.572116955674885,
+      0.11930692139549438
+    ],
+    "distance_travelled_m": 2.6592765050817504,
+    "position_sigma_m": 5.004112872626781,
+    "heading_bias_deg": 0.0,
+    "velocity_bias_mps": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "heading_reference_validated": true,
+    "heading_continuity_lost": false,
+    "stationary_hold": {
+      "active": false,
+      "dwell_s": 0.0,
+      "anchor_ne": null,
+      "speed_threshold_mps": 0.03,
+      "reason": "Waiting for two seconds of stationary valid DVL/VN"
+    },
+    "north_alignment": {
+      "aligned": true,
+      "offset_deg": -163.519,
+      "reason": "True heading 207.0 deg captured; independently verify alignment",
+      "samples": 0,
+      "method": "Operator measured true heading",
+      "reference": {
+        "true_heading_deg": 207.0,
+        "vn_heading_deg": 10.518999999999998,
+        "captured_monotonic": 10424.129614528
+      },
+      "persistence": "bridge session only"
+    },
+    "instance": "9c1892a2-bccf-4175-b540-add63c2b82e6",
+    "fusion_policy": "bridge_odometry",
+    "clock_mapping": {
+      "offset": -14.410091448000458,
+      "uncertainty": 0.004547184,
+      "updated": 10643.132960736
+    },
+    "pressure_sample": {
+      "source": "SCALED_PRESSURE3",
+      "hpa": 1004.2999877929688,
+      "received": 10643.284593568,
+      "cube_boot_ms": 10657675
+    },
+    "profile_mismatches": {},
+    "configuration_verified": true,
+    "enabled": true,
+    "surface_pressure_hpa": 992.5999755859375,
+    "startup_output_enabled": false,
+    "transmitting": false,
+    "published_monotonic": 10643.290825696,
+    "reset_counter": 1,
+    "inputs": {
+      "vn": true,
+      "dvl": true
+    },
+    "heading_vn": {
+      "received": 10643.25399888,
+      "yaw": 141.29800000000003,
+      "raw_yaw": 304.817,
+      "rate": 0.24900745776385577
+    },
+    "heading_dvl": {
+      "received": 10643.225203104,
+      "velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "valid": true
+    }
+  },
+  "mission": {
+    "data": {
+      "run_id": "d355c3905c5d426abd37036637057ff3",
+      "stage": "ABORTED",
+      "reason": "Pressure depth exceeded mission target by more than 0.15 m; pilot takeover",
+      "plan": {
+        "lat": 32.9235696156632,
+        "lon": -117.0385662895403,
+        "depth_m": 0.4,
+        "map": "geographic"
+      },
+      "surface_start": [
+        32.9236039,
+        -117.0385443
+      ],
+      "start_cube": [
+        -31.519088745117188,
+        -4.870078086853027,
+        0.6497594714164734
+      ],
+      "target_cube": [
+        -35.33106275869001,
+        -6.922988808145249,
+        1.048740004157649
+      ],
+      "surface_down": 0.648740004157649,
+      "vertical_offset_error_m": -0.03238405883143558,
+      "navigation_pause": {
+        "active": false,
+        "reason": "",
+        "hold_ned": null
+      },
+      "abort_context": {
+        "telemetry_fresh": true,
+        "navigation_hold_safe": true,
+        "supervisor_age_s": 0.06814620799923432,
+        "supervisor_reason": "Continuous estimate healthy",
+        "supervisor_state": "DVL continuation",
+        "navigation_ready": true,
+        "reference_current": true,
+        "bridge_fault": "",
+        "dvl_continuity": {
+          "recovering": false,
+          "state": "TRACKING",
+          "prediction_active": false,
+          "missing_distance_bound_m": 4.976019106133946,
+          "dropouts": 17,
+          "valid_recovery_samples": 3,
+          "maximum_gap_s": 1.0,
+          "position_sigma_limit_m": 5.0,
+          "position_sigma_m": 1.6889192190193785,
+          "requires_position_revalidation": false
+        },
+        "pressure_depth_m": 0.5781785948501782,
+        "cube_local_ned": [
+          -31.573570251464844,
+          -4.852232933044434,
+          1.1945345401763916
+        ],
+        "vertical_offset_error_m": -0.03238405883143558,
+        "fc_status_text": [],
+        "watchdog_failure": "",
+        "cube_mode": 4,
+        "cube_armed": true
+      },
+      "heading_rad": 2.8841896057128906,
+      "complete": false,
+      "simulation": false,
+      "published_monotonic": 10551.82774656,
+      "telemetry_fresh": true,
+      "confirmed_source": "Continuous fusion",
+      "control_evidence": {
+        "source": "TETHER",
+        "inhibit": null,
+        "armed": true,
+        "mode": "MANUAL",
+        "sa_active": false,
+        "esc_commanded_on": true,
+        "mission_claimed": false,
+        "pilot_arm_switch_pwm": 1495,
+        "pilot_mode_switch_pwm": 1500,
+        "pilot_retry_remaining_s": 0.0
+      },
+      "cube_mode_id": 19,
+      "cube_armed": true
+    },
+    "age": 91.47640694399888,
+    "fresh": false
+  }
+}

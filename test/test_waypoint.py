@@ -70,6 +70,33 @@ class WaypointTests(unittest.TestCase):
         self.assertEqual(self.step(), [])
         self.assertEqual(self.run.stage, 'DIVE')
 
+    def test_changing_cube_pressure_offset_aborts_before_permission_hold(self):
+        self.o.update(local=(0.,0.,.66),depth=.009)
+        self.dive()
+        self.o.update(local=(0.,0.,.45),depth=.2,navigation_hold_safe=True)
+        self.o['supervisor']['navigation_ready']=False
+        actions=self.step()
+        self.assertEqual(self.run.stage,'ABORTED')
+        self.assertIn('vertical reference changed',self.run.reason)
+        self.assertEqual(actions,[('manual',None)])
+        self.assertFalse(any(a=='target' for a,_ in self.step()))
+
+    def test_pressure_overshoot_aborts_even_if_cube_tracks_it(self):
+        self.dive()
+        self.o.update(local=(0.,0.,.7),depth=.7)
+        actions=self.step()
+        self.assertEqual(self.run.stage,'ABORTED')
+        self.assertIn('Pressure depth exceeded',self.run.reason)
+        self.assertEqual(actions,[('manual',None)])
+
+    def test_fixed_nonzero_vertical_offset_remains_supported(self):
+        self.o.update(local=(0.,0.,.66),depth=.009)
+        self.dive()
+        self.o.update(local=(0.,0.,1.151),depth=.5)
+        self.step()
+        self.assertEqual(self.run.stage,'DIVE')
+        self.assertAlmostEqual(self.run.vertical_offset_error,0.)
+
     def test_pilot_disarm_during_armed_preparation_never_rearms(self):
         self.o['armed'] = True
         self.step()
@@ -97,6 +124,46 @@ class WaypointTests(unittest.TestCase):
                 actions = self.step()
                 self.assertEqual(self.run.stage, 'ABORTED')
                 self.assertEqual(actions[0][0], 'manual')
+
+    def test_brief_permission_interruption_holds_then_resumes_original_target(self):
+        self.dive()
+        self.run.enter('TRANSIT',self.now,'Traveling underwater')
+        self.o.update(local=(.2,0.,.5),depth=.5,navigation_hold_safe=True)
+        self.o['supervisor']['navigation_ready']=False
+        self.o['supervisor']['reason']='Unavailable: Navigation bridge'
+        actions=self.step()
+        self.assertEqual(self.run.stage,'TRANSIT')
+        self.assertEqual(actions[0][0],'target')
+        self.assertEqual(actions[0][1][:3],(.2,0.,.5))
+        self.o['local']=(.21,0.,.5)
+        self.assertEqual(self.step(),[])  # Fixed hold, not a moving target.
+        self.o['supervisor']['navigation_ready']=True
+        actions=self.step()
+        self.assertEqual(actions[0][1][:3],self.run.target)
+        self.assertFalse(self.run.snapshot()['navigation_pause']['active'])
+
+    def test_stale_supervisor_hold_expires_without_extending_bad_navigation(self):
+        self.dive();self.o.update(fresh=False,navigation_hold_safe=True)
+        self.assertEqual(self.step()[0][0],'target')
+        for _ in range(9):actions=self.step()
+        self.assertEqual(self.run.stage,'ABORTED')
+        self.assertEqual(self.run.reason,'Fresh navigation telemetry for this run unavailable')
+
+    def test_independent_hold_cannot_bypass_real_fault_or_frame_change(self):
+        for fault in ('origin','policy','reference','watchdog','supervisor','pilot','jump','ekf'):
+            with self.subTest(fault=fault):
+                self.setUp();self.dive();self.o['navigation_hold_safe']=True
+                self.o['supervisor']['navigation_ready']=False
+                if fault=='origin':self.o['origin']=(34.,-117.,0.)
+                if fault=='policy':self.o['supervisor']['fusion_policy']='other'
+                if fault=='reference':self.o['supervisor']['reference_current']=False
+                if fault=='watchdog':self.o['failure']='Control watchdog or ESC permission unavailable'
+                if fault=='supervisor':self.o['supervisor']['state']='Fault'
+                if fault=='pilot':self.o['mode']=19
+                if fault=='jump':self.o['local']=(20.,0.,0.)
+                if fault=='ekf':self.o['navigation_hold_safe']=False
+                self.step()
+                self.assertEqual(self.run.stage,'ABORTED')
 
     def test_pilot_takeover_not_overridden(self):
         self.dive(); self.o['mode'] = 2

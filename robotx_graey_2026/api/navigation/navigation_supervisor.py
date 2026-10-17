@@ -162,7 +162,10 @@ class NavigationSupervisor(Node):
             self.put('heading_vn', d.get('heading_vn'))
             self.put('heading_dvl', d.get('heading_dvl'))
             gps = d.get('gps_admission') or {}
-            good = bool(gps.get('qualified') and gps.get('applied_recently') and d.get('transmitting'))
+            stationary_fix = bool((d.get('stationary_hold') or {}).get('active')
+                                  and gps.get('stationary_validated_recently') and d.get('healthy'))
+            good = bool(gps.get('qualified') and (gps.get('applied_recently') or stationary_fix)
+                        and d.get('transmitting'))
             self.put('gps_good', good)
             self.put('gps_reason', gps.get('reason', 'Bridge GPS unavailable'))
             self.put('gps_admission', gps)
@@ -180,7 +183,7 @@ class NavigationSupervisor(Node):
             return
 
     def request_telemetry(self):
-        for mid in (24, 30, 32, 49, 193, 137):
+        for mid in (24, 30, 32, 49, 193):
             self.link.command(511, mid, 200000)
         for name in getattr(self, 'profile', PROFILE):
             self.link.send('param_request_read_send', 1, 1, name.encode(), -1)
@@ -233,7 +236,10 @@ class NavigationSupervisor(Node):
         intent = self.fresh('intent') or {}
         depth = self.fresh('depth')
         pose = self.fresh('pose', 0.5)
-        checks = [('Cube link', self.fresh('heartbeat', 3)), ('EKF estimate', self.fresh('ekf', 2)), ('Cube position', pose), ('DVL velocity', self.fresh('dvl', 0.5)), ('DVL validity', self.fresh('dvl_valid', 0.5)), ('VN-100', self.fresh('vn', 0.5))]
+        # The bridge owns bounded DVL dropout prediction and its uncertainty.
+        # Raw bottom-lock state remains visible and gates north/reference capture;
+        # it must not independently abort an already-authorized dive per packet.
+        checks = [('Cube link', self.fresh('heartbeat', 3)), ('EKF estimate', self.fresh('ekf', 2)), ('Cube position', pose), ('VN-100', self.fresh('vn', 0.5))]
         checks.append(('Navigation bridge', (self.fresh('bridge', 0.5) or {}).get('healthy')))
         checks.append(('Odometry output', (self.fresh('bridge', 0.5) or {}).get('transmitting')))
         checks.append(('Bridge position uncertainty', (self.fresh('bridge', 0.5) or {}).get('navigation_valid')))

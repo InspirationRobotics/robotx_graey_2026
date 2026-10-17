@@ -996,3 +996,157 @@ These measure consistency only; no independent physical heading/displacement
 reference supplied. Operator says DVL error slight, prioritize graphic heading.
 Also deployed recovery disabled-reason textb70df32: initial post-restart Prepare
 required when no baseline/north exists; no fault bypass introduced.
+
+2026-10-15 implemented DVL stationary position hold: after initialization, two
+seconds of fresh valid bottom lock <=0.03m/s and low VN rotation holds bridge NE
+and zero velocity, withholding GPS translation/bias corrections. Movement, invalid
+DVL or stale VN/pressure releases hold. Raw GPS stays visible/quality checked.
+No Cube origin reset, direct GPS fusion or heading tuning.182 regressions and
+page check passed; native mission/deployment results in stationary-position-hold
+session document. Very slow actual movement below3cm/s may be treated as rest.
+
+2026-10-15 stationary-hold implementation/SITL complete throughd90e7f5. First
+native test exposed supervisor applied_recently dependency, fixed with separate
+fresh stationary GPS validation plus healthy/transmitting guards; rerun full
+mission passes (0.152m simulated error). Deployment staged but STOPPED before any
+changes: live armed MANUAL, kill released, ESC-on, TETHER. Await user disarm/kill.
+Retry /home/graey/deploy-stationary-hold.py with sudo after fresh safety check;
+script then installs changed estimator/supervisor and forces verified runtime
+copies. Requires new Prepare after restart. See stationary-position-hold doc.
+
+2026-10-17 authorized recovery/north work on tether_toggle_beichen only (local
+implementation; NOT deployed). Operator confirmed north/east position feedback
+with VN retained for body-to-world orientation, and a separately started bounded
+surface alignment maneuver with a pool-aware travel limit. Bridge now coasts
+brief DVL gaps at last trusted earth velocity, grows uncertainty and automatically
+reacquires consistent DVL; supervisor trusts this bounded health instead of raw
+per-packet lock. One-second/0.75m accumulated missing-distance limits remain
+provisional stop conditions. No calibration, north or origin reset on brief loss.
+New /calibration automatic alignment button drives only after operator enables
+propulsion and arms in MANUAL; never arms/releases kill itself. Uses raw relative
+VN yaw, qualified GPS/DVL, travel/time/speed/rotation bounds, then a 3-second
+stationary verification and killed/disarmed Cube commissioning. This is not
+geographic position hold or obstacle avoidance. Existing waypoint code already
+uses NED position setpoints, not timed heading/distance driving. Off-target
+underwater/surface re-anchoring policy documented as consideration only; no new
+behavior implemented. 198 Python and both Node page suites pass; isolated native
+GUI waypoint with underwater DVL dropout passes (~0.153m simulated error), and
+GUI automatic north alignment recovered an injected 40-degree reference error.
+See docs/recovery-and-automatic-north-2026-10-17.md for failed runs, evidence,
+provisional assumptions and wet-test limitations. The reported long-term VN
+heading error remains undiagnosed; this is not a fix for that sensor problem.
+2026-10-17 final validation: 202 Python regressions and both Node page suites pass.
+Final GUI/native automatic north run e691860d passes with bounded DVL velocity
+braking for the stationary check (5.080m within6m; injected40deg alignment error
+recovered). Earlier passive-coast and freshness/startup failures are documented,
+not hidden. Native waypoint388892ffec completes despite injected underwater DVL
+loss; recovery2c0beae6 passes. Evidence and source hashes are in
+ docs/evidence/recovery-north-2026-10-17.json. No vehicle deployment or physical
+accuracy verification occurred this session.
+
+2026-10-17 underwater-MANUAL local debugging: no live access (mDNS unresolved,
+tether SSH timed out); user explicitly requested finish locally/deploy later.
+Identified/reproduced first-observation permission loss causing waypoint abort
+and MANUAL even with healthy independent Cube/bridge. Added <=0.7s fixed-position
+hold/resume only with fresh healthy Cube/bridge/config/reference/control evidence;
+real faults, different frames, kill, pilot takeover and operator Abort remain
+immediate. Added mode-request/pause logs, firmware STATUSTEXT and abort-context
+snapshot. Native GUI waypoint with transient permission rejection + DVL dropout
+completed (~0.097m simulated error); separate operator-Abort run still yielded
+MANUAL. 205 Python regressions and waypoint Node checks pass. No claim that this
+explains the physical event without its logs; older deployed DVL behavior may
+still abort. See docs/underwater-manual-debug-2026-10-17.md and evidence JSON.
+No deployment or live parameter changes performed.
+
+2026-10-17 deployment verified via graey.local at user's request. Preserved newer
+Jetson d2d1e4a pipeline/sonar/vision history by conflict-free merge b3b830f on toggle;
+local and installed-runtime205 tests pass. Backed up, built, repaired stale
+installed Python/HTML, restarted graey-ros; exactly one continuous bridge, new GUI
+controls served. MAVProxy previously had dead serial thread despite active unit;
+restarted after user-confirmed kill/disarm, then verified live killed/disarmed
+ESC-off before deployment. Live VN flip_180=true/yaw_offset0; no new mounting fix.
+Final readiness BLOCKED: DVL invalid, baseline0/north unaligned after restart,
+bridge disabled/Observation; EK3_SRC1_POSZ actual1 vs required6 unchanged (no live
+parameter writes). No alignment maneuver or mission started. Backup:
+ /home/graey/deployment-backups/20261017-navigation-203454. See deployment doc and
+ docs/evidence/deployment-2026-10-17.json. Jetson clock showedOct13; sessionOct17.
+
+2026-10-17 alignment-button investigation: live calibration collected, but no
+Prepare job; RF_LOST inhibit, DVL invalid, baseline0 and EK3_SRC1_POSZ1 vs6 remain.
+Button was correctly interlocked but hid the reasons. Calibration HTML now lists
+all blockers, including Prepare-vs-calibration distinction, control/sensor state,
+exact parameter mismatch and clearance/arming prerequisites. Enables on qualified
+state; no bypass of safety or server gates. Node test covers the actual blocked
+snapshot and a ready state. Static-only deployment; no restart/calibration reset
+or live parameter change required.
+
+2026-10-17 live profile correction for user's Prepare error: freshly verified
+killed/disarmed ESC-off and no mission, changed only EK3_SRC1_POSZ1->6 via shared
+MAVProxy UDP14554. Full PROFILE before/after readback matches; running bridge
+configuration_verified=true and profile_mismatches empty. No sensor restart or
+calibration reset. Failed Prepare job message remains historical until retry.
+DVL still invalid at final snapshot; baseline0/north unaligned until Prepare.
+Evidence: docs/evidence/posz-profile-correction-2026-10-17.json. Earlier deployment
+notes describing the parameter blocker are historical; this correction supersedes
+that blocker. Supervisor still Observation until normal preparation/commission.
+
+2026-10-17 robust DVL/GPS follow-up: verified deployed730fd75 latched after six
+DVL dropouts exhausted a cumulative0.75m allowance despite fresh valid DVL.
+Replaced lifetime allowance with existing position-uncertainty validity policy:
+one-second bounded coast, output withheld after that, automatic consistent-DVL
+reacquisition unless actual modeled position sigma exceeds existing5m ceiling.
+Preserve north/reference on routine reacquisition; no automatic mission restart.
+GPS movement anchors now survive dropout, retain stationary reference beyond
+rolling window and reject confidently inconsistent GPS speed. Existing pressure,
+timing, accuracy and stationary-hold gates remain. Cannot detect constant bias.
+210 Python + both GUI tests pass; native DVL recovery fee0ad0d and GUI waypoint
+7f690703db pass (QGC forwarding disabled; no physical mission). See
+robotx_graey_2026/docs/dvl-gps-recovery-2026-10-17.md for scope and deployment.
+
+2026-10-17 deployed DVL/GPS update dfbec7f after fresh killed/disarmed ESC-off
+verification; installed-runtime210 tests pass. One bridge and matching PROFILE,
+VN/DVL fresh; no live parameter/arming/mission actions. Restart intentionally
+cleared pressure/north preparation, bridge disabled/Observation; Prepare and
+north alignment required once. Controller returned RF; select Tether if intended.
+Deployment evidence: docs/evidence/dvl-gps-postdeploy-2026-10-17.json.
+
+2026-10-17 critical depth-source finding from live MAVProxy tlog: bridge used
+SCALED_PRESSURE2 (~978hPa air-pressure behavior), showing only0.008..0.021m
+through a physical dive. SCALED_PRESSURE3 rose992.6..1118.2hPa and fell on
+ascent, identifying the water-responsive channel on this installation. Wrong
+depth also falsely opened pressure-based GPS admission underwater. Mission
+293b00 requested0.4m and aborted on DVL loss; no physical mission success.
+Code selects configurable pressure_message defaultSCALED_PRESSURE3 with no
+fallback, one depth source for baseline/GPS/odometry, and vertical-offset change
+and pressure overshoot guards0.15m. 215 tests + GUI checks pass. See
+robotx_graey_2026/docs/depth-pressure-source-2026-10-17.md. Satellite mapping uses
+geographic tiles; no surveyed evidence yet separates image offset from GNSSbias.
+
+2026-10-17 pressure-fix deployment attempt blocked before changes: controller
+still reports armed/kill released/ESC-on despite user confirmation. Code9003d0a
+pushed; Jetson remains1efe6fd. Do not claim pressure fix deployed. Await matching
+live maintenance state. No source/service/parameter changes made by failed run.
+
+2026-10-17 pressure correction subsequently DEPLOYED9d79fdd after fresh verified
+kill/disarm/ESC-off.215 installed tests pass; postrestart channel3 fresh~992.4hPa,
+PROFILEmatches, VN/DVL valid. Baseline0/bridge disabled until surfaced Prepare and
+north alignment. RF selected after restart. No arming/calibration/mission done.
+Earlier blocked deployment note superseded. Evidence pressure-postdeploy-2026-10-17.
+Phone117W and GUI-117longitude are equivalent; sign difference is not map error.
+
+2026-10-17 latest missiond355c390 aborted toMANUAL at pressure0.578m for0.4m
+request; bridge/DVL/heading healthy then. This is the intended overshoot guard,
+not source switching. Live WPNAV_DOWN150/UP250cm/s andACCEL_Z100cm/s² too aggressive
+for this pool. Prepared10/15/50 profile and mission readback enforcement; no
+heading/PID changes.215 regressions+GUI+native waypoint-dbc0152678 passed. RawGPS
+6.808maccuracy/7.59m/s was NOT admitted; GUI clarifies rejected raw points gray.
+Subsequent real DVL gaps exhausted5m modeled position uncertainty; do not pretend
+bottom lock repairs missed position. See docs/shallow-waypoint-overshoot-2026-10-17.md.
+
+2026-10-17 shallow waypoint update20e7fe9 deployed without sensor/core restart;
+215 installed tests pass. Killed/disarmed safety verified, WPNAVDN10/UP15cm/s,
+ACCEL_Z50cm/s² readback confirmed. Bridgeinstance/baseline/north unchanged. No
+mission/arming. Receiver rawGPS accuracy recovered to1.325m on its own; do not
+claim rawGPS accuracy fixed by code. PriorDVL position fault remains, needs
+surfaced stationary Recover DVL action (north preserved), not IMU recalibration.
+See shallow-waypoint deployment evidence/doc.

@@ -42,11 +42,13 @@ async function render(data,options={}){
   const telemetry={...ready,navigation:{...ready.navigation,streams:{...ready.navigation.streams,
     local:{fresh:true,age:.1,data:{ned:[1,2,.5],velocity:[.3,.4,0]}},
     attitude:{fresh:true,age:.1,data:{rpy:[2,-3,359]}},
-    bridge:{fresh:true,age:.1,data:{inputs:{vn:true},heading_reference_validated:true,transmitting:true,heading_vn:{yaw:1},north_alignment:{offset_deg:90},heading_bias_deg:2}},
+    bridge:{fresh:true,age:.1,data:{inputs:{vn:true},pressure_sample:{source:'SCALED_PRESSURE3'},depth_m:.4,heading_reference_validated:true,transmitting:true,heading_vn:{yaw:1},north_alignment:{offset_deg:90},heading_bias_deg:2}},
     ekf:{fresh:true,age:.2,data:{flags:3,velocity_variance:.1,horizontal_variance:.2,vertical_variance:.3}},
     gps:{fresh:true,age:.2,data:{valid:true,lat:32.9,lon:-117}}
   }}};
   e=await render(telemetry);assert.equal(e.headingDifference.textContent,'-2.0°');assert.match(e.alignedHeading.textContent,/1.0° · transmitting/);
+  assert.match(e.depthSource.textContent,/SCALED_PRESSURE3 · 0.40 m/);
+  assert.match(e.rawGPSStatus.textContent,/NOT AIDING/);
   assert.equal(e.headingOffsets.textContent,'90.0° / 2.0°');assert.equal(e.cubeSpeed.textContent,'0.50');assert.equal(e.gpsSeparation.textContent,'0.00');assert.match(e.estimateAge.textContent,/local: 0.10 s/);
   e=await render({...telemetry,navigation:{...telemetry.navigation,streams:{...telemetry.navigation.streams,bridge:{fresh:false,age:4,data:telemetry.navigation.streams.bridge.data},local:{fresh:false,age:4,data:telemetry.navigation.streams.local.data}}}});
   assert.match(e.alignedHeading.textContent,/Unavailable/);assert.equal(e.headingDifference.textContent,'—');assert.equal(e.cubeSpeed.textContent,'—');assert.match(e.estimateAge.textContent,/4.00 s · stale/);

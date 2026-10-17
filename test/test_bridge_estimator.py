@@ -36,7 +36,7 @@ class EstimatorTests(unittest.TestCase):
         self.acquire()
         self.e.north_offset = 30.
         self.e.heading_bias = 2.
-        for _ in range(15):
+        for _ in range(80):
             self.t += .05
             self.e.imu(self.t,(1.,0.,0.,0.),(0.,0.,0.))
             self.e.pressure_depth(self.t,0.)
@@ -130,14 +130,16 @@ class EstimatorTests(unittest.TestCase):
     def test_dvl_loss_latches_without_zero_velocity(self):
         self.acquire()
         self.e.dvl(self.t+.05, (), False)
-        self.e.status(self.t+.6)
-        self.t += .6
+        self.e.imu(self.t+4.,(1.,0.,0.,0.),(0.,0.,0.))
+        self.e.pressure_depth(self.t+4.,0.)
+        self.e.status(self.t+4.)
+        self.t += 4.
         for _ in range(50):
             self.step()
         self.assertTrue(self.e.fault)
         self.assertFalse(self.e.status(self.t)['healthy'])
 
-    def test_brief_invalid_dvl_withholds_then_recovers_without_inventing_motion(self):
+    def test_brief_invalid_dvl_coasts_then_recovers_without_reset(self):
         self.acquire()
         e=self.e
         position=list(e.position)
@@ -146,22 +148,24 @@ class EstimatorTests(unittest.TestCase):
         e.imu(self.t,(1.,0.,0.,0.),(0.,0.,0.))
         e.pressure_depth(self.t,0.)
         e.dvl(self.t,(),False)
-        self.assertFalse(e.status(self.t)['healthy'])
+        self.assertTrue(e.status(self.t)['healthy'])
+        self.assertTrue(e.status(self.t)['dvl_continuity']['prediction_active'])
         self.assertFalse(e.fault)
         self.step(gps=False,speed=0.)
-        self.assertFalse(e.status(self.t)['healthy'])
+        self.assertTrue(e.status(self.t)['healthy'])
         self.assertEqual(e.position,position)
-        self.step(gps=False,speed=0.)
+        for _ in range(5):self.step(gps=False,speed=0.)
         self.assertTrue(e.status(self.t)['healthy'])
         self.assertFalse(e.fault)
         self.assertGreater(e.horizontal_variance,variance)
         self.assertEqual(e.dvl_dropouts,1)
+        self.assertEqual(e.status(self.t)['dvl_continuity']['state'],'TRACKING')
 
     def test_dvl_absent_without_invalid_packet_still_latches(self):
         self.acquire()
-        self.e.imu(self.t+.51,(1.,0.,0.,0.),(0.,0.,0.))
-        self.e.pressure_depth(self.t+.51,0.)
-        self.assertIn('DVL continuity',self.e.status(self.t+.51)['fault'])
+        self.e.imu(self.t+4.,(1.,0.,0.,0.),(0.,0.,0.))
+        self.e.pressure_depth(self.t+4.,0.)
+        self.assertIn('DVL continuity',self.e.status(self.t+4.)['fault'])
 
     def test_inconsistent_recovery_velocities_cannot_reenable_output(self):
         self.acquire()
@@ -172,7 +176,7 @@ class EstimatorTests(unittest.TestCase):
             e.imu(now,(1.,0.,0.,0.),(0.,0.,0.))
             e.pressure_depth(now,0.)
             e.dvl(now,((1. if i%2 else -1.),0.,0.),True)
-            self.assertFalse(e.status(now)['healthy'])
+            self.assertTrue(e.status(now)['dvl_continuity']['recovering'])
 
     def test_vn_failure_during_dvl_recovery_is_not_cleared(self):
         self.acquire()
@@ -187,6 +191,40 @@ class EstimatorTests(unittest.TestCase):
         for _ in range(150):
             self.step(heading=10.)
         self.assertEqual(self.e.heading_bias, 0.)
+
+    def test_stationary_dvl_blocks_slow_gps_drift_without_freezing_movement(self):
+        self.acquire()
+        for _ in range(50):self.step()
+        self.assertTrue(self.e.status(self.t)['stationary_hold']['active'])
+        before=tuple(self.e.position[:2]);correction=self.e.last_correction
+        for i in range(200):self.step(north=i*.005)
+        self.assertEqual(tuple(self.e.position[:2]),before)
+        self.assertEqual(self.e.velocity(),(0.,0.,0.))
+        self.assertEqual(self.e.last_correction,correction)
+        self.assertTrue(self.e.status(self.t)['healthy'])
+        self.assertTrue(self.e.status(self.t)['gps_admission']['stationary_validated_recently'])
+        self.assertFalse(self.e.status(self.t)['gps_admission']['applied_recently'])
+        self.step(gps=False,speed=.2)
+        self.assertFalse(self.e.status(self.t)['stationary_hold']['active'])
+        self.assertGreater(self.e.position[0],before[0])
+
+    def test_stationary_hold_releases_on_invalid_dvl_or_stale_vn(self):
+        self.acquire()
+        for _ in range(50):self.step()
+        self.e.dvl(self.t+.05,(),False)
+        self.assertIsNone(self.e.stationary_anchor)
+        for _ in range(60):self.step()
+        self.assertTrue(self.e.status(self.t)['stationary_hold']['active'])
+        self.e.status(self.t+.6)
+        self.assertIsNone(self.e.stationary_anchor)
+
+    def test_stationary_hold_never_prevents_first_gps_anchor(self):
+        for _ in range(100):self.step(gps=False)
+        self.assertFalse(self.e.initialized)
+        self.assertIsNone(self.e.stationary_anchor)
+        for _ in range(100):self.step(north=3.)
+        self.assertTrue(self.e.initialized)
+        self.assertAlmostEqual(self.e.position[0],3.,places=2)
 
     def test_heading_and_velocity_updates_need_sustained_forward_motion(self):
         # Exercise the motion update independently of the geographic trajectory.
@@ -216,6 +254,68 @@ class EstimatorTests(unittest.TestCase):
         self.acquire()
         self.assertFalse(self.e.set_origin((33.1, -117., 0.)))
         self.assertFalse(self.e.status(self.t)['healthy'])
+
+    def test_underwater_prediction_tracks_last_world_velocity_through_rotation(self):
+        self.acquire()
+        for _ in range(10):self.step(gps=False,depth=.5,speed=.4)
+        e=self.e;start=e.position[0];before=self.t
+        for i in range(1,5):
+            self.t=before+i*.05
+            e.imu(self.t,yaw_rotate((1.,0.,0.,0.),90.),(0.,0.,0.))
+            e.pressure_depth(self.t,.5);e.dvl(self.t,(),False)
+            s=e.status(self.t)
+            self.assertTrue(s['healthy']);self.assertFalse(e.motion_valid)
+        self.assertAlmostEqual(e.position[0]-start,.08)
+        self.assertAlmostEqual(e.velocity()[1],-.4)
+        self.assertTrue(e.heading_validated)
+        self.assertGreater(e.missing_distance_bound,0.)
+
+    def test_repeated_dropouts_cannot_erase_unknown_displacement_budget(self):
+        self.acquire()
+        for cycle in range(100):
+            self.t+=.05
+            self.e.imu(self.t,(1.,0.,0.,0.),(0.,0.,0.))
+            self.e.pressure_depth(self.t,0.);self.e.dvl(self.t,(),False)
+            for _ in range(6):self.step(gps=False)
+            if self.e.fault:break
+        self.assertTrue(self.e.fault)
+        self.assertGreater(self.e.horizontal_variance,25.)
+
+    def test_six_dropouts_do_not_latch_arbitrary_lifetime_budget(self):
+        self.acquire()
+        for cycle in range(6):
+            self.t+=.05
+            self.e.imu(self.t,(1.,0.,0.,0.),(0.,0.,0.))
+            self.e.pressure_depth(self.t,0.);self.e.dvl(self.t,(),False)
+            for _ in range(8):self.step(gps=False)
+            self.assertFalse(self.e.fault)
+            self.assertTrue(self.e.status(self.t)['healthy'])
+        self.assertTrue(self.e.heading_validated)
+
+    def test_silence_stops_prediction_then_recovers_without_recalibration(self):
+        self.acquire()
+        self.e.imu(self.t+1.2,(1.,0.,0.,0.),(0.,0.,0.))
+        self.e.pressure_depth(self.t+1.2,0.)
+        s=self.e.status(self.t+1.2)
+        self.assertFalse(s['healthy']);self.assertFalse(self.e.fault)
+        self.assertEqual(s['dvl_continuity']['state'],'WAITING_FOR_DVL')
+        self.t+=1.2
+        for _ in range(8):self.step(gps=False)
+        self.assertTrue(self.e.status(self.t)['healthy'])
+        self.assertTrue(self.e.heading_validated)
+
+    def test_coasting_never_supplies_a_gps_or_north_measurement(self):
+        self.acquire();self.e.dvl(self.t+.05,(),False)
+        self.e.apply_gps(self.t+.05,dict(cube_fix_time_us=1))
+        self.assertEqual(self.e.event['decision'],'deferred')
+        self.assertEqual(self.e.heading_bias,0.)
+
+    def test_gross_dvl_speed_spike_is_rejected_without_teleport(self):
+        self.acquire();before=tuple(self.e.position)
+        self.e.dvl(self.t+.05,(100.,0.,0.),True)
+        self.assertFalse(self.e.motion_valid)
+        self.assertEqual(tuple(self.e.position),before)
+        self.assertFalse(self.e.fault)
 
     def test_geodetic_altitude_update_does_not_move_pressure_frame(self):
         self.acquire()

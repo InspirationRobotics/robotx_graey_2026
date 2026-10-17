@@ -49,6 +49,11 @@ class WaypointRun:
         self.pilot_takeover = False
         self.takeover_requested = False
         self.started_armed = None
+        self.navigation_wait_since = None
+        self.navigation_hold = None
+        self.navigation_wait_reason = ''
+        self.abort_context = None
+        self.vertical_offset_error = None
 
     @property
     def phase(self):
@@ -64,6 +69,36 @@ class WaypointRun:
         self.pilot_takeover = pilot
         self.takeover_requested = self.stage in self.moving | {'GUIDED', 'ARM', 'DISARM'}
         self.enter('ABORTED', now, reason)
+
+    def navigation_wait(self, now, o, reason):
+        """Pause travel only with independent healthy pose/bridge evidence.
+
+        This is not stale-sensor extrapolation. Capture one current Cube position
+        and stop moving the target; never chase a changing last-known position.
+        Missing adapter evidence is fail-closed. A valid frame is mandatory.
+        """
+        s=o.get('supervisor') or {}
+        if (self.stage not in self.moving or o.get('navigation_hold_safe') is not True
+                or s.get('fusion_policy')!='continuous'
+                or s.get('run_id')!=self.run_id
+                or s.get('reference_current') is not True
+                or (s.get('reference') or {}).get('reference_id')!=self.reference_id):
+            return None
+        if self.last_position is not None:
+            t,p=self.last_position
+            if math.dist(o['local'],p) > .5+2.*max(0.,now-t):
+                return None
+        if self.navigation_wait_since is None:
+            self.navigation_wait_since=now
+            self.navigation_hold=tuple(o['local'])
+        if now-self.navigation_wait_since >= .7:
+            return None
+        self.navigation_wait_reason=reason
+        # Last mission setpoint may still command forward travel. Replace it
+        # immediately once, then refresh at the ordinary position-target rate.
+        if self.last_command != -math.inf and now-self.navigation_wait_since < .001:
+            self.last_command=-math.inf
+        return self.command(now,'target',(*self.navigation_hold,self.heading),interval=3.)
 
     def abort_actions(self, now, o):
         if self.takeover_requested and not self.pilot_takeover and o.get('mode') in (None, 4):
@@ -103,7 +138,9 @@ class WaypointRun:
             failure = 'Operator aborted; pilot takeover requested'
         if (moving and o.get('armed') is False) or (
                 self.stage in self.moving | {'ARM', 'DISARM'} and o.get('mode') not in (None, 4)):
-            self.abort(now, 'Pilot changed mode or vehicle disarmed', pilot=True)
+            # A heartbeat reveals the outcome, not whether a pilot, firmware
+            # failsafe or another MAVLink sender caused it. Always yield.
+            self.abort(now, 'Vehicle left GUIDED or disarmed; yielding control', pilot=True)
             return []
         if now-self.since > (10. if self.stage in ('GUIDED', 'ARM', 'DISARM') else 90.):
             failure = 'Mission stage timed out: '+self.stage
@@ -111,10 +148,25 @@ class WaypointRun:
         # depth and the frozen local-down offset. Only NE origin defines targets.
         if self.origin is not None and tuple(o.get('origin') or ())[:2] != self.origin[:2]:
             failure = 'Cube origin unavailable or changed'
+        # A fixed Cube/pressure zero difference is supported, but a changing
+        # difference invalidates the frozen vertical target. Check before the
+        # temporary navigation-permission hold, which must never mask this.
+        if self.surface_down is not None and (moving or self.stage in ('GUIDED', 'ARM')) and o.get('fresh'):
+            local, depth = o.get('local'), o.get('depth')
+            if (local and len(local)==3 and isinstance(depth,(int,float))
+                    and math.isfinite(depth) and math.isfinite(local[2])):
+                self.vertical_offset_error = local[2]-depth-self.surface_down
+                if depth > self.plan['depth_m']+.15:
+                    failure = 'Pressure depth exceeded mission target by more than 0.15 m; pilot takeover'
+                elif abs(self.vertical_offset_error) > .15:
+                    failure = 'Cube/pressure vertical reference changed by more than 0.15 m; pilot takeover'
         if (moving or self.stage in ('GUIDED', 'ARM')) and (not s.get('navigation_ready') or not s.get('reference_current')
                        or not (s.get('fusion_policy') == 'continuous')
                        or (s.get('reference') or {}).get('reference_id') != self.reference_id):
-            failure = 'Underwater navigation permission or reference lost: '+str(s.get('reason'))
+            if not failure and s.get('state')!='Fault':
+                hold=self.navigation_wait(now,o,'Navigation permission temporarily unavailable: '+str(s.get('reason')))
+                if hold is not None:return hold
+            failure = failure or 'Underwater navigation permission or reference lost: '+str(s.get('reason'))
         if s.get('state') == 'Fault':
             failure = 'Supervisor fault: '+str(s.get('reason'))
         if failure:
@@ -123,9 +175,17 @@ class WaypointRun:
         # Every stage uses fresh status for this run, including pre-arm waits.
         if not o.get('fresh') or s.get('run_id') != self.run_id:
             if moving or self.stage in ('GUIDED', 'ARM', 'DISARM'):
+                hold=self.navigation_wait(now,o,'Waiting for fresh supervisor status for this mission')
+                if hold is not None:return hold
                 self.abort(now, 'Fresh navigation telemetry for this run unavailable')
                 return self.abort_actions(now, o)
             return []
+        if self.navigation_wait_since is not None:
+            # Resume the original stage target immediately after validation.
+            self.last_command=-math.inf
+            self.arrival=None
+        self.navigation_wait_since=self.navigation_hold=None
+        self.navigation_wait_reason=''
         if self.stage == 'WAIT_SURFACE':
             if s.get('surfaced') is True and (s.get('fusion_policy') == 'continuous' and s.get('gps_qualified_input') is True) and s.get('navigation_ready'):
                 self.enter('PREPARE', now, 'Capture surface start and validate continuous navigation')
@@ -206,4 +266,8 @@ class WaypointRun:
         return dict(run_id=self.run_id, stage=self.stage, reason=self.reason, plan=self.plan,
                     surface_start=self.start_gps, start_cube=self.start, target_cube=self.target,
                     surface_down=self.surface_down,
+                    vertical_offset_error_m=self.vertical_offset_error,
+                    navigation_pause=dict(active=self.navigation_wait_since is not None,
+                        reason=self.navigation_wait_reason,hold_ned=self.navigation_hold),
+                    abort_context=self.abort_context,
                     heading_rad=self.heading, complete=self.stage == 'COMPLETE')

@@ -19,6 +19,7 @@ class WaypointGuiTests(unittest.TestCase):
             waypoint_capabilities=lambda:dict(enabled=False,simulation=False),
             waypoint_process=None,waypoint_launch=None,waypoint_aborts=queue.Queue(),
             calibration_jobs=None,
+            north_process=None,north_aborts=queue.Queue(),
             pids_for=lambda name:[],MISSION_EXECUTABLES=('waypoint_mission',),
             subprocess=NS(Popen=Mock()),link=Mock())
         exec(compile(tree,str(path),'exec'),self.ns)
@@ -37,6 +38,13 @@ class WaypointGuiTests(unittest.TestCase):
     def test_pending_child_blocks_second_mission_before_pid_discovery(self):
         self.ns['waypoint_process']=NS(poll=lambda:None)
         self.assertTrue(self.ns['any_mission_running']())
+
+    def test_alignment_child_excludes_waypoint_and_stop_requests_abort(self):
+        self.ns['north_process']=NS(poll=lambda:None)
+        self.assertTrue(self.ns['any_mission_running']())
+        self.assertTrue(self.ns['mission_stop']()[0])
+        self.assertTrue(self.ns['north_aborts'].get_nowait())
+        self.ns['link'].disarm.assert_not_called()
 
     def test_legacy_stop_cancels_starting_waypoint_without_disarm_rearm_race(self):
         self.ns.update(waypoint_launch=dict(run_id='r'),waypoint_process=NS(poll=lambda:None))

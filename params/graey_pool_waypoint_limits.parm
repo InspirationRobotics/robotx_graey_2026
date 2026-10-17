@@ -1,0 +1,4 @@
+# Shallow pool commissioning: cm/s, cm/s, cm/s². Does not tune EKF or PID gains.
+WPNAV_SPEED_DN 10
+WPNAV_SPEED_UP 15
+WPNAV_ACCEL_Z 50

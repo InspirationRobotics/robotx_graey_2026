@@ -52,12 +52,21 @@ class BridgeEstimator:
         self.velocity_bias = [0., 0., 0.]
         self.heading_bias = 0.
         self.heading_continuity_lost = False
+        self.stationary_since = None
+        self.stationary_anchor = None
+        self.last_stationary_fix_at = None
         self.imu_at = self.motion_at = self.depth_at = None
         self.motion_valid = False
         self.dvl_good_at = None
         self.dvl_gap_start = None
         self.dvl_recovery_count = 0
         self.dvl_dropouts = 0
+        self.propagated_at = None
+        self.coast_world = (0., 0., 0.)
+        self.recovery_since = None
+        self.recovery_velocity = None
+        self.missing_distance_bound = 0.
+        self.gap_bound = 0.
         self.depth = None
         self.surface = None
         self.shallow_since = self.deep_since = None
@@ -93,7 +102,7 @@ class BridgeEstimator:
             self.imu_at = None
             self.heading_continuity_lost = True
             if self.initialized:
-                self.fault = 'Invalid VN attitude; revalidate navigation'
+                self.fault = self.fault or 'Invalid VN attitude; revalidate navigation'
             return
         self.raw_q = tuple(v/math.sqrt(norm) for v in q)
         self.rates, self.imu_at = tuple(rates), now
@@ -127,44 +136,57 @@ class BridgeEstimator:
                 and self.depth <= .15 and now-self.shallow_since >= 2.)
 
     def dvl(self, now, velocity, valid):
-        valid = valid and len(velocity) == 3 and all(math.isfinite(v) for v in velocity)
+        valid = (valid and len(velocity) == 3 and all(math.isfinite(v) for v in velocity)
+                 and math.sqrt(sum(v*v for v in velocity)) <= 5.)
         dt = now-self.motion_at if self.motion_at is not None else None
+        # Silence and explicit invalid reports use the same propagation path.
+        if self.initialized and self.dvl_good_at is not None and now-self.dvl_good_at > .25:
+            self.start_dvl_gap()
+        if self.dvl_gap_start is not None:
+            self.coast(now)
         self.gps.quality.motion(now, velocity, valid)
         if not valid or (dt is not None and not 0 < dt < .5):
-            self.gps.invalidate('DVL continuity lost; GPS must requalify')
+            self.stationary_since = self.stationary_anchor = None
             self.history.clear()
-            if self.initialized and self.dvl_gap_start is None:
-                self.dvl_gap_start = self.dvl_good_at if self.dvl_good_at is not None else self.motion_at
-                self.dvl_dropouts += 1
-                self.dvl_recovery_count = 0
-            if self.initialized and (self.dvl_gap_start is None or now-self.dvl_gap_start >= .5):
-                self.fault = 'DVL continuity lost; position uncertainty requires revalidation'
+            self.start_dvl_gap()
+            self.coast(now)
         self.motion_valid = bool(valid)
         self.motion_at = now
         if not valid:
             self.pending_gps = None
+            self.history.clear()
             self.dvl_recovery_count = 0
+            self.recovery_since = self.recovery_velocity = None
             return
         recovering = self.dvl_gap_start is not None
         if recovering:
-            gap = now-self.dvl_gap_start
-            if gap >= .5:
-                self.fault = 'DVL continuity lost; position uncertainty requires revalidation'
-            elif not self.fault:
-                if self.dvl_recovery_count and max(abs(a-b) for a,b in zip(velocity,self.raw_velocity))>.2:
-                    self.dvl_recovery_count=0
-                if self.dvl_recovery_count == 0:
-                    # No invented velocity or catch-up translation for the gap.
-                    # Conservative 5m/s displacement budget, not measured error.
-                    self.horizontal_variance = min(10000.,self.horizontal_variance+(5.*gap)**2)
-                    dt = None
+            if not self.fault:
+                if (self.recovery_velocity is not None and
+                        max(abs(a-b) for a,b in zip(velocity,self.recovery_velocity)) > .2):
+                    self.dvl_recovery_count = 0
+                    self.recovery_since = None
+                if self.recovery_since is None:
+                    self.recovery_since = now
+                self.recovery_velocity = tuple(velocity)
                 self.dvl_recovery_count += 1
-                if self.dvl_recovery_count >= 2:
+                if self.dvl_recovery_count >= 3 and now-self.recovery_since >= .2:
                     self.dvl_gap_start = None
+                    self.gap_bound = 0.
+            dt = None  # Already propagated by coast; never integrate a gap twice.
         self.dvl_good_at = now
         self.raw_velocity = tuple(velocity)
         if self.initialized and not self.fresh(self.imu_at, now):
             self.fault = 'VN stale; position propagation stopped'
+        still = (self.initialized and not self.fault and self.dvl_gap_start is None
+                 and self.fresh(self.imu_at, now) and self.fresh(self.depth_at, now)
+                 and math.sqrt(sum(v*v for v in velocity)) <= .03
+                 and max(abs(math.degrees(v)) for v in self.rates) <= 2.)
+        if still:
+            self.stationary_since = now if self.stationary_since is None else self.stationary_since
+            if now-self.stationary_since >= 2. and self.stationary_anchor is None:
+                self.stationary_anchor = tuple(self.position[:2])
+        else:
+            self.stationary_since = self.stationary_anchor = None
         if self.fresh(self.imu_at, now) and dt is not None and 0 < dt < .5 and not self.fault:
             world = rotate(self.orientation(), self.velocity())
             for i in (0, 1):
@@ -172,8 +194,13 @@ class BridgeEstimator:
             if self.initialized:
                 self.distance_travelled += math.hypot(world[0], world[1])*dt
                 self.horizontal_variance = min(10000., self.horizontal_variance+.02*dt+.01*dt*dt)
-        self.history.append(dict(t=now, position=tuple(self.position), q=self.orientation(),
-                                 raw_velocity=self.raw_velocity, rates=self.rates))
+        self.propagated_at = now
+        if self.dvl_gap_start is None or self.fault:
+            self.coast_world = rotate(self.orientation(), self.velocity())
+            self.history.append(dict(t=now, position=tuple(self.position), q=self.orientation(),
+                                     raw_velocity=self.raw_velocity, rates=self.rates))
+        else:
+            self.history.clear()  # Predicted velocity cannot validate GPS/north.
         if self.pending_gps is not None:
             received, fix = self.pending_gps
             age = self.gps.clock.age(fix['cube_fix_time_us'],now)
@@ -183,6 +210,52 @@ class BridgeEstimator:
                 self.pending_gps = None
             else:
                 self.apply_gps(now,fix)
+
+    def start_dvl_gap(self):
+        if self.initialized and self.dvl_gap_start is None:
+            self.dvl_gap_start = self.dvl_good_at
+            self.dvl_dropouts += 1
+            self.dvl_recovery_count = 0
+            self.recovery_since = self.recovery_velocity = None
+            self.gap_bound = 0.
+            self.stationary_since = self.stationary_anchor = None
+            self.pending_gps = None
+            self.history.clear()
+
+    def coast(self, now):
+        """Bounded constant earth-velocity prediction, never a DVL measurement.
+
+        Provisional envelope: one second, 0.2 m/s velocity error and 1 m/s²
+        unobserved acceleration. Position uncertainty survives reacquisition;
+        good velocity cannot erase unobserved displacement. After one second
+        stop extrapolating and withhold output until measured motion returns.
+        """
+        if self.dvl_gap_start is None or self.fault:
+            return
+        age = now-self.dvl_gap_start
+        if age < 0:
+            self.fault = 'Navigation clock regressed; revalidate navigation'
+            return
+        bound = .2*age+.5*age*age
+        increase = max(0., bound-self.gap_bound)
+        self.missing_distance_bound += increase
+        # Conservative correlated error accumulation. Reacquiring velocity is
+        # not a position measurement; only actual admitted position corrections
+        # can reduce the resulting covariance.
+        self.horizontal_variance = min(10000., (math.sqrt(self.horizontal_variance)+increase)**2)
+        self.gap_bound = bound
+        if self.horizontal_variance > 25.:
+            self.fault = 'DVL continuity lost; position uncertainty requires revalidation'
+            return
+        if not self.fresh(self.imu_at,now) or not self.fresh(self.depth_at,now):
+            return
+        if self.propagated_at is not None and now >= self.propagated_at:
+            end=min(now,self.dvl_gap_start+1.)
+            dt = max(0.,end-self.propagated_at)
+            for i in (0,1):
+                self.position[i] += self.coast_world[i]*dt
+            self.distance_travelled += math.hypot(*self.coast_world[:2])*dt
+            self.propagated_at = max(self.propagated_at,end)
 
     def orientation(self):
         return yaw_rotate(self.raw_q, self.north_offset+self.heading_bias)
@@ -208,6 +281,7 @@ class BridgeEstimator:
         self.gps = GPSAdmission()
         self.gps.clock = clock
         self.initialized = False
+        self.stationary_since = self.stationary_anchor = None
         self.position[:2] = [0., 0.]
         self.horizontal_variance = 9.
         self.velocity_bias = [0., 0., 0.]
@@ -215,6 +289,9 @@ class BridgeEstimator:
         self.pending_gps = self.last_fix = self.last_correction = None
         self.heading_since, self.heading_count = None, 0
         self.dvl_gap_start, self.dvl_recovery_count = None, 0
+        self.propagated_at = now
+        self.recovery_since = self.recovery_velocity = None
+        self.missing_distance_bound = self.gap_bound = 0.
         self.fault = ''
         return 'North alignment retained; waiting for fresh qualified GPS to re-anchor position'
 
@@ -255,6 +332,10 @@ class BridgeEstimator:
         return self.north_alignment.reason
 
     def velocity(self):
+        if self.dvl_gap_start is not None:
+            return rotate(self.orientation(), self.coast_world, inverse=True)
+        if self.stationary_anchor is not None:
+            return (0., 0., 0.)
         return tuple(a+b for a, b in zip(self.raw_velocity, self.velocity_bias))
 
     def at(self, stamp):
@@ -294,6 +375,9 @@ class BridgeEstimator:
     def apply_gps(self, now, fix):
         if self.origin is None:
             return self.reject('Cube geographic origin unavailable')
+        if self.dvl_gap_start is not None:
+            self.event.update(decision='deferred', reason='DVL prediction cannot validate GPS or north alignment')
+            return False
         sample_time = fix['cube_fix_time_us']/1e6+self.gps.clock.offset
         sample = self.at(sample_time)
         if sample is None:
@@ -336,6 +420,11 @@ class BridgeEstimator:
             limit = min(5., max(2., 3*math.sqrt(self.horizontal_variance+fix['accuracy']**2)))
             if magnitude > limit:
                 return self.reject('GPS disagrees with propagated position; no reset applied')
+            if self.stationary_anchor is not None:
+                self.last_fix = dict(fix)
+                self.last_stationary_fix_at = now
+                self.event.update(decision='withheld', reason='DVL stationary hold; GPS position correction withheld')
+                return False
             gain = min(self.horizontal_variance/(self.horizontal_variance+fix['accuracy']**2),
                        .1/max(magnitude, .000001))
             delta = [gain*v for v in residual]
@@ -395,28 +484,41 @@ class BridgeEstimator:
                 self.velocity_bias[i] = max(-.15, min(.15, self.velocity_bias[i]+.05*innovation))
 
     def status(self, now):
+        if self.initialized and self.dvl_good_at is not None and now-self.dvl_good_at > .25:
+            self.start_dvl_gap()
+        self.coast(now)
+        if (not self.motion_valid or not self.fresh(self.motion_at,now)
+                or not self.fresh(self.imu_at,now) or not self.fresh(self.depth_at,now) or self.fault):
+            self.stationary_since = self.stationary_anchor = None
         if not self.gps_eligible(now):
             self.gps.invalidate('Pressure surface eligibility unavailable')
             self.heading_since, self.heading_count = None, 0
         if self.initialized and not self.fresh(self.imu_at, now):
             self.heading_continuity_lost = True
             self.fault = self.fault or 'VN freshness lost; revalidate navigation'
-        if self.initialized and self.dvl_good_at is not None and now-self.dvl_good_at >= .5:
-            self.fault = self.fault or 'DVL continuity lost; position uncertainty requires revalidation'
-        healthy = (self.initialized and not self.fault and self.motion_valid
-                   and self.dvl_gap_start is None
-                   and self.fresh(self.motion_at, now) and self.fresh(self.imu_at, now)
+        recovering = self.dvl_gap_start is not None
+        coasting = recovering and not self.fault and 0<=now-self.dvl_gap_start<1.
+        healthy = (self.initialized and not self.fault
+                   and (coasting or (not recovering and self.motion_valid and self.fresh(self.motion_at, now)))
+                   and self.fresh(self.imu_at, now)
                    and self.fresh(self.depth_at, now))
         gps = self.gps.status(now)
         gps.update(fix=self.last_fix, applied_recently=self.last_correction is not None
-                   and 0 <= now-self.last_correction <= .35)
+                   and 0 <= now-self.last_correction <= .35,
+                   stationary_validated_recently=self.stationary_anchor is not None
+                   and self.last_stationary_fix_at is not None and 0 <= now-self.last_stationary_fix_at <= .35)
         if self.north_alignment and not self.heading_validated:
             healthy = False
         return dict(healthy=bool(healthy), navigation_valid=bool(healthy and self.horizontal_variance <= 25.),
                     fault=self.fault, initialized=self.initialized,
                     dvl_continuity=dict(recovering=self.dvl_gap_start is not None,
+                        state='POSITION_UNCERTAIN' if self.fault else 'REACQUIRING' if recovering and self.dvl_recovery_count else 'COASTING' if coasting else 'WAITING_FOR_DVL' if recovering else 'TRACKING',
+                        prediction_active=bool(coasting and healthy),
+                        missing_distance_bound_m=self.missing_distance_bound,
                         dropouts=self.dvl_dropouts,valid_recovery_samples=self.dvl_recovery_count,
-                        maximum_gap_s=.5, missing_displacement_budget_mps=5.),
+                        maximum_gap_s=1.,position_sigma_limit_m=5.,
+                        position_sigma_m=math.sqrt(self.horizontal_variance),
+                        requires_position_revalidation=bool(self.fault)),
                     depth_m=self.depth if self.fresh(self.depth_at, now) else None,
                     surfaced=self.surface if self.fresh(self.depth_at, now) else None,
                     gps_eligible=self.gps_eligible(now), gps_admission=gps,
@@ -426,6 +528,10 @@ class BridgeEstimator:
                     heading_bias_deg=self.heading_bias, velocity_bias_mps=list(self.velocity_bias),
                     heading_reference_validated=self.heading_validated,
                     heading_continuity_lost=self.heading_continuity_lost,
+                    stationary_hold=dict(active=self.stationary_anchor is not None,
+                        dwell_s=max(0.,now-self.stationary_since) if self.stationary_since is not None else 0.,
+                        anchor_ne=self.stationary_anchor, speed_threshold_mps=.03,
+                        reason='DVL stationary; GPS translation withheld' if self.stationary_anchor is not None else 'Waiting for two seconds of stationary valid DVL/VN'),
                     north_alignment=self.north_alignment.status() if self.north_alignment else None)
 
     def covariance(self):
