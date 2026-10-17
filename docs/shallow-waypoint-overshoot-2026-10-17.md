@@ -41,3 +41,22 @@ permission interruptions; vertical limit readback verified, final simulated
 horizontal target error0.249m. No live mission performed by the agent. Deployment
 and parameter readback results follow below when verified.
 
+
+## Verified deployment and remaining physical checks
+
+Deployed20e7fe9 on tether_toggle_beichen, backup
+/home/graey/deployment-backups/20261017-shallow-224619. Freshly checked killed,
+disarmed,ESC-off/no mission. Hot-installed only waypoint mission Python and GUI
+HTML; did not restart core or sensors.215 installed-runtime tests passed.
+WPNAV readback before150/250/100 and after10/15/50 respectively (DN/UP/ACCEL_Z).
+Bridge instance, pressure baseline and full north-alignment object unchanged.
+No heading calibration, PID tuning, arming or mission started.
+
+Post-update raw GPS reported1.325m accuracy (previously6.808m), speed0.17m/s;
+this improvement is receiver recovery, not proof of the software improving raw
+accuracy. DVL/VN valid, pressure depth0m, but actual position-uncertainty fault
+remains latched after prior gaps. Use surfaced stationary Recover DVL position
+with its explicit confirmation; this preserves north. Do not start another
+mission until Cube position has recovered and the gentler descent is checked
+under supervision. Runtime update intentionally did not fabricate a new position
+or silently reset the mission reference.

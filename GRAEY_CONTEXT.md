@@ -1142,3 +1142,11 @@ heading/PID changes.215 regressions+GUI+native waypoint-dbc0152678 passed. RawGP
 6.808maccuracy/7.59m/s was NOT admitted; GUI clarifies rejected raw points gray.
 Subsequent real DVL gaps exhausted5m modeled position uncertainty; do not pretend
 bottom lock repairs missed position. See docs/shallow-waypoint-overshoot-2026-10-17.md.
+
+2026-10-17 shallow waypoint update20e7fe9 deployed without sensor/core restart;
+215 installed tests pass. Killed/disarmed safety verified, WPNAVDN10/UP15cm/s,
+ACCEL_Z50cm/s² readback confirmed. Bridgeinstance/baseline/north unchanged. No
+mission/arming. Receiver rawGPS accuracy recovered to1.325m on its own; do not
+claim rawGPS accuracy fixed by code. PriorDVL position fault remains, needs
+surfaced stationary Recover DVL action (north preserved), not IMU recalibration.
+See shallow-waypoint deployment evidence/doc.
