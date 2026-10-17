@@ -1079,3 +1079,13 @@ exact parameter mismatch and clearance/arming prerequisites. Enables on qualifie
 state; no bypass of safety or server gates. Node test covers the actual blocked
 snapshot and a ready state. Static-only deployment; no restart/calibration reset
 or live parameter change required.
+
+2026-10-17 live profile correction for user's Prepare error: freshly verified
+killed/disarmed ESC-off and no mission, changed only EK3_SRC1_POSZ1->6 via shared
+MAVProxy UDP14554. Full PROFILE before/after readback matches; running bridge
+configuration_verified=true and profile_mismatches empty. No sensor restart or
+calibration reset. Failed Prepare job message remains historical until retry.
+DVL still invalid at final snapshot; baseline0/north unaligned until Prepare.
+Evidence: docs/evidence/posz-profile-correction-2026-10-17.json. Earlier deployment
+notes describing the parameter blocker are historical; this correction supersedes
+that blocker. Supervisor still Observation until normal preparation/commission.
