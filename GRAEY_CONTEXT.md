@@ -1043,3 +1043,17 @@ not hidden. Native waypoint388892ffec completes despite injected underwater DVL
 loss; recovery2c0beae6 passes. Evidence and source hashes are in
  docs/evidence/recovery-north-2026-10-17.json. No vehicle deployment or physical
 accuracy verification occurred this session.
+
+2026-10-17 underwater-MANUAL local debugging: no live access (mDNS unresolved,
+tether SSH timed out); user explicitly requested finish locally/deploy later.
+Identified/reproduced first-observation permission loss causing waypoint abort
+and MANUAL even with healthy independent Cube/bridge. Added <=0.7s fixed-position
+hold/resume only with fresh healthy Cube/bridge/config/reference/control evidence;
+real faults, different frames, kill, pilot takeover and operator Abort remain
+immediate. Added mode-request/pause logs, firmware STATUSTEXT and abort-context
+snapshot. Native GUI waypoint with transient permission rejection + DVL dropout
+completed (~0.097m simulated error); separate operator-Abort run still yielded
+MANUAL. 205 Python regressions and waypoint Node checks pass. No claim that this
+explains the physical event without its logs; older deployed DVL behavior may
+still abort. See docs/underwater-manual-debug-2026-10-17.md and evidence JSON.
+No deployment or live parameter changes performed.

@@ -24,6 +24,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--abort', action='store_true')
     parser.add_argument('--dvl-dropout',action='store_true',help='Inject brief invalid DVL during underwater transit')
+    parser.add_argument('--supervisor-interruption',action='store_true',help='Inject a brief false permission status while Cube/bridge stay healthy')
     parser.add_argument('--continuous', action='store_true', default=True)
     parser.add_argument('--auto-north', action='store_true', help='Manual surface movement with a 40-degree synthetic VN reference error')
     args=parser.parse_args()
@@ -59,13 +60,14 @@ def main():
     alignment_stopped = False
     alignment_drive_started = None
     injector=None
-    if args.dvl_dropout:
+    if args.dvl_dropout or args.supervisor_interruption:
         os.environ.update(ROS_DOMAIN_ID='73',ROS_LOCALHOST_ONLY='1')
         import rclpy
         from std_msgs.msg import String
         from rclpy.clock import Clock,ClockType
         rclpy.init();injector=rclpy.create_node('waypoint_short_dvl_dropout')
         dvl_pub=injector.create_publisher(String,'/graey/dvl/sample',10)
+        status_pub=injector.create_publisher(String,'/graey/navigation/status',10)
         dvl_clock=Clock(clock_type=ClockType.STEADY_TIME)
     try:
         with (folder/'runner.log').open('w') as output:
@@ -124,6 +126,16 @@ def main():
                         if not result['stages'] or result['stages'][-1]!=m['stage']: result['stages'].append(m['stage'])
                         gps=streams.get('gps',{}).get('data',{})
                         if m['stage']=='TRANSIT':
+                            if args.supervisor_interruption and not result.get('permission_interruption_injected'):
+                                original=dict(s)
+                                deadline_injection=time.monotonic()+.35
+                                while time.monotonic()<deadline_injection:
+                                    original.update(navigation_ready=False,reason='Injected short permission publication interruption',published_monotonic=time.monotonic())
+                                    status_pub.publish(String(data=json.dumps(original)))
+                                    time.sleep(.01)
+                                    sample=api()['navigation']['streams'].get('waypoint',{}).get('data',{})
+                                    result['navigation_pause_seen']=bool(result.get('navigation_pause_seen') or sample.get('navigation_pause',{}).get('active'))
+                                result['permission_interruption_injected']=True
                             if args.dvl_dropout and not result.get('dvl_dropout_injected'):
                                 for _ in range(3):
                                     dvl_pub.publish(String(data=json.dumps(dict(stamp_ns=dvl_clock.now().nanoseconds,velocity=[],valid=False,sensor_time=None))))
@@ -153,6 +165,8 @@ def main():
                                 b=streams.get('bridge',{}).get('data',{})
                                 result['dvl_continuity']=b.get('dvl_continuity')
                                 result['passed'] &= bool(result.get('dvl_dropout_injected') and not b.get('fault') and (b.get('dvl_continuity') or {}).get('dropouts',0)>0)
+                            if args.supervisor_interruption:
+                                result['passed'] &= bool(result.get('permission_interruption_injected') and result.get('navigation_pause_seen'))
                             break
                 except (OSError,KeyError,ValueError) as error:
                     result['last_retry']=str(error)

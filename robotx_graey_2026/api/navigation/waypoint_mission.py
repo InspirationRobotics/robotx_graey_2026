@@ -34,15 +34,20 @@ class WaypointMission(Node):
         self.link = Link(cfg['mavlink'], 198, self.get_logger())
         self.view = NavigationView()
         self.supervisor, self.safety = {}, {}
+        self.bridge = {}
+        self.bridge_time = -math.inf
         self.supervisor_time = self.safety_time = -math.inf
         self.aborted, self.written = False, False
         self.sequence, self.stamps = 0, {}
         self.gps_enabled = True
         self.last_stage = None
+        self.last_pause = False
+        self.fc_status_text = []
         self.pub = self.create_publisher(String, '/graey/waypoint/status', 10)
         self.intent_pub = self.create_publisher(String, '/graey/navigation/intent', 10)
         self.auto_pub = self.create_publisher(Bool, '/graey/autonomy_active', 10)
         self.create_subscription(String, '/graey/navigation/status', self.on_status, 10)
+        self.create_subscription(String, '/graey/navigation/bridge_status', self.on_bridge, 10)
         self.create_subscription(String, '/graey/control_watchdog/status', self.on_safety, 10)
         self.create_subscription(String, '/graey/waypoint/abort', self.on_abort, 10)
         self.create_timer(.02, self.pump)
@@ -71,6 +76,14 @@ class WaypointMission(Node):
         except (ValueError, TypeError):
             pass
 
+    def on_bridge(self, msg):
+        try:
+            data=json.loads(msg.data)
+            if isinstance(data,dict):
+                self.bridge,self.bridge_time=data,time.monotonic()
+        except (ValueError,TypeError):
+            pass
+
     def on_abort(self, msg):
         if msg.data == self.logic.run_id:
             self.aborted = True
@@ -79,6 +92,10 @@ class WaypointMission(Node):
         def receive(kind, m):
             if m.get_srcSystem() != 1 or m.get_srcComponent() != 1:
                 return
+            if kind=='STATUSTEXT':
+                item=dict(at=time.monotonic(),severity=int(m.severity),text=str(m.text))
+                self.fc_status_text=(self.fc_status_text+[item])[-10:]
+                self.get_logger().warning('FC_STATUS_TEXT '+json.dumps(item))
             if kind in ('LOCAL_POSITION_NED', 'ATTITUDE', 'GLOBAL_POSITION_INT'):
                 previous = self.stamps.get(kind, -1)
                 if m.time_boot_ms+1000 < previous:
@@ -116,7 +133,19 @@ class WaypointMission(Node):
                 if not (self.safety_time == -math.inf and self.logic.stage == 'WAIT_SURFACE'
                         and now-self.logic.since < 2):
                     failure = 'Control watchdog or ESC permission unavailable'
+        b=getattr(self,'bridge',{})
+        cube_fresh=bool(hb and local and att and origin and self.view.position_healthy()
+            and ned and velocity and depth is not None
+            and all(isinstance(v,(int,float)) and math.isfinite(v)
+                    for v in (*ned,*velocity,*att.get('rpy',[None]),depth)))
+        hold_safe=bool(cube_fresh and not failure
+            and 0<=now-getattr(self,'bridge_time',-math.inf)<.3
+            and 0<=now-b.get('published_monotonic',-math.inf)<.3
+            and b.get('healthy') is True and b.get('navigation_valid') is True
+            and b.get('transmitting') is True and b.get('configuration_verified') is True
+            and not b.get('fault'))
         return dict(fresh=fresh, failure=failure, abort=self.aborted,
+            navigation_hold_safe=hold_safe,
             supervisor=s, armed=hb.get('armed'), mode=hb.get('mode_id'),
             local=ned, speed=math.hypot(*velocity[:2]) if velocity and all(v is not None for v in velocity) else math.inf,
             yaw=math.radians(att['rpy'][2]) if att and att['rpy'][2] is not None else None,
@@ -136,9 +165,21 @@ class WaypointMission(Node):
             if action == 'target':
                 self.link.goto_ned(*payload)
             elif action in ('guided', 'manual'):
+                self.get_logger().warning('MISSION_MODE_REQUEST '+json.dumps(dict(
+                    run_id=self.logic.run_id,action=action,stage=self.logic.stage,
+                    reason=self.logic.reason,published_monotonic=now)))
                 self.link.set_mode(MODE_GUIDED if action == 'guided' else MODE_MANUAL)
             elif action in ('arm', 'disarm'):
                 self.link.command(400, 1 if action == 'arm' else 0)
+        if self.logic.stage=='ABORTED' and self.logic.abort_context is None:
+            self.logic.abort_context=dict(telemetry_fresh=bool(o['fresh']),
+                navigation_hold_safe=o.get('navigation_hold_safe'),
+                supervisor_age_s=now-self.supervisor_time if math.isfinite(self.supervisor_time) else None,
+                supervisor_reason=self.supervisor.get('reason'),supervisor_state=self.supervisor.get('state'),
+                navigation_ready=self.supervisor.get('navigation_ready'),reference_current=self.supervisor.get('reference_current'),
+                bridge_fault=self.bridge.get('fault'),dvl_continuity=self.bridge.get('dvl_continuity'),
+                fc_status_text=self.fc_status_text,
+                watchdog_failure=o.get('failure'),cube_mode=o.get('mode'),cube_armed=o.get('armed'))
         if self.sim:
             enabled = not (self.logic.stage in ('DIVE', 'TRANSIT', 'SURFACE')
                            and isinstance(o['depth'], (int, float)) and o['depth'] > .2)
@@ -146,6 +187,11 @@ class WaypointMission(Node):
                 self.gps_enabled = enabled
                 self.link.send('param_set_send', 1, 1, b'SIM_GPS_DISABLE', float(not enabled), 9)
         status = self.logic.snapshot()
+        paused=status['navigation_pause']['active']
+        if paused!=self.last_pause:
+            self.last_pause=paused
+            self.get_logger().warning('MISSION_NAVIGATION_PAUSE '+json.dumps(dict(
+                run_id=self.logic.run_id,published_monotonic=now,**status['navigation_pause'])))
         status.update(simulation=self.sim, published_monotonic=now,
                       telemetry_fresh=bool(o['fresh']), confirmed_source=self.supervisor.get('confirmed_source'))
         status['control_evidence']={k:self.safety.get(k) for k in (
