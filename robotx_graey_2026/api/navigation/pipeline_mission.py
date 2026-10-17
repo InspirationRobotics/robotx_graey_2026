@@ -303,7 +303,9 @@ class PipelineMission(MissionBase):
                                             # 'marked' = where follow_mode:=mark_buoy saved it; 'here' = the
                                             # sub is already at the buoy's end of the pipe, facing along it
         p('survey_buoy_file', 'sonar_data/green_buoy.json')   # mark_buoy writes it, 'marked' reads it
-        p('repair_hold_s', 15.0)            # hold the camera over the RED light this long (no magnet yet)
+        p('repair_hold_s', 0.0)             # > 0: go back over the RED light and hold this long (stands in
+                                            # for the magnet repair); 0: just note it and go on (Ruth, Oct 17:
+                                            # the magnet isn't on the sub yet)
         p('light_same_m', 0.3)              # sightings this close together are one light
         p('survey_backup_m', 0.6)           # at the buoy end, after turning 180: back up this far, so the
                                             # camera (0.2 m behind the sonar) starts at the end
@@ -1154,8 +1156,9 @@ class PipelineMission(MissionBase):
                 self.s_track.append(sonar.copy())          # the way along the pipe: the lights' order
             if self.s_red_new:                             # the camera has just passed the RED light
                 self.s_red_new = False
-                self.repair_begin()
-                return
+                if self.repair_hold > 0:                   # no magnet on the sub (Oct 17): note it, go on
+                    self.repair_begin()
+                    return
         # sonar sweep period, for the speed limit
         sw = m.get('sweep', 0)
         if sw != self.f_sweep:
@@ -1391,6 +1394,10 @@ class PipelineMission(MissionBase):
         if abs(err) < math.radians(5) or (self.dry and self.now() - self.state_t0 > 5):
             here = self.cur if self.cur else self.f_start
             back = self.survey_backup if self.survey else self.follow_backup
+            if self.survey:
+                # the camera starts once turned, as it backs up over the end: started before the
+                # turn, the spinning picture split one light into two (sim, Oct 17)
+                self.start_camera()
             self.f_backup_goal = (self.f_start[0] + back * self.f_dir0[0],
                                   self.f_start[1] + back * self.f_dir0[1])
             self.get_logger().info(f'    turned round - backing up {back:.2f} m so the '
@@ -1449,10 +1456,10 @@ class PipelineMission(MissionBase):
 
     def start_camera(self):
         if (self.camera_boxes or self.survey) and self.camera is None:
-            args = {'palette': 'red-green', 'same_m': self.light_same} if self.survey else {}
+            tracker = led_boxes.LightTracker(same_m=self.light_same) if self.survey else None
             self.camera = led_boxes.CameraWatcher(self.camera_url, self.camera_at,
                                                   lambda t: self.get_logger().info('    ' + t), self.on_box,
-                                                  **args).start()
+                                                  tracker=tracker).start()
 
     def stop_camera(self, why='the mission ended early'):
         if self.camera is None:
@@ -1512,7 +1519,6 @@ class PipelineMission(MissionBase):
                 pass
         self.f_start, self.f_dir0 = (here[0], here[1]), self.f_dir.copy()
         self.s_leg, self.s_track = 'survey', []
-        self.start_camera()                                # lights at the very end show while it backs up
         self.carrot, self.last_t = (here[0], here[1]), now
         self.to_phase('follow turn')
 

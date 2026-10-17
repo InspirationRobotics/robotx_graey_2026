@@ -113,6 +113,93 @@ class BoxTracker:
         return b
 
 
+class LightTracker:
+    """The survey's lights (Ruth, Oct 17): each lit LED is a BLOB of red or green (the
+    hue it is nearer, as red_green_fractions), followed from frame to frame, so two
+    GREEN lights in view one after the other stay two lights. BoxTracker's share of the
+    whole picture ran them together when the next came into view before the last had
+    gone (sim, Oct 17: lights 0.8 m apart, 4 of 5 found). A light is placed where the
+    camera was when its blob was nearest the middle of the picture - straight under the
+    camera, whichever way the camera is turned. Repeat sightings of a colour within
+    same_m are that light again; boxes holds the lights, in BoxTracker's format."""
+
+    def __init__(self, min_frac=0.02, gap_s=1.0, same_m=0.3, new_frac=0.04, link=0.6):
+        self.min_frac, self.gap_s, self.same_m, self.new_frac = min_frac, gap_s, same_m, new_frac
+        self.link = link            # a blob this close (picture half-widths) to a track's last is that track:
+                                    # 0.6 kept one track per real light on the Oct 15-16 footage (0.35 split
+                                    # halos), and still parts lights ~0.4 m apart
+        self.boxes = []
+        self._tracks = []
+
+    @staticmethod
+    def blobs(rgb, min_frac):
+        """(colour, x, y, share): x, y from -1 to 1 across the picture, share of its area."""
+        import cv2
+        h, w = rgb.shape[:2]
+        d = rgb.astype(np.int16)
+        r, g = d[..., 0], d[..., 1]
+        mx, mn = d.max(-1), d.min(-1)
+        bright = (mx > 140) & (mx - mn > 70)
+        out = []
+        for colour, mask in (('red', bright & (r > g)), ('green', bright & (g > r))):
+            n, _, stats, cents = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+            for k in range(1, n):
+                share = stats[k, cv2.CC_STAT_AREA] / float(h * w)
+                if share >= min_frac:
+                    out.append((colour, cents[k][0] / w * 2 - 1, cents[k][1] / h * 2 - 1, share))
+        return out
+
+    def update(self, t, rgb, pos):
+        """One frame at time t (s); pos = (north, east) of the camera, or None.
+        Returns the lights whose sightings just ended (new or seen again): a list."""
+        free = list(self._tracks)
+        for colour, x, y, share in sorted(self.blobs(rgb, self.min_frac), key=lambda b: -b[3]):
+            best = None
+            for tr in free:
+                dd = math.hypot(x - tr['x'], y - tr['y'])
+                if tr['colour'] == colour and dd <= self.link and (best is None or dd < best[0]):
+                    best = (dd, tr)
+            if best:
+                tr = best[1]
+                free.remove(tr)
+            else:
+                tr = {'colour': colour, 't0': t, 'best': 0.0, 'mid': 9.0, 'pos': pos}
+                self._tracks.append(tr)
+            tr['x'], tr['y'], tr['last'], tr['best'] = x, y, t, max(tr['best'], share)
+            if math.hypot(x, y) < tr['mid']:
+                tr['mid'] = math.hypot(x, y)
+                if pos is not None:
+                    tr['pos'] = pos
+        done = []
+        for tr in [tr for tr in self._tracks if t - tr['last'] > self.gap_s]:
+            self._tracks.remove(tr)
+            done.append(self._finish(tr))
+        return [b for b in done if b is not None]
+
+    def flush(self):
+        done = [self._finish(tr) for tr in self._tracks]
+        self._tracks = []
+        return [b for b in done if b is not None]
+
+    def _finish(self, tr):
+        colour, pos = tr['colour'], tr['pos']
+        for b in self.boxes:
+            if (b['colour'] == colour and pos is not None and b['n'] is not None
+                    and math.hypot(pos[0] - b['n'], pos[1] - b['e']) <= self.same_m):
+                b['sightings'] += 1
+                b['last_t'] = tr['last']
+                b['colours'][colour] = max(b['colours'][colour], tr['best'])
+                b['new'] = False
+                return b
+        if tr['best'] < self.new_frac:
+            return None                     # a glimpse, not a light
+        b = {'n': pos[0] if pos else None, 'e': pos[1] if pos else None, 'colour': colour,
+             'colours': {colour: tr['best']}, 'sightings': 1, 'first_t': tr['t0'], 'last_t': tr['last'],
+             'new': True, 'number': len(self.boxes) + 1}
+        self.boxes.append(b)
+        return b
+
+
 def describe(b):
     cols = ', '.join(f'{k} {v:.0%}' for k, v in sorted(b['colours'].items(), key=lambda kv: -kv[1]))
     where = f"at NED ({b['n']:.2f}, {b['e']:.2f})" if b['n'] is not None else 'position unknown'
@@ -160,9 +247,9 @@ class CameraWatcher:
     """Runs the tracker on the camera stream in a thread. where() gives the camera's
     (north, east) now; report(text) logs; on_box(box) is called as sightings end."""
 
-    def __init__(self, url, where, report, on_box=None, **tracker_args):
+    def __init__(self, url, where, report, on_box=None, tracker=None, **tracker_args):
         self.url, self.where, self.report, self.on_box = url, where, report, on_box
-        self.tracker = BoxTracker(**tracker_args)
+        self.tracker = tracker if tracker is not None else BoxTracker(**tracker_args)
         self.stop = threading.Event()
         self.frames = 0
         self.thread = threading.Thread(target=self._run, daemon=True)
