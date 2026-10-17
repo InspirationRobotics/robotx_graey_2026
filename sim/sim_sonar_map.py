@@ -26,6 +26,10 @@ class TrackedSimSonar(SimSonar):
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
         made.append(self)
+        # the bottom camera on :8080, like tools/cam_pair.py (SIM_CAMERA=0 turns it off)
+        if len(made) == 1 and os.environ.get("SIM_CAMERA", "1") != "0":
+            from sim_camera import SimCamera
+            SimCamera(lambda: made[-1], self.boxes_geo, self.centre_line).start()
 
 
 def with_truth(snapshot):

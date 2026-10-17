@@ -476,8 +476,9 @@ hx.fillText((p[1]>=0?'+':'')+p[1].toFixed(2)+' m',g.left+28,p[0]+p[2]);});}
 function sendBand(b){fetch('/band',{method:'POST',body:b?(b[0]+' '+b[1]):'off'})
 .then(function(r){return r.text();}).then(function(x){hbt.textContent=x==='ok'?(b?fmt(b):''):x;});}
 function nearest(e){var g=geom();if(!BAND||!g)return null;var r=hc.getBoundingClientRect(),y=e.clientY-r.top,
-dh=Math.abs(y-(g.cy-BAND[1]*g.ppm)),dl=Math.abs(y-(g.cy-BAND[0]*g.ppm));
-return Math.min(dh,dl)<=16?(dh<=dl?1:0):null;}
+x=e.clientX-r.left,dh=Math.abs(y-(g.cy-BAND[1]*g.ppm)),dl=Math.abs(y-(g.cy-BAND[0]*g.ppm));
+var tol=x<=g.left+40?16:5;
+return Math.min(dh,dl)<=tol?(dh<=dl?1:0):null;}
 hc.addEventListener('pointerdown',function(e){var k=nearest(e);if(k===null)return;
 drag={k:k,b:BAND.slice()};hc.setPointerCapture(e.pointerId);e.preventDefault();});
 hc.addEventListener('pointermove',function(e){var g=geom();
@@ -487,7 +488,8 @@ h=Math.max(-GEOM.range,Math.min(GEOM.range,h));
 if(drag.k===1)drag.b[1]=Math.max(h,drag.b[0]+0.05);else drag.b[0]=Math.min(h,drag.b[1]-0.05);
 drag.b=[Math.round(drag.b[0]*100)/100,Math.round(drag.b[1]*100)/100];
 hbt.textContent=fmt(drag.b);drawBand();});
-function endDrag(){if(!drag)return;BAND=LAST=drag.b;drag=null;dragged=true;sendBand(BAND);drawBand();}
+function endDrag(){if(!drag)return;var moved=drag.b[0]!==BAND[0]||drag.b[1]!==BAND[1];
+BAND=LAST=drag.b;drag=null;if(moved){dragged=true;sendBand(BAND);}drawBand();}
 hc.addEventListener('pointerup',endDrag);hc.addEventListener('pointercancel',endDrag);
 hbon.onchange=function(){BAND=hbon.checked?LAST.slice():null;sendBand(BAND);drawBand();};
 window.addEventListener('resize',drawBand);im.addEventListener('load',drawBand);

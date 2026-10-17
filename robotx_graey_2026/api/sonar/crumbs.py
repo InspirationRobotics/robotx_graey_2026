@@ -84,6 +84,7 @@ FADE_SWEEPS = 2         # newer sweeps that must look at a crumb to wipe it out
 FADE_DEG = S.BEAM_FORE_AFT_DEG / 2.0    # ... anywhere in the beam, fore-aft
 MAX_TURN_DPS = 10.0     # turning faster than this, deg/s: ping ignored
 FLOOR_CUT_M = 0.0       # echoes less than this above the floor make no crumbs; 0 = off (missions set it)
+NEAR_MIN_M = 0.3        # the closest a near_m setting may look (below the 0.75 m blind zone)
 
 _FIELDS = ("x", "y", "up", "brightness", "range_m", "angle", "sweep", "seen", "faded_by")
 
@@ -301,7 +302,11 @@ class CrumbMap:
         floor cut and band applied (sm), and its echoes' bins, strongest first."""
         raw = np.convolve(np.asarray(row, float), np.ones(SMOOTH_BINS) / SMOOTH_BINS, "same")
         sm = raw.copy()
-        sm[:int(math.ceil(max(S.MIN_RANGE_M, self.near_m) / metres_per_bin))] = 0
+        # near_m between NEAR_MIN_M and the blind zone looks closer than it (Oct 16 pool: the
+        # pipe 0.5-0.7 m under the sonar read 105-192, background 4-20; with no pipe, echoes of
+        # 100 or more were 0-1% of pings from 0.25 m out)
+        blind = max(NEAR_MIN_M, self.near_m) if 0 < self.near_m < S.MIN_RANGE_M else max(S.MIN_RANGE_M, self.near_m)
+        sm[:int(math.ceil(blind / metres_per_bin))] = 0
         if self.far_m > 0:
             sm[int(math.floor(self.far_m / metres_per_bin)) + 1:] = 0
         a = math.radians(a_deg)
