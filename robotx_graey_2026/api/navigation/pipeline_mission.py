@@ -249,6 +249,8 @@ class PipelineMission(MissionBase):
         p('follow_sector', '240 300')       # sonar looks straight down +-30 deg: one cross-section per sweep
         p('follow_range', 2.5)              # m; short range, quicker pings
         p('follow_band', '0.12 0.65')       # m ABOVE THE FLOOR (DVL altitude): pipe top ~0.3, box top ~0.45
+        p('follow_band_from', 'floor')      # 'sonar': follow_band is m from the sonar, up + (Ruth, Oct 16:
+                                            # the pool pipe sits 0.6-0.85 m under the sonar wherever the floor is)
         p('sonar_above_dvl_m', 0.3)         # the floor shows at DVL altitude + this (every pool session)
         p('follow_speed', 0.08)             # m/s at most
         p('follow_step_m', 0.3)             # ... and at most this far per sonar sweep
@@ -308,6 +310,9 @@ class PipelineMission(MissionBase):
             raise ValueError(f"pool_after_pick must be follow or approach, not {self.after_pick!r}")
         self.follow_sector, self.follow_range = g('follow_sector'), float(g('follow_range'))
         self.follow_band = tuple(float(v) for v in g('follow_band').split())
+        self.follow_band_from = g('follow_band_from').strip().lower()
+        if self.follow_band_from not in ('floor', 'sonar'):
+            raise ValueError(f"follow_band_from must be floor or sonar, not {self.follow_band_from!r}")
         self.sonar_above_dvl = float(g('sonar_above_dvl_m'))
         self.follow_speed, self.follow_step = float(g('follow_speed')), float(g('follow_step_m'))
         self.follow_yaw = math.radians(g('follow_yaw_dps'))
@@ -955,7 +960,10 @@ class PipelineMission(MissionBase):
         self.go_spot(best, look=False)
 
     def follow_band_now(self):
-        """follow_band (m above the floor) as the map wants it: m from the sonar, up +."""
+        """follow_band as the map wants it: m from the sonar, up +. Measured from the
+        floor (DVL altitude), or as it is with follow_band_from:=sonar."""
+        if self.follow_band_from == 'sonar':
+            return (round(self.follow_band[0], 2), round(self.follow_band[1], 2))
         alt = self.floor_clearance()
         if alt is None:
             return None
@@ -999,8 +1007,9 @@ class PipelineMission(MissionBase):
             self.map_post('/mapcmd', cmd)
         if self.recording:
             try:
+                where = 'from the sonar' if self.follow_band_from == 'sonar' else 'above the floor'
                 self.map_post('/mark', f'{what}: sonar straight down, band '
-                              + (f'{self.follow_band[0]}-{self.follow_band[1]} m above the floor' if band else 'off (no DVL)'))
+                              + (f'{self.follow_band[0]} to {self.follow_band[1]} m {where}' if band else 'off (no DVL)'))
             except OSError:
                 pass
         if band is None:
