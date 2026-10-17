@@ -28,6 +28,7 @@ class FusedNavBridge(SteadyNode):
         super().__init__('nav_ekf_bridge')
         defaults = dict(enabled=False, mavlink='udpout:127.0.0.1:14551',
                         surface_pressure_hpa=0., water_density=1000.,
+                        pressure_message='SCALED_PRESSURE3',
                         sitl_depth_topic='',
                         auto_north_alignment=False,
                         require_disarmed_start=False,
@@ -35,6 +36,8 @@ class FusedNavBridge(SteadyNode):
         for name, value in defaults.items():
             self.declare_parameter(name, value, ParameterDescriptor(read_only=True))
         self.settings = {k: self.get_parameter(k).value for k in defaults}
+        if self.settings['pressure_message'] not in ('SCALED_PRESSURE','SCALED_PRESSURE2','SCALED_PRESSURE3'):
+            raise ValueError('Select a verified MAVLink pressure sensor message')
         if self.settings['sitl_depth_topic'] and os.environ.get('GRAEY_RUNTIME_SCOPE') != 'sitl':
             raise ValueError('Synthetic depth is restricted to isolated SITL')
         self.est = BridgeEstimator(self.settings['heading_reference_validated'],
@@ -197,7 +200,8 @@ class FusedNavBridge(SteadyNode):
     def request(self):
         self.link.heartbeat()
         self.sync_clock()
-        for mid in (24, 137, 49):
+        pressure_id={'SCALED_PRESSURE':29,'SCALED_PRESSURE2':137,'SCALED_PRESSURE3':143}[self.settings.get('pressure_message','SCALED_PRESSURE3')]
+        for mid in (24, pressure_id, 49):
             self.link.command(511, mid, 100000)
         for name in PROFILE:
             self.link.send('param_request_read_send', 1, 1, name.encode(), -1)
@@ -226,7 +230,7 @@ class FusedNavBridge(SteadyNode):
             self.params[m.param_id.rstrip('\x00')] = (now, m.param_value)
         elif kind == 'GPS_GLOBAL_ORIGIN':
             self.est.set_origin((m.latitude/1e7, m.longitude/1e7, m.altitude/1000))
-        elif kind == 'SCALED_PRESSURE2':
+        elif kind == self.settings.get('pressure_message','SCALED_PRESSURE3'):
             if self.settings.get('sitl_depth_topic'):
                 return
             if self.boot_ms is not None and m.time_boot_ms+1000 < self.boot_ms:
@@ -239,7 +243,7 @@ class FusedNavBridge(SteadyNode):
             if age is None or age > .35:
                 self.est.pressure_depth(now, math.nan)
                 return
-            self.pressure_sample = dict(hpa=m.press_abs if math.isfinite(m.press_abs) else None,
+            self.pressure_sample = dict(source=kind,hpa=m.press_abs if math.isfinite(m.press_abs) else None,
                                         received=now, cube_boot_ms=m.time_boot_ms)
             if math.isfinite(m.press_abs):
                 self.pressures.append((now, m.press_abs))

@@ -70,6 +70,33 @@ class WaypointTests(unittest.TestCase):
         self.assertEqual(self.step(), [])
         self.assertEqual(self.run.stage, 'DIVE')
 
+    def test_changing_cube_pressure_offset_aborts_before_permission_hold(self):
+        self.o.update(local=(0.,0.,.66),depth=.009)
+        self.dive()
+        self.o.update(local=(0.,0.,.45),depth=.2,navigation_hold_safe=True)
+        self.o['supervisor']['navigation_ready']=False
+        actions=self.step()
+        self.assertEqual(self.run.stage,'ABORTED')
+        self.assertIn('vertical reference changed',self.run.reason)
+        self.assertEqual(actions,[('manual',None)])
+        self.assertFalse(any(a=='target' for a,_ in self.step()))
+
+    def test_pressure_overshoot_aborts_even_if_cube_tracks_it(self):
+        self.dive()
+        self.o.update(local=(0.,0.,.7),depth=.7)
+        actions=self.step()
+        self.assertEqual(self.run.stage,'ABORTED')
+        self.assertIn('Pressure depth exceeded',self.run.reason)
+        self.assertEqual(actions,[('manual',None)])
+
+    def test_fixed_nonzero_vertical_offset_remains_supported(self):
+        self.o.update(local=(0.,0.,.66),depth=.009)
+        self.dive()
+        self.o.update(local=(0.,0.,1.151),depth=.5)
+        self.step()
+        self.assertEqual(self.run.stage,'DIVE')
+        self.assertAlmostEqual(self.run.vertical_offset_error,0.)
+
     def test_pilot_disarm_during_armed_preparation_never_rearms(self):
         self.o['armed'] = True
         self.step()

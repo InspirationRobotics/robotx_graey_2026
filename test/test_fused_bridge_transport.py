@@ -68,7 +68,7 @@ class TransportTests(unittest.TestCase):
     def pressure(self, stamp, system=1):
         m = NS(time_boot_ms=stamp, press_abs=1000.49,
                get_srcSystem=lambda: system, get_srcComponent=lambda: 1)
-        self.b.consume('SCALED_PRESSURE2', m)
+        self.b.consume('SCALED_PRESSURE3', m)
 
     def test_pressure_requires_clock_freshness_calibration_and_cube_sender(self):
         self.pressure(10000, system=42)
@@ -87,13 +87,33 @@ class TransportTests(unittest.TestCase):
                                           velocity=[0, 0, 0], sensor_time=1))))
         self.assertFalse(self.b.est.motion_valid)
 
+    def test_air_barometers_cannot_replace_water_pressure_or_qualify_submerged_gps(self):
+        self.b.settings['surface_pressure_hpa']=992.7
+        m=NS(time_boot_ms=10000,press_abs=979.,get_srcSystem=lambda:1,get_srcComponent=lambda:1)
+        for kind in ('SCALED_PRESSURE','SCALED_PRESSURE2'):
+            self.b.consume(kind,m)
+        self.assertIsNone(self.b.est.depth_at)
+        m.press_abs=992.7+1000*9.80665*.7/100
+        self.b.consume('SCALED_PRESSURE3',m)
+        self.assertAlmostEqual(self.b.est.depth,.7)
+        self.assertFalse(self.b.est.gps_eligible(10.))
+        self.assertEqual(self.b.pressure_sample['source'],'SCALED_PRESSURE3')
+
+    def test_explicit_pressure_source_is_used_without_fallback(self):
+        self.b.settings['pressure_message']='SCALED_PRESSURE2'
+        m=NS(time_boot_ms=10000,press_abs=1049.03325,get_srcSystem=lambda:1,get_srcComponent=lambda:1)
+        self.b.consume('SCALED_PRESSURE3',m)
+        self.assertIsNone(self.b.est.depth_at)
+        self.b.consume('SCALED_PRESSURE2',m)
+        self.assertAlmostEqual(self.b.est.depth,.5)
+
     def test_nonfinite_pressure_blocks_output_without_crashing_status(self):
         for pressure in (math.nan, math.inf):
             self.clock.now += .1
             stamp = round(self.clock.now*1000)
             m = NS(time_boot_ms=stamp, press_abs=pressure,
                    get_srcSystem=lambda: 1, get_srcComponent=lambda: 1)
-            self.b.consume('SCALED_PRESSURE2', m)
+            self.b.consume('SCALED_PRESSURE3', m)
             self.b.tick()
             status = json.loads(self.b.pub.publish.call_args.args[0].data)
             self.assertIsNone(status['pressure_sample']['hpa'])

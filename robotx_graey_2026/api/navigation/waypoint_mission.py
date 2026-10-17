@@ -178,6 +178,8 @@ class WaypointMission(Node):
                 supervisor_reason=self.supervisor.get('reason'),supervisor_state=self.supervisor.get('state'),
                 navigation_ready=self.supervisor.get('navigation_ready'),reference_current=self.supervisor.get('reference_current'),
                 bridge_fault=self.bridge.get('fault'),dvl_continuity=self.bridge.get('dvl_continuity'),
+                pressure_depth_m=o.get('depth'),cube_local_ned=o.get('local'),
+                vertical_offset_error_m=self.logic.vertical_offset_error,
                 fc_status_text=self.fc_status_text,
                 watchdog_failure=o.get('failure'),cube_mode=o.get('mode'),cube_armed=o.get('armed'))
         if self.sim:

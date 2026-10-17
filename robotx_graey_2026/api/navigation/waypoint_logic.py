@@ -53,6 +53,7 @@ class WaypointRun:
         self.navigation_hold = None
         self.navigation_wait_reason = ''
         self.abort_context = None
+        self.vertical_offset_error = None
 
     @property
     def phase(self):
@@ -147,6 +148,18 @@ class WaypointRun:
         # depth and the frozen local-down offset. Only NE origin defines targets.
         if self.origin is not None and tuple(o.get('origin') or ())[:2] != self.origin[:2]:
             failure = 'Cube origin unavailable or changed'
+        # A fixed Cube/pressure zero difference is supported, but a changing
+        # difference invalidates the frozen vertical target. Check before the
+        # temporary navigation-permission hold, which must never mask this.
+        if self.surface_down is not None and (moving or self.stage in ('GUIDED', 'ARM')) and o.get('fresh'):
+            local, depth = o.get('local'), o.get('depth')
+            if (local and len(local)==3 and isinstance(depth,(int,float))
+                    and math.isfinite(depth) and math.isfinite(local[2])):
+                self.vertical_offset_error = local[2]-depth-self.surface_down
+                if depth > self.plan['depth_m']+.15:
+                    failure = 'Pressure depth exceeded mission target by more than 0.15 m; pilot takeover'
+                elif abs(self.vertical_offset_error) > .15:
+                    failure = 'Cube/pressure vertical reference changed by more than 0.15 m; pilot takeover'
         if (moving or self.stage in ('GUIDED', 'ARM')) and (not s.get('navigation_ready') or not s.get('reference_current')
                        or not (s.get('fusion_policy') == 'continuous')
                        or (s.get('reference') or {}).get('reference_id') != self.reference_id):
@@ -253,6 +266,7 @@ class WaypointRun:
         return dict(run_id=self.run_id, stage=self.stage, reason=self.reason, plan=self.plan,
                     surface_start=self.start_gps, start_cube=self.start, target_cube=self.target,
                     surface_down=self.surface_down,
+                    vertical_offset_error_m=self.vertical_offset_error,
                     navigation_pause=dict(active=self.navigation_wait_since is not None,
                         reason=self.navigation_wait_reason,hold_ned=self.navigation_hold),
                     abort_context=self.abort_context,

@@ -1109,3 +1109,15 @@ VN/DVL fresh; no live parameter/arming/mission actions. Restart intentionally
 cleared pressure/north preparation, bridge disabled/Observation; Prepare and
 north alignment required once. Controller returned RF; select Tether if intended.
 Deployment evidence: docs/evidence/dvl-gps-postdeploy-2026-10-17.json.
+
+2026-10-17 critical depth-source finding from live MAVProxy tlog: bridge used
+SCALED_PRESSURE2 (~978hPa air-pressure behavior), showing only0.008..0.021m
+through a physical dive. SCALED_PRESSURE3 rose992.6..1118.2hPa and fell on
+ascent, identifying the water-responsive channel on this installation. Wrong
+depth also falsely opened pressure-based GPS admission underwater. Mission
+293b00 requested0.4m and aborted on DVL loss; no physical mission success.
+Code selects configurable pressure_message defaultSCALED_PRESSURE3 with no
+fallback, one depth source for baseline/GPS/odometry, and vertical-offset change
+and pressure overshoot guards0.15m. 215 tests + GUI checks pass. See
+robotx_graey_2026/docs/depth-pressure-source-2026-10-17.md. Satellite mapping uses
+geographic tiles; no surveyed evidence yet separates image offset from GNSSbias.

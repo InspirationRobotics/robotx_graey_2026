@@ -183,7 +183,7 @@ class NavigationSupervisor(Node):
             return
 
     def request_telemetry(self):
-        for mid in (24, 30, 32, 49, 193, 137):
+        for mid in (24, 30, 32, 49, 193):
             self.link.command(511, mid, 200000)
         for name in getattr(self, 'profile', PROFILE):
             self.link.send('param_request_read_send', 1, 1, name.encode(), -1)
