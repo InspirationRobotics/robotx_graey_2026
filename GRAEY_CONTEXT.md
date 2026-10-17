@@ -1126,3 +1126,10 @@ geographic tiles; no surveyed evidence yet separates image offset from GNSSbias.
 still reports armed/kill released/ESC-on despite user confirmation. Code9003d0a
 pushed; Jetson remains1efe6fd. Do not claim pressure fix deployed. Await matching
 live maintenance state. No source/service/parameter changes made by failed run.
+
+2026-10-17 pressure correction subsequently DEPLOYED9d79fdd after fresh verified
+kill/disarm/ESC-off.215 installed tests pass; postrestart channel3 fresh~992.4hPa,
+PROFILEmatches, VN/DVL valid. Baseline0/bridge disabled until surfaced Prepare and
+north alignment. RF selected after restart. No arming/calibration/mission done.
+Earlier blocked deployment note superseded. Evidence pressure-postdeploy-2026-10-17.
+Phone117W and GUI-117longitude are equivalent; sign difference is not map error.

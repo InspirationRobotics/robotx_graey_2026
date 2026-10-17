@@ -77,3 +77,20 @@ Final native GUI waypoint simulation waypoint-b857686e92 passed with DVL and sup
 
 Deployment attempt stopped before any source/service changes: fresh controller telemetry reported armed=true, sa_active=false, esc_commanded_on=true despite user reporting killed/disarmed. Code9003d0a is pushed, but Jetson remains1efe6fd until states agree. No safety gate bypassed. Recheck safe state before deploying.
 
+
+## Deployment completed after safety-state reconciliation
+
+The subsequent fresh check confirmed killed/disarmed ESC-off/no mission. Deployed
+9d79fdd with backup /home/graey/deployment-backups/20261017-pressure-223610.
+215 installed-runtime tests passed; source and installed modules/assets verified.
+Post-restart pressure_sample.source=SCALED_PRESSURE3, fresh pressure~992.4hPa,
+matching PROFILE and valid VN/DVL inputs. Vehicle remained killed/disarmed,
+ESC-off. Baseline0/depth unavailable/bridge disabled intentionally until Prepare;
+redo surfaced preparation and north alignment. Selection returned to RF.
+No arming, pressure calibration or physical mission was started by the agent.
+Evidence: docs/evidence/pressure-postdeploy-2026-10-17.json. Earlier blocked
+attempt is historical, superseded by this verified successful deployment.
+
+User's phone coordinate117W versus GUI longitude-117 is equivalent geographic
+notation, not a position mismatch. Latitude32N remains positive32. This does not
+by itself resolve metre-scale receiver or imagery errors.
