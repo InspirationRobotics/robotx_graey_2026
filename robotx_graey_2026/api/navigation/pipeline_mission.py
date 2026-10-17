@@ -186,6 +186,9 @@ class PipelineMission(MissionBase):
 
     def on_altitude(self, msg):
         self.altitude = (msg.data, self.now())
+        if msg.data > 0:                    # the last 10 s of good readings, for the follow's band
+            self.alt_hist = [(t, a) for t, a in getattr(self, 'alt_hist', []) if self.now() - t <= 10.0]
+            self.alt_hist.append((self.now(), float(msg.data)))
 
     def floor_clearance(self):
         """Metres from the DVL to the bottom, or None if the DVL has no lock now."""
@@ -967,10 +970,16 @@ class PipelineMission(MissionBase):
         floor (DVL altitude), or as it is with follow_band_from:=sonar."""
         if self.follow_band_from == 'sonar':
             return (round(self.follow_band[0], 2), round(self.follow_band[1], 2))
-        alt = self.floor_clearance()
-        if alt is None:
+        # the median of the last 10 s of DVL altitude, kept for up to a minute when the DVL
+        # drops its lock: at the surface it lost and regained the floor, so the band jumped
+        # and the follow started with none (pool, Oct 16)
+        vals = [a for t, a in getattr(self, 'alt_hist', []) if self.now() - t <= 10.0]
+        if vals:
+            self.alt_good = (float(np.median(vals)), self.now())
+        good = getattr(self, 'alt_good', None)
+        if good is None or self.now() - good[1] > 60.0:
             return None
-        floor_up = -(alt + self.sonar_above_dvl)
+        floor_up = -(good[0] + self.sonar_above_dvl)
         return (round(floor_up + self.follow_band[0], 2), round(floor_up + self.follow_band[1], 2))
 
     def start_follow_here(self):
