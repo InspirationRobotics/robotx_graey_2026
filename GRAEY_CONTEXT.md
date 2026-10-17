@@ -1102,3 +1102,10 @@ timing, accuracy and stationary-hold gates remain. Cannot detect constant bias.
 210 Python + both GUI tests pass; native DVL recovery fee0ad0d and GUI waypoint
 7f690703db pass (QGC forwarding disabled; no physical mission). See
 robotx_graey_2026/docs/dvl-gps-recovery-2026-10-17.md for scope and deployment.
+
+2026-10-17 deployed DVL/GPS update dfbec7f after fresh killed/disarmed ESC-off
+verification; installed-runtime210 tests pass. One bridge and matching PROFILE,
+VN/DVL fresh; no live parameter/arming/mission actions. Restart intentionally
+cleared pressure/north preparation, bridge disabled/Observation; Prepare and
+north alignment required once. Controller returned RF; select Tether if intended.
+Deployment evidence: docs/evidence/dvl-gps-postdeploy-2026-10-17.json.

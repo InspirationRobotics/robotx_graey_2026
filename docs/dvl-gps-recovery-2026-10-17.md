@@ -61,3 +61,20 @@ Deployment and full GUI waypoint result are recorded below when completed.
 
 Native GUI waypoint `waypoint-7f690703db` passed the full surface/dive/transit/surface mission with injected DVL and supervisor interruptions; final simulated target error 0.1525 m. This is simulation evidence, not physical accuracy.
 
+
+## Deployment verified
+
+Deployed code dfbec7f to killed/disarmed ESC-off Jetson, with rollback backup at
+/home/graey/deployment-backups/20261017-dvl-gps-221407. Fast-forwarded only
+`tether_toggle_beichen`; main and teammate changes preserved. Verified source
+and installed Python/HTML match, including repair of stale installed files
+left by prior builds. All 210 tests passed against installed runtime from /tmp.
+
+Post-restart: fresh Cube telemetry, kill engaged, disarmed, ESC-off, no mission,
+one continuous bridge, matching bridge PROFILE, VN flip_180=true/yaw_offset=0,
+DVL and VN inputs valid. New uncertainty/recovery fields present. No arming,
+propulsion, parameter adjustment or physical mission performed. Restart reset
+session pressure baseline/north alignment and left bridge disabled/Observation,
+as intended: Prepare and north alignment are needed once before operation.
+Controller selection returned to RF; operator must select Tether if intended.
+Evidence: docs/evidence/dvl-gps-postdeploy-2026-10-17.json.
