@@ -48,6 +48,7 @@ async function render(data,options={}){
   }}};
   e=await render(telemetry);assert.equal(e.headingDifference.textContent,'-2.0°');assert.match(e.alignedHeading.textContent,/1.0° · transmitting/);
   assert.match(e.depthSource.textContent,/SCALED_PRESSURE3 · 0.40 m/);
+  assert.match(e.rawGPSStatus.textContent,/NOT AIDING/);
   assert.equal(e.headingOffsets.textContent,'90.0° / 2.0°');assert.equal(e.cubeSpeed.textContent,'0.50');assert.equal(e.gpsSeparation.textContent,'0.00');assert.match(e.estimateAge.textContent,/local: 0.10 s/);
   e=await render({...telemetry,navigation:{...telemetry.navigation,streams:{...telemetry.navigation.streams,bridge:{fresh:false,age:4,data:telemetry.navigation.streams.bridge.data},local:{fresh:false,age:4,data:telemetry.navigation.streams.local.data}}}});
   assert.match(e.alignedHeading.textContent,/Unavailable/);assert.equal(e.headingDifference.textContent,'—');assert.equal(e.cubeSpeed.textContent,'—');assert.match(e.estimateAge.textContent,/4.00 s · stale/);

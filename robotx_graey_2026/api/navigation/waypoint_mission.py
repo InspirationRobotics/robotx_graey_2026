@@ -14,6 +14,9 @@ from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL
 
 
 class WaypointMission(Node):
+    # cm/s and cm/s² on the verified ArduSub 4.5 parameter interface.
+    SHALLOW_LIMITS = dict(WPNAV_SPEED_DN=10., WPNAV_SPEED_UP=15., WPNAV_ACCEL_Z=50.)
+
     def __init__(self):
         super().__init__('waypoint_mission')
         for key, value in dict(plan_json='', run_id='', commissioned=False, simulation=False,
@@ -39,6 +42,7 @@ class WaypointMission(Node):
         self.supervisor_time = self.safety_time = -math.inf
         self.aborted, self.written = False, False
         self.sequence, self.stamps = 0, {}
+        self.nav_limits = {}
         self.gps_enabled = True
         self.last_stage = None
         self.last_pause = False
@@ -59,6 +63,16 @@ class WaypointMission(Node):
     def request(self):
         for mid in (24, 30, 32, 33, 49, 193):
             self.link.command(511, mid, 100000)
+        for name in self.SHALLOW_LIMITS:
+            self.link.send('param_request_read_send',1,1,name.encode(),-1)
+
+    def limits_ready(self, now):
+        for name,maximum in self.SHALLOW_LIMITS.items():
+            stamp,value=getattr(self,'nav_limits',{}).get(name,(-math.inf,None))
+            if not (0<=now-stamp<12 and isinstance(value,(int,float))
+                    and math.isfinite(value) and 0<value<=maximum):
+                return False
+        return True
 
     def on_status(self, msg):
         try:
@@ -92,6 +106,8 @@ class WaypointMission(Node):
         def receive(kind, m):
             if m.get_srcSystem() != 1 or m.get_srcComponent() != 1:
                 return
+            if kind=='PARAM_VALUE' and m.param_id.rstrip('\x00') in self.SHALLOW_LIMITS:
+                self.nav_limits[m.param_id.rstrip('\x00')]=(time.monotonic(),m.param_value)
             if kind=='STATUSTEXT':
                 item=dict(at=time.monotonic(),severity=int(m.severity),text=str(m.text))
                 self.fc_status_text=(self.fc_status_text+[item])[-10:]
@@ -123,6 +139,11 @@ class WaypointMission(Node):
                              for v in (*(ned or [None]), *(velocity or [None]),
                                        *att.get('rpy', [None]), depth))
         failure = ''
+        limits_ready=self.limits_ready(now)
+        if not limits_ready:
+            fresh=False
+            if self.logic.stage!='WAIT_SURFACE':
+                failure='Shallow waypoint vertical speed/acceleration limits unavailable or excessive'
         if not self.sim:
             c = self.safety
             if not (0 <= now-self.safety_time < 2 and c.get('vehicle_fresh')
@@ -145,6 +166,7 @@ class WaypointMission(Node):
             and b.get('transmitting') is True and b.get('configuration_verified') is True
             and not b.get('fault'))
         return dict(fresh=fresh, failure=failure, abort=self.aborted,
+            vertical_limits_verified=limits_ready,
             navigation_hold_safe=hold_safe,
             supervisor=s, armed=hb.get('armed'), mode=hb.get('mode_id'),
             local=ned, speed=math.hypot(*velocity[:2]) if velocity and all(v is not None for v in velocity) else math.inf,
@@ -161,6 +183,8 @@ class WaypointMission(Node):
             self.intent_pub.publish(String(data=json.dumps(dict(run_id=self.logic.run_id,
                 phase=self.logic.phase, sequence=self.sequence, target_gps=self.logic.plan))))
         o = self.observation(now)
+        if self.logic.stage=='WAIT_SURFACE' and not o['vertical_limits_verified']:
+            self.logic.reason='Waiting for shallow waypoint vertical speed/acceleration limit readback'
         for action, payload in self.logic.step(now, o):
             if action == 'target':
                 self.link.goto_ned(*payload)
@@ -195,6 +219,7 @@ class WaypointMission(Node):
             self.get_logger().warning('MISSION_NAVIGATION_PAUSE '+json.dumps(dict(
                 run_id=self.logic.run_id,published_monotonic=now,**status['navigation_pause'])))
         status.update(simulation=self.sim, published_monotonic=now,
+                      vertical_limits_verified=o['vertical_limits_verified'],
                       telemetry_fresh=bool(o['fresh']), confirmed_source=self.supervisor.get('confirmed_source'))
         status['control_evidence']={k:self.safety.get(k) for k in (
             'source','inhibit','armed','mode','sa_active','esc_commanded_on',

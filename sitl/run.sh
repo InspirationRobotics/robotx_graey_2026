@@ -50,7 +50,8 @@ PARAM_FILE="$RUN_DIR/continuous.parm"
 import sys
 from robotx_graey_2026.api.navigation.odometry_profile import PROFILE
 p=dict(PROFILE, SYSID_THISMAV=1, EK2_ENABLE=0, SCR_ENABLE=0, SIM_GPS_DISABLE=0, LOG_DISARMED=1,
-       SIM_BARO_RND=0, SIM_BARO_DRIFT=0)
+       SIM_BARO_RND=0, SIM_BARO_DRIFT=0,
+       WPNAV_SPEED_DN=10, WPNAV_SPEED_UP=15, WPNAV_ACCEL_Z=50)
 open(sys.argv[1],'w').write('\n'.join(f'{k} {v}' for k,v in p.items()))
 PY
 # Preserve prior evidence, but never mistake yesterday's result for this run.

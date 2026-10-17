@@ -1133,3 +1133,12 @@ PROFILEmatches, VN/DVL valid. Baseline0/bridge disabled until surfaced Prepare a
 north alignment. RF selected after restart. No arming/calibration/mission done.
 Earlier blocked deployment note superseded. Evidence pressure-postdeploy-2026-10-17.
 Phone117W and GUI-117longitude are equivalent; sign difference is not map error.
+
+2026-10-17 latest missiond355c390 aborted toMANUAL at pressure0.578m for0.4m
+request; bridge/DVL/heading healthy then. This is the intended overshoot guard,
+not source switching. Live WPNAV_DOWN150/UP250cm/s andACCEL_Z100cm/s² too aggressive
+for this pool. Prepared10/15/50 profile and mission readback enforcement; no
+heading/PID changes.215 regressions+GUI+native waypoint-dbc0152678 passed. RawGPS
+6.808maccuracy/7.59m/s was NOT admitted; GUI clarifies rejected raw points gray.
+Subsequent real DVL gaps exhausted5m modeled position uncertainty; do not pretend
+bottom lock repairs missed position. See docs/shallow-waypoint-overshoot-2026-10-17.md.
