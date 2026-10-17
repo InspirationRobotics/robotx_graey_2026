@@ -1036,7 +1036,8 @@ class PipelineMission(MissionBase):
             except OSError:
                 pass
         if band is None:
-            self.get_logger().warn('    no DVL altitude: looking with no height band (the floor may make dots)')
+            self.get_logger().warn('    no DVL altitude yet: no height band until the DVL is heard '
+                                   '(following waits up to 6 s for it)')
         h = self.cur_yaw if self.cur_yaw is not None else math.atan2(self.f_dir[1], self.f_dir[0])
         here = self.cur if self.cur else self.hold
         self.f_hold = (here[0], here[1], self.hold[2], h)
@@ -1045,6 +1046,17 @@ class PipelineMission(MissionBase):
         """Hold still until the reset map runs from (0, 0), then tie its frame to NED."""
         n, e, down, h = self.f_hold
         self.stream_posvel(n, e, down, 0.0, 0.0, 0.0, 'over the pipe')
+        if self.f_band is None and self.follow_band_from == 'floor' and self.now() - self.state_t0 < 6.0:
+            # no band yet: a just-started mission has not heard the DVL. Wait up to 6 s for it,
+            # then set the band and clear the map, so the first sweeps can't take the floor (Oct 16)
+            band = self.follow_band_now()
+            if band is None:
+                return
+            self.map_post('/band', f'{band[0]} {band[1]}')
+            self.map_post('/mapcmd', 'reset')
+            self.f_band, self.f_band_t = band, self.now()
+            self.get_logger().info(f'    DVL heard: band {band[0]} to {band[1]} m from the sonar')
+            return
         m = self.map_get()
         if m['state'] == 'running' and m['pose'] and math.hypot(*m['pose'][:2]) < 0.05:
             if self.dry or self.cur is None:
@@ -1058,6 +1070,7 @@ class PipelineMission(MissionBase):
             self.f_seen = None                  # nothing moves until the pipe shows under the sonar
             self.f_dist, self.f_logged, self.f_period, self.f_sweep = 0.0, 0.0, 8.0, m.get('sweep', 0)
             self.f_lat, self.f_known, self.f_box, self.f_line = 0.0, set(), None, None
+            self.f_lost_now, self.f_prev_loss, self.f_stuck_t = False, None, None
             self.f_reversed, self.f_hold_pt, self.f_leg_t0, self.f_creep0 = False, None, self.now(), None
             self.f_start, self.f_dir0 = (here[0], here[1]), self.f_dir.copy()
             self.start_camera()
@@ -1112,6 +1125,7 @@ class PipelineMission(MissionBase):
             if under.any():
                 self.f_lat = float(np.median((c[under] - sonar) @ right))
                 self.f_line = sonar + self.f_lat * right        # a point ON the pipe, fixed in NED
+                self.f_lost_now = False
                 self.f_seen = now
                 # a box sits on the pipe (~0.15 m tall): a fresh dot clearly above the pipe's line
                 level = corridor & ~fresh
@@ -1159,10 +1173,13 @@ class PipelineMission(MissionBase):
             self.f_dir, self.f_reversed = -self.f_dir, True
             self.f_seen, self.f_leg_t0, self.f_lat, self.f_creep0, self.f_hold_pt = None, now, 0.0, None, None
             self.f_line = None
+            self.f_lost_now, self.f_prev_loss, self.f_stuck_t = False, None, None
             return
         if now - seen > self.follow_lost:
             why = (f'no pipe under the sonar for {self.follow_lost:.0f} s (it ended, or it was lost)'
                    if self.f_seen is not None else f'the pipe never showed under the sonar in {self.follow_lost:.0f} s')
+        elif self.f_stuck_t is not None and now - self.f_stuck_t > self.follow_lost:
+            why = 'lost the pipe twice at the same spot: its end'
         elif self.f_dist >= self.follow_max:
             why = f'followed {self.follow_max:.1f} m'
         elif now - self.f_t0 > self.follow_time:
@@ -1183,7 +1200,10 @@ class PipelineMission(MissionBase):
         v = min(self.follow_speed, self.follow_step / max(self.f_period, 1.0))
         yaw_d = math.atan2(d[1], d[0])
         rate, err = self.yaw_rate_to(yaw_d)
-        waiting = self.f_seen is None or now - self.f_seen > 1.0 * self.f_period
+        waiting = self.f_seen is None or now - self.f_seen > 1.0 * self.f_period or self.f_stuck_t is not None
+        if waiting and not self.f_lost_now and self.f_line is not None:
+            self.f_lost_now = True
+            self.note_loss(now)
         since = now - (self.f_seen if self.f_seen is not None else self.f_leg_t0)
         creep = False
         if abs(err) > math.radians(20) and self.f_seen is None:
@@ -1201,8 +1221,17 @@ class PipelineMission(MissionBase):
             self.f_hold_pt = None
             goal = sonar + d * v
             tn, te = goal[0] - ahead * math.cos(h), goal[1] - ahead * math.sin(h)
+        elif waiting and self.f_line is not None and abs(err) <= math.radians(20):
+            # pipe missing: back, slowly, until the sonar is over where it was last seen, and
+            # wait there - not wherever the sub drifted to (Ruth, Oct 16)
+            v = 0.0
+            self.f_hold_pt = None
+            back = (self.f_prev_loss if self.f_stuck_t is not None else self.f_line) - sonar
+            dist = float(np.linalg.norm(back))
+            goal = sonar + (back / dist * min(dist, self.follow_speed) if dist > 1e-6 else 0.0)
+            tn, te = goal[0] - ahead * math.cos(h), goal[1] - ahead * math.sin(h)
         elif waiting or abs(err) > math.radians(20):
-            # waiting for the next sweep, or still turning (round): stay on one spot
+            # waiting for the first sighting, or still turning (round): stay on one spot
             v = 0.0
             if self.f_hold_pt is None:
                 self.f_hold_pt = (here[0], here[1])
@@ -1226,6 +1255,19 @@ class PipelineMission(MissionBase):
                 f'{"right" if self.f_lat >= 0 else "left"} of the sonar, {v:.2f} m/s, sweep {self.f_period:.1f} s'
                 + (f', last seen {now - seen:.0f} s ago' if now - seen > 3 else '')
                 + (' (dry run: drive it there)' if self.dry else ''))
+
+    def note_loss(self, now):
+        """The pipe just went missing. Missing again within 0.3 m of where it went missing last
+        time (it came back there, went on a little, lost it again) is its end (Ruth, Oct 16)."""
+        pt = self.f_line.copy()
+        if self.f_prev_loss is not None and float(np.linalg.norm(pt - self.f_prev_loss)) <= 0.3:
+            if self.f_stuck_t is None:
+                self.f_stuck_t = now
+                self.get_logger().info(f'    lost the pipe again at the same spot - its end? holding over it '
+                                       f'{self.follow_lost:.0f} s')
+        else:
+            self.f_prev_loss = pt
+            self.get_logger().info('    pipe missing - going back over where it was last seen')
 
     def end_in_poshold(self):
         """Hand the sub over armed and holding: MissionBase sees the mode leave GUIDED and
@@ -1289,6 +1331,7 @@ class PipelineMission(MissionBase):
             self.f_dir = d.copy()
             self.f_seen, self.f_leg_t0, self.f_lat, self.f_creep0, self.f_hold_pt = None, now, 0.0, None, None
             self.f_line = None
+            self.f_lost_now, self.f_prev_loss, self.f_stuck_t = False, None, None
             self.f_prev = np.array([here[0] + ahead * math.cos(h), here[1] + ahead * math.sin(h)])
             self.get_logger().info(f'    following the other part: heading {math.degrees(math.atan2(d[1], d[0])) % 360:.0f} deg')
             if self.recording:
