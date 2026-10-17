@@ -1,0 +1,385 @@
+[
+  {
+    "run_id": "5d8280d82aad42688bb9827c3012865f",
+    "stage": "ABORTED",
+    "reason": "Pressure depth exceeded mission target by more than 0.15 m; pilot takeover",
+    "plan": {
+      "lat": 32.923583807127045,
+      "lon": -117.03851044600887,
+      "depth_m": 0.4,
+      "map": "geographic"
+    },
+    "surface_start": [
+      32.9235943,
+      -117.0385589
+    ],
+    "start_cube": [
+      -32.57795715332031,
+      -6.223323345184326,
+      0.6572277545928955
+    ],
+    "target_cube": [
+      -33.751276229561384,
+      -1.7049223795054655,
+      1.0490701493661487
+    ],
+    "surface_down": 0.6490701493661488,
+    "vertical_offset_error_m": 0.04957926997112072,
+    "navigation_pause": {
+      "active": false,
+      "reason": "",
+      "hold_ned": null
+    },
+    "abort_context": {
+      "telemetry_fresh": true,
+      "navigation_hold_safe": true,
+      "supervisor_age_s": 0.02886969600149314,
+      "supervisor_reason": "Continuous estimate healthy",
+      "supervisor_state": "DVL continuation",
+      "navigation_ready": true,
+      "reference_current": true,
+      "bridge_fault": "",
+      "dvl_continuity": {
+        "recovering": false,
+        "state": "TRACKING",
+        "prediction_active": false,
+        "missing_distance_bound_m": 2.0320676001122195,
+        "dropouts": 7,
+        "valid_recovery_samples": 3,
+        "maximum_gap_s": 1.0,
+        "position_sigma_limit_m": 5.0,
+        "position_sigma_m": 0.5614191593455774,
+        "requires_position_revalidation": false
+      },
+      "pressure_depth_m": 0.5873569121065171,
+      "cube_local_ned": [
+        -32.34383010864258,
+        -6.213987827301025,
+        1.2860063314437866
+      ],
+      "vertical_offset_error_m": 0.04957926997112072,
+      "fc_status_text": [],
+      "watchdog_failure": "",
+      "cube_mode": 4,
+      "cube_armed": true
+    },
+    "heading_rad": 3.5708678404437464,
+    "complete": false,
+    "simulation": false,
+    "published_monotonic": 11087.588070944,
+    "vertical_limits_verified": true,
+    "telemetry_fresh": true,
+    "confirmed_source": "Continuous fusion",
+    "control_evidence": {
+      "source": "TETHER",
+      "inhibit": null,
+      "armed": true,
+      "mode": "GUIDED",
+      "sa_active": false,
+      "esc_commanded_on": true,
+      "mission_claimed": true,
+      "pilot_arm_switch_pwm": 1495,
+      "pilot_mode_switch_pwm": 1500,
+      "pilot_retry_remaining_s": 0.0
+    },
+    "cube_mode_id": 4,
+    "cube_armed": true,
+    "stage_history": [
+      {
+        "stage": "WAIT_SURFACE",
+        "monotonic": 11084.5870664,
+        "reason": "Qualifying surfaced navigation"
+      },
+      {
+        "stage": "PREPARE",
+        "monotonic": 11085.08645504,
+        "reason": "Capture surface start and validate continuous navigation"
+      },
+      {
+        "stage": "GUIDED",
+        "monotonic": 11085.387870592,
+        "reason": "Waiting for GUIDED mode confirmation"
+      },
+      {
+        "stage": "ARM",
+        "monotonic": 11085.588168992,
+        "reason": "Waiting for arm confirmation"
+      },
+      {
+        "stage": "DIVE",
+        "monotonic": 11085.686416288,
+        "reason": "Descending at the surface start"
+      },
+      {
+        "stage": "ABORTED",
+        "monotonic": 11087.588070944,
+        "reason": "Pressure depth exceeded mission target by more than 0.15 m; pilot takeover"
+      }
+    ],
+    "requested_displacement_ne_m": [
+      -1.1733190762410715,
+      4.518400965678861
+    ],
+    "estimated_displacement_ne_at_abort_m": [
+      0.23412704467773438,
+      0.009335517883300781
+    ]
+  },
+  {
+    "run_id": "c6c3c7afd82841deb398ddadb3736a55",
+    "stage": "ABORTED",
+    "reason": "Underwater navigation permission or reference lost: Unavailable: Navigation bridge, Bridge position uncertainty",
+    "plan": {
+      "lat": 32.923583377082686,
+      "lon": -117.03850634740105,
+      "depth_m": 0.4,
+      "map": "geographic"
+    },
+    "surface_start": [
+      32.9235938,
+      -117.0385613
+    ],
+    "start_cube": [
+      -32.64229202270508,
+      -6.454923152923584,
+      0.6700537800788879
+    ],
+    "target_cube": [
+      -33.79914854864986,
+      -1.3219450249224804,
+      1.0710732473377123
+    ],
+    "surface_down": 0.6710732473377123,
+    "vertical_offset_error_m": 0.044302309323055344,
+    "navigation_pause": {
+      "active": false,
+      "reason": "",
+      "hold_ned": null
+    },
+    "abort_context": {
+      "telemetry_fresh": true,
+      "navigation_hold_safe": false,
+      "supervisor_age_s": 0.026784128000144847,
+      "supervisor_reason": "Unavailable: Navigation bridge, Bridge position uncertainty",
+      "supervisor_state": "DVL continuation",
+      "navigation_ready": false,
+      "reference_current": true,
+      "bridge_fault": "",
+      "dvl_continuity": {
+        "recovering": true,
+        "state": "REACQUIRING",
+        "prediction_active": false,
+        "missing_distance_bound_m": 4.798945680847197,
+        "dropouts": 16,
+        "valid_recovery_samples": 1,
+        "maximum_gap_s": 1.0,
+        "position_sigma_limit_m": 5.0,
+        "position_sigma_m": 2.221013310322747,
+        "requires_position_revalidation": false
+      },
+      "pressure_depth_m": 0.39463029889953505,
+      "cube_local_ned": [
+        -32.73953628540039,
+        -5.764759540557861,
+        1.1100058555603027
+      ],
+      "vertical_offset_error_m": 0.044302309323055344,
+      "fc_status_text": [],
+      "watchdog_failure": "",
+      "cube_mode": 4,
+      "cube_armed": true
+    },
+    "heading_rad": 3.716614548360006,
+    "complete": false,
+    "simulation": false,
+    "published_monotonic": 11122.589761824,
+    "vertical_limits_verified": true,
+    "telemetry_fresh": true,
+    "confirmed_source": "Continuous fusion",
+    "control_evidence": {
+      "source": "TETHER",
+      "inhibit": null,
+      "armed": true,
+      "mode": "GUIDED",
+      "sa_active": false,
+      "esc_commanded_on": true,
+      "mission_claimed": true,
+      "pilot_arm_switch_pwm": 1495,
+      "pilot_mode_switch_pwm": 1500,
+      "pilot_retry_remaining_s": 0.0
+    },
+    "cube_mode_id": 4,
+    "cube_armed": true,
+    "stage_history": [
+      {
+        "stage": "WAIT_SURFACE",
+        "monotonic": 11111.2921768,
+        "reason": "Qualifying surfaced navigation"
+      },
+      {
+        "stage": "PREPARE",
+        "monotonic": 11113.792105408,
+        "reason": "Capture surface start and validate continuous navigation"
+      },
+      {
+        "stage": "GUIDED",
+        "monotonic": 11114.091388032,
+        "reason": "Waiting for GUIDED mode confirmation"
+      },
+      {
+        "stage": "ARM",
+        "monotonic": 11114.2925728,
+        "reason": "Waiting for arm confirmation"
+      },
+      {
+        "stage": "DIVE",
+        "monotonic": 11114.389982048,
+        "reason": "Descending at the surface start"
+      },
+      {
+        "stage": "TRANSIT",
+        "monotonic": 11117.989894208,
+        "reason": "Traveling underwater to waypoint"
+      },
+      {
+        "stage": "ABORTED",
+        "monotonic": 11122.589761824,
+        "reason": "Underwater navigation permission or reference lost: Unavailable: Navigation bridge, Bridge position uncertainty"
+      }
+    ],
+    "requested_displacement_ne_m": [
+      -1.1568565259447823,
+      5.1329781280011035
+    ],
+    "estimated_displacement_ne_at_abort_m": [
+      -0.0972442626953125,
+      0.6901636123657227
+    ]
+  },
+  {
+    "run_id": "4d5705a4baa448f2ad720ccd2fd02fd6",
+    "stage": "ABORTED",
+    "reason": "Vehicle left GUIDED or disarmed; yielding control",
+    "plan": {
+      "lat": 32.92358122686089,
+      "lon": -117.03851608159461,
+      "depth_m": 0.4,
+      "map": "geographic"
+    },
+    "surface_start": [
+      32.9235829,
+      -117.038554
+    ],
+    "start_cube": [
+      -33.844268798828125,
+      -5.778902530670166,
+      0.6585904955863953
+    ],
+    "target_cube": [
+      -34.03851014409222,
+      -2.231516237741479,
+      1.0555314714245383
+    ],
+    "surface_down": 0.6555314714245383,
+    "vertical_offset_error_m": 0.023937195261558686,
+    "navigation_pause": {
+      "active": false,
+      "reason": "",
+      "hold_ned": null
+    },
+    "abort_context": {
+      "telemetry_fresh": true,
+      "navigation_hold_safe": true,
+      "supervisor_age_s": 0.026861824000661727,
+      "supervisor_reason": "Continuous estimate healthy",
+      "supervisor_state": "DVL continuation",
+      "navigation_ready": true,
+      "reference_current": true,
+      "bridge_fault": "",
+      "dvl_continuity": {
+        "recovering": false,
+        "state": "TRACKING",
+        "prediction_active": false,
+        "missing_distance_bound_m": 7.421358436082051,
+        "dropouts": 24,
+        "valid_recovery_samples": 3,
+        "maximum_gap_s": 1.0,
+        "position_sigma_limit_m": 5.0,
+        "position_sigma_m": 2.212855694523576,
+        "requires_position_revalidation": false
+      },
+      "pressure_depth_m": 0.3915706523522941,
+      "cube_local_ned": [
+        -33.46937942504883,
+        -6.2751641273498535,
+        1.0803086757659912
+      ],
+      "vertical_offset_error_m": 0.023937195261558686,
+      "fc_status_text": [],
+      "watchdog_failure": "",
+      "cube_mode": 4,
+      "cube_armed": false
+    },
+    "heading_rad": 2.436359405517578,
+    "complete": false,
+    "simulation": false,
+    "published_monotonic": 11153.08342912,
+    "vertical_limits_verified": true,
+    "telemetry_fresh": true,
+    "confirmed_source": "Continuous fusion",
+    "control_evidence": {
+      "source": "TETHER",
+      "inhibit": null,
+      "armed": true,
+      "mode": "GUIDED",
+      "sa_active": false,
+      "esc_commanded_on": true,
+      "mission_claimed": true,
+      "pilot_arm_switch_pwm": 1495,
+      "pilot_mode_switch_pwm": 1500,
+      "pilot_retry_remaining_s": 0.0
+    },
+    "cube_mode_id": 4,
+    "cube_armed": false,
+    "stage_history": [
+      {
+        "stage": "WAIT_SURFACE",
+        "monotonic": 11144.883506528,
+        "reason": "Qualifying surfaced navigation"
+      },
+      {
+        "stage": "PREPARE",
+        "monotonic": 11145.98498064,
+        "reason": "Capture surface start and validate continuous navigation"
+      },
+      {
+        "stage": "GUIDED",
+        "monotonic": 11146.2865184,
+        "reason": "Waiting for GUIDED mode confirmation"
+      },
+      {
+        "stage": "ARM",
+        "monotonic": 11146.483942528,
+        "reason": "Waiting for arm confirmation"
+      },
+      {
+        "stage": "DIVE",
+        "monotonic": 11146.589590432,
+        "reason": "Descending at the surface start"
+      },
+      {
+        "stage": "ABORTED",
+        "monotonic": 11153.08342912,
+        "reason": "Vehicle left GUIDED or disarmed; yielding control"
+      }
+    ],
+    "requested_displacement_ne_m": [
+      -0.1942413452640963,
+      3.547386292928687
+    ],
+    "estimated_displacement_ne_at_abort_m": [
+      0.3748893737792969,
+      -0.4962615966796875
+    ]
+  }
+]

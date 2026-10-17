@@ -79,3 +79,46 @@ powered test. Compare intended click -> recorded plan -> sent NED -> Cube motion
 translation is the next useful frame check if logs do not establish axis mapping;
 no need for another uncontrolled waypoint to discover that. Preserve the good
 north calibration and record headings rather than recalibrating preemptively.
+
+## Wi-Fi retrieval follow-up
+
+Connected read-only at192.168.8.105. Current telemetry reported armed/MANUAL,
+kill released/ESC-on; no software, control, sensor or parameter changes made.
+Jetson source7ebb36c; offline diagnostics8d3c5e6 not yet deployed. Current bridge
+has a new instance and no north alignment after restart; do not treat old session
+preparation as current. Saved mission logs were copied locally before analysis.
+
+Three consecutive runs after shallow-limit deployment match the user's sequence:
+
+| Run prefix | Relevant evidence | Result |
+| --- | --- | --- |
+| 5d8280d8 | 0.4m depth request; 0.58736m pressure at abort, 1.90s after DIVE entry | Overshoot guard requested MANUAL before transit |
+| c6c3c7af | Target1.157m south/5.133m east; reached TRANSIT for4.60s; DVL REACQUIRING with one valid recovery sample and odometry withheld | Permission loss requested MANUAL; waypoint never completed |
+| 4d5705a4 | Target0.194m south/3.547m east; stayed in DIVE, never TRANSIT; fresh healthy bridge and navigation ready at stop | Pilot disarm; no mission-requested MANUAL preceding disarm |
+
+The second run's estimated movement at abort was0.097m south/0.690m east; the
+third run's estimated movement was0.375m north/0.496m west. These are Cube
+estimates, not independent physical measurements. The second recorded target
+(32.923583377,-117.038506347) is near the screenshot's intended selection,
+not its marked actual endpoint. It was not an exact coordinate match because
+the screenshot selection was made later; no claim of byte-identical match.
+
+Third-run sideways motion occurred while the mission was still commanding
+horizontal hold at the start during descent. That narrows the investigation to
+position/attitude/velocity frames, depth-to-horizontal coupling and controller
+or thruster response; changing geographic waypoint conversion alone would not
+address that behavior. First-run overshoot despite verified shallow limit
+readbacks also demonstrates speed parameters alone did not solve the physical
+vertical response. Keep the pressure guard; do not hide overshoot by widening it.
+
+Only the post-restart MAVProxy tlog remains at its fixed path. It does not provide
+the pre-restart mission time series needed for full physical frame diagnosis.
+The350MB persistent ROS log and saved stage logs retain decisions, but no new
+WAYPOINT_TRACE was deployed for these runs. Older DVL observer capture at
+monotonic15735..15760 is later than these111xx runs:224samples,2invalid,maxgap0.381s.
+It cannot be used as evidence that DVL stayed valid during these missions.
+
+Next read-only evidence is the Cube onboard BIN covering boot time11084..11154,
+plus verified DVL sensor/body mapping. Do not repeat powered waypoint testing
+to substitute for a disarmed frame and control-response verification.
+Evidence summary: docs/evidence/physical-waypoint-runs-2026-10-17.json.

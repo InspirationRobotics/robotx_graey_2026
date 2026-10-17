@@ -1161,3 +1161,13 @@ DVL raw axes assumedbodyFRD without mountingtransform remains UNVERIFIED; not
 confirmed rootcause. Added0.5s WAYPOINT_TRACE including actualsenttarget and
 Cube/bridge/DVL/GPS data for futurediagnosis. No heading/axes/control tuning or
 live deployment. See docs/waypoint-displacement-debug-2026-10-17.md.
+
+2026-10-17 Wi-Fi read-only succeeds192.168.8.105. Vehiclecurrentlyarmed/MANUAL,
+killreleased/ESC-on; no livechanges. Jetson7ebb36c, diagnosticsnotdeployed.
+Retrieved3 consecutive runs5d8280d8(depthovershoot0.587m for0.4m),c6c3c7af
+(TRANSIT4.6s,thenDVLreacquisition/permissionabort),4d5705a4(pilotdisarm duringDIVE,
+neverTRANSIT). Last lateral deviation occurred under start-position hold before
+waypointtravel; correct map conversion alone cannot resolve it. Secondtarget
+~1.16mS/5.13mE, estimated movementonly0.097mS/0.690mE atabort. Cubeestimatesnot
+physicaltruth. Oldtlogoverwrittenafterrestart, needonboardBINfor11084..11154bootsec.
+See waypoint-displacement-debug doc and physical-waypoint-runs evidence.
