@@ -46,6 +46,8 @@ class WaypointMission(Node):
         self.gps_enabled = True
         self.last_stage = None
         self.last_pause = False
+        self.last_trace = -math.inf
+        self.sent_target = None
         self.fc_status_text = []
         self.pub = self.create_publisher(String, '/graey/waypoint/status', 10)
         self.intent_pub = self.create_publisher(String, '/graey/navigation/intent', 10)
@@ -187,6 +189,7 @@ class WaypointMission(Node):
             self.logic.reason='Waiting for shallow waypoint vertical speed/acceleration limit readback'
         for action, payload in self.logic.step(now, o):
             if action == 'target':
+                self.sent_target=payload
                 self.link.goto_ned(*payload)
             elif action in ('guided', 'manual'):
                 self.get_logger().warning('MISSION_MODE_REQUEST '+json.dumps(dict(
@@ -226,6 +229,23 @@ class WaypointMission(Node):
             'mission_claimed','pilot_arm_switch_pwm','pilot_mode_switch_pwm','pilot_retry_remaining_s')}
         status['cube_mode_id']=o.get('mode')
         status['cube_armed']=o.get('armed')
+        if self.logic.stage in self.logic.moving and now-self.last_trace>=.5:
+            self.last_trace=now
+            # Log independent inputs and sent frame references together. Stage
+            # summaries alone cannot diagnose wrong-axis motion after the run.
+            self.get_logger().info('WAYPOINT_TRACE '+json.dumps(dict(
+                run_id=self.logic.run_id,stage=self.logic.stage,monotonic=now,
+                plan=self.logic.plan,target_ned=self.logic.target,
+                last_sent_target_ned_yaw=self.sent_target,
+                start_ned=self.logic.start,cube_ned=o.get('local'),
+                cube_yaw_rad=o.get('yaw'),pressure_depth_m=o.get('depth'),
+                bridge_ned=self.bridge.get('position_ned'),
+                bridge_velocity=self.bridge.get('heading_dvl'),
+                bridge_heading=self.bridge.get('heading_vn'),
+                dvl_continuity=self.bridge.get('dvl_continuity'),
+                gps_admission=self.bridge.get('gps_admission'),
+                gps_observation=self.bridge.get('gps_observation')),
+                allow_nan=False))
         if self.logic.stage != self.last_stage:
             self.last_stage = self.logic.stage
             self.get_logger().info('WAYPOINT_STAGE '+json.dumps(status, allow_nan=False))

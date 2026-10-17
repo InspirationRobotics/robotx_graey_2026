@@ -1150,3 +1150,14 @@ mission/arming. Receiver rawGPS accuracy recovered to1.325m on its own; do not
 claim rawGPS accuracy fixed by code. PriorDVL position fault remains, needs
 surfaced stationary Recover DVL action (north preserved), not IMU recalibration.
 See shallow-waypoint deployment evidence/doc.
+
+2026-10-17 offline wrong-waypoint investigation: user screenshots actualmarked
+32.9235546,-117.0385309 vs commanded32.9235847,-117.0385069 (~3.35mS/2.24mW).
+Accurate start followed by bad displacement not explained by constant mapoffset
+alone. No access to later3 missionlogs: hostname failed/tether timedout; user
+has no vehicle now. Target replacement test, heading-independentNEtarget tests
+and native southeastwaypoint344a552a2c pass (~0.086msimerror),216 regressions.
+DVL raw axes assumedbodyFRD without mountingtransform remains UNVERIFIED; not
+confirmed rootcause. Added0.5s WAYPOINT_TRACE including actualsenttarget and
+Cube/bridge/DVL/GPS data for futurediagnosis. No heading/axes/control tuning or
+live deployment. See docs/waypoint-displacement-debug-2026-10-17.md.

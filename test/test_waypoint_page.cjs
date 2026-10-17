@@ -32,6 +32,12 @@ async function render(data,options={}){
   e.map.onclick({clientX:500,clientY:300});assert(!e.start.disabled);await e.start.onclick();assert.equal(e.posts[0].plan.map,'geographic');
   for(const p of [{lat:32.9236125,lon:-117.0385235},{lat:-33.5,lon:151.2}]){const xy=e.tileXY(p,20),q=e.tileGeo(xy.x,xy.y,20);assert(Math.abs(q.lat-p.lat)<1e-10);assert(Math.abs(q.lon-p.lon)<1e-10)}
   e=await render(ready,{tilesLoaded:true});e.maptype.value='satellite';e.maptype.onchange();
+  e.map.onclick({clientX:450,clientY:400});
+  e.map.onclick({clientX:550,clientY:300});
+  await e.start.onclick();
+  assert(e.posts[0].plan.lon>ready.navigation.cube_estimate.lon);
+  assert(Math.abs(e.posts[0].plan.lat-ready.navigation.cube_estimate.lat)<1e-8);
+  e=await render(ready,{tilesLoaded:true});e.maptype.value='satellite';e.maptype.onchange();
   assert.match(e.tileURL(183388,422631,20),/tile\/64776\/20\/422631\/183388$/);
   e.findPool.onclick();e.retryTiles.onclick();e.map.onclick({clientX:450,clientY:300});
   assert.match(e.target.textContent,/32\.9236125, -117\.0385235/);assert.equal(e.posts.length,0);

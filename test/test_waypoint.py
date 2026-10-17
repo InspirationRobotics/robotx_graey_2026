@@ -70,6 +70,19 @@ class WaypointTests(unittest.TestCase):
         self.assertEqual(self.step(), [])
         self.assertEqual(self.run.stage, 'DIVE')
 
+    def test_geographic_target_is_not_rotated_by_vehicle_heading(self):
+        # A southeast point stays southeast regardless of the nose direction.
+        for degrees in (0.,90.,108.,180.,270.):
+            with self.subTest(degrees=degrees):
+                self.setUp()
+                lat,lon=ne_to_geo(-1.,3.,self.origin)
+                self.run=WaypointRun(dict(self.plan,lat=lat,lon=lon),'run',0.)
+                self.o['yaw']=math.radians(degrees)
+                self.dive()
+                self.assertAlmostEqual(self.run.target[0],-1.,places=6)
+                self.assertAlmostEqual(self.run.target[1],3.,places=6)
+                self.assertAlmostEqual(self.run.heading,math.radians(degrees))
+
     def test_changing_cube_pressure_offset_aborts_before_permission_hold(self):
         self.o.update(local=(0.,0.,.66),depth=.009)
         self.dive()

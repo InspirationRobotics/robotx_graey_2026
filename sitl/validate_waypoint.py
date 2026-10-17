@@ -27,6 +27,8 @@ def main():
     parser.add_argument('--supervisor-interruption',action='store_true',help='Inject a brief false permission status while Cube/bridge stay healthy')
     parser.add_argument('--continuous', action='store_true', default=True)
     parser.add_argument('--auto-north', action='store_true', help='Manual surface movement with a 40-degree synthetic VN reference error')
+    parser.add_argument('--target-north',type=float,default=1.5)
+    parser.add_argument('--target-east',type=float,default=1.)
     args=parser.parse_args()
     from robotx_graey_2026.api.navigation.waypoint_logic import ne_to_geo
     root=Path(__file__).resolve().parents[1]
@@ -116,13 +118,15 @@ def main():
                         result['north_alignment']=alignment
                         alignment_stopped=True
                     if run_id is None and c['valid'] and s.get('configuration_verified') and s.get('surfaced'):
-                        lat,lon=ne_to_geo(1.5,1.,(c['lat'],c['lon']))
+                        lat,lon=ne_to_geo(args.target_north,args.target_east,(c['lat'],c['lon']))
+                        result['requested_target']=dict(lat=lat,lon=lon)
                         plan=api(dict(action='preview',plan=dict(lat=lat,lon=lon,depth_m=.5,map='geographic')))
                         started=api(dict(action='start',plan_id=plan['plan_id']));run_id=started['run_id']
                         duplicate=api(dict(action='start',plan_id=plan['plan_id']))
                         result['duplicate_idempotent']=duplicate.get('duplicate') and duplicate['run_id']==run_id
                     m=streams.get('waypoint',{}).get('data',{})
                     if m.get('run_id')==run_id and run_id:
+                        assert abs(m['plan']['lat']-lat)<1e-9 and abs(m['plan']['lon']-lon)<1e-9,'Mission changed the selected geographic target'
                         if not result['stages'] or result['stages'][-1]!=m['stage']: result['stages'].append(m['stage'])
                         gps=streams.get('gps',{}).get('data',{})
                         if m['stage']=='TRANSIT':
