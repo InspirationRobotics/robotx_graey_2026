@@ -1057,3 +1057,16 @@ MANUAL. 205 Python regressions and waypoint Node checks pass. No claim that this
 explains the physical event without its logs; older deployed DVL behavior may
 still abort. See docs/underwater-manual-debug-2026-10-17.md and evidence JSON.
 No deployment or live parameter changes performed.
+
+2026-10-17 deployment verified via graey.local at user's request. Preserved newer
+Jetson d2d1e4a pipeline/sonar/vision history by conflict-free merge b3b830f on toggle;
+local and installed-runtime205 tests pass. Backed up, built, repaired stale
+installed Python/HTML, restarted graey-ros; exactly one continuous bridge, new GUI
+controls served. MAVProxy previously had dead serial thread despite active unit;
+restarted after user-confirmed kill/disarm, then verified live killed/disarmed
+ESC-off before deployment. Live VN flip_180=true/yaw_offset0; no new mounting fix.
+Final readiness BLOCKED: DVL invalid, baseline0/north unaligned after restart,
+bridge disabled/Observation; EK3_SRC1_POSZ actual1 vs required6 unchanged (no live
+parameter writes). No alignment maneuver or mission started. Backup:
+ /home/graey/deployment-backups/20261017-navigation-203454. See deployment doc and
+ docs/evidence/deployment-2026-10-17.json. Jetson clock showedOct13; sessionOct17.
