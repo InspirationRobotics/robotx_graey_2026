@@ -1187,6 +1187,9 @@ class PipelineMission(MissionBase):
             # sideways: to the pipe as last seen, a fixed point - not f_lat from wherever the sonar
             # is now, which slid the sub on past the pipe between 5 s sweeps (pool, Oct 16)
             lat = float((self.f_line - sonar) @ right) if self.f_line is not None else 0.0
+            # ... and no faster than follow_speed: GUIDED goes sideways at WPNAV speed (~0.45 m/s),
+            # which lunged past the pipe between 5-8 s sweeps (pool, Oct 16)
+            lat = max(-self.follow_speed, min(self.follow_speed, lat))
             goal = sonar + lat * right + d * v                       # where the sonar should be in ~1 s
             tn, te = goal[0] - ahead * math.cos(h), goal[1] - ahead * math.sin(h)
         self.stream_posvel(tn, te, self.hold[2], v * d[0], v * d[1], rate, 'follow')
