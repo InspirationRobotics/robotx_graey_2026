@@ -1,0 +1,49 @@
+{
+  "controller": {
+    "session": "7885978ed0584c81bbadf3c1df324a35",
+    "revision": 2,
+    "source": "RF",
+    "inhibit": null,
+    "armed": false,
+    "mode": "MANUAL",
+    "vehicle_fresh": true,
+    "rf_alive": true,
+    "tether_alive": true,
+    "ping_age": 0.9571615679997194,
+    "ping_detail": "Reply received",
+    "tether_ip": "192.168.2.1",
+    "tether_interface": "enP8p1s0",
+    "sa_active": true,
+    "esc_commanded_on": false,
+    "autonomous": false,
+    "mission_claimed": false,
+    "pilot_arm_switch_pwm": 1495,
+    "pilot_mode_switch_pwm": 1500,
+    "pilot_retry_remaining_s": 0.0,
+    "can_select_rf": true,
+    "can_select_tether": true,
+    "can_recover_tether": false,
+    "online": true
+  },
+  "bridge_fresh": true,
+  "configuration_verified": true,
+  "profile_mismatches": {},
+  "pressure_sample": {
+    "hpa": 1005.8754272460938,
+    "received": 10458.02855696,
+    "cube_boot_ms": 7110422
+  },
+  "surface_pressure_hpa": 0.0,
+  "depth_m": null,
+  "transmitting": false,
+  "inputs": {
+    "vn": true,
+    "dvl": true
+  },
+  "job": {
+    "phase": "idle",
+    "message": "Read instructions before starting",
+    "busy": false
+  },
+  "stats_page_installed": true
+}

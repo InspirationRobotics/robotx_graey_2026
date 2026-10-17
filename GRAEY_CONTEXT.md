@@ -915,3 +915,84 @@ plans, separate from old approximate screenshot view. Shows Cube/GPS/track/route
 loading/errors and provider attribution; offline grid retained. No fusion or live
 mission permission gates bypassed. Browser internet required. Node tests cover
 projection inversion, tile readiness and geographic target submission. See sessiondoc.
+
+2026-10-15 local waypoint/map follow-up (not deployed): user requested finish
+locally and deploy later. Satellite page now defaults to a visually inspected,
+clearer Esri Wayback release 2023-08-31, with current-layer choice, Find pool and
+Reload imagery. Geographic clicks retain live target validation; old screenshot
+remains view-only. Find pool changes viewport only. Image date/position and GPS
+accuracy are not surveyed guarantees. Full-page browser localhost preview timed
+out; direct tile visual inspection and page JavaScript checks passed.
+Fixed demonstrated stale pilot arm/disarm retries fighting mission GUIDED under
+RF or TETHER: cancel retries on new mission claim; static SB level cannot force
+mode/arm/disarm during ownership. New SB disarm edge and SA kill remain effective.
+Added pilot-control evidence to mission stage logs. No firmware failsafe bypass.
+173 Python regressions and Node page checks pass; native GUI-API continuous SITL
+completed 0.5m dive/transit/surface/disarm/GPS recovery, simulated target error
+0.153m, QGC forwarding disabled. Native fixture excludes hardware kill node;
+production pilot callbacks tested with mocked transport. Live cause confirmation
+and deployment pending. See docs/waypoint-map-control-session-2026-10-15.md.
+
+2026-10-15 added collapsible Cube estimate stats on /waypoint, open by default.
+Displays Cube geographic/local position, attitude, velocity and speed, calibrated
+pressure depth, EKF reported metrics/flags and stream ages. Also shows validated
+corrected VN bridge heading, north offset/GPS heading adjustment, wrapped Cube/VN
+heading difference and raw GPS separation. Withholds stale/missing derived values;
+marks whether bridge odometry is transmitting. Uses existing telemetry only.
+Node page regression passes, including heading wrap across north and stale-data
+withholding. Static UI change; local/online toggle update, Jetson deployment pending.
+
+2026-10-15 deployment verified over tether: merged current navigation/UI through
+44731b2 with Jetson sonar history17397c8 as2029343. Backup20261015-waypoint-223525.
+Build and173 regressions passed on Jetson. Stopped hand-started August bridge;
+one normal continuous bridge/supervisor/pilot node observed. Restored sole profile
+mismatch EK3_SRC1_POSZ from1 to6; complete profile readback verified and running
+bridge reports configuration verified. Bar30 pressure and VN/DVL inputs fresh.
+Refreshed stale installed waypoint HTML; served map controls/Cube stats verified.
+Killed/disarmed ESC-off confirmed; restart selected RF (previously TETHER_LOST).
+Operator will Calibrate/Prepare personally; baseline0 and output withheld at final
+snapshot. No physical mission or post-calibration accuracy measurement yet. See
+ docs/waypoint-deployment-2026-10-15.md. Local clone includes preserved sonar history.
+
+2026-10-15 satellite blank desktop reproduced and fixed: archive level21 requests
+failed at1440x900 while level20 rendered. Cap archived tile requests at20 and
+upscale; current provider retains21. Node desktop regression and live screenshot
+pass. Static HTML deployed with controller/bridge/Prepare identities preserved.
+Operator had calibrated/prepared (known true heading102 captured). Later live
+DVL continuity fault latched with4 dropouts; DVL subsequently fresh/valid at0.729m
+clearance, but supervisor Fault/navigation_ready=false. Old Prepare job ready
+label is historical; do not treat it as current mission permission. No mission.
+Single earlier snapshot Cube172.2/corrected VN171.6, GPS separation0.11m is only
+consistency evidence, not absolute accuracy. See deployment session document.
+
+2026-10-15 implemented explicit surfaced DVL position recovery. New calibration
+page action retains bridge-session north alignment/heading bias and pressure
+baseline, requires killed/disarmed ESC-off plus stationary bottom lock and VN
+continuity, discards uncertain position and waits for new qualified GPS. Generic
+Prepare still resets alignment; recovery avoids magnetic recalibration and north
+recapture for DVL-only faults. No underwater recovery or automatic old mission
+resume. 179 Python regressions and both Node page suites pass; isolated native
+SITL explicit ROS recovery resumes GPS-anchored odometry with reset counter+1.
+See docs/dvl-position-recovery-2026-10-15.md. Installation restart requires one new
+Prepare; routine recovery thereafter does not restart sensors or bridge.
+
+2026-10-15 DVL recovery deployed through140a9c8. Backup20261015-dvl-recovery-230552.
+Caught stale installed Python despite successful build; backed up/refreshed3
+modules, verified actual Trigger recovery service/status field, and179 tests pass
+against installed runtime from/tmp. Page recovery controls visually verified.
+Killed/disarmed ESC-off, RF selected. Restart leaves baseline0/north unaligned;
+operator needs one Prepare now. Magnetic calibration was not run/erased. No
+physical recovery or mission started. Routine DVL-only recovery then retains
+alignment. See docs/dvl-position-recovery-2026-10-15.md for provenance/limits.
+
+2026-10-15 heading graphic clarified at operator request: dot/line replaced by
+explicit Cube bow arrow, exact Cube angle label and north/east legend. Cardinal
+geometry and305deg NW checks pass. Deployed static HTML through89f1e99 without
+restarting navigation; controller/bridge/job identities preserved. Live screenshot
+shows299.7deg arrow pointing NW. No sensor yaw offset or DVL tuning applied.
+12 live samples saved Jetson logs/map-consistency-20261015.json; Cube/bridge NE
+separation roughly0.05–0.08m, GPS separation roughly0.07–0.11m in sampled endpoints.
+These measure consistency only; no independent physical heading/displacement
+reference supplied. Operator says DVL error slight, prioritize graphic heading.
+Also deployed recovery disabled-reason textb70df32: initial post-restart Prepare
+required when no baseline/north exists; no fault bypass introduced.

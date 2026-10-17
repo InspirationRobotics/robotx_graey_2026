@@ -51,6 +51,7 @@ class BridgeEstimator:
         self.raw_velocity = (0., 0., 0.)
         self.velocity_bias = [0., 0., 0.]
         self.heading_bias = 0.
+        self.heading_continuity_lost = False
         self.imu_at = self.motion_at = self.depth_at = None
         self.motion_valid = False
         self.dvl_good_at = None
@@ -85,9 +86,12 @@ class BridgeEstimator:
         return True
 
     def imu(self, now, q, rates):
+        if self.heading_validated and self.imu_at is not None and not self.fresh(self.imu_at, now):
+            self.heading_continuity_lost = True
         norm = sum(v*v for v in q)
         if len(q) != 4 or len(rates) != 3 or not all(math.isfinite(v) for v in (*q, *rates)) or not .9 < norm < 1.1:
             self.imu_at = None
+            self.heading_continuity_lost = True
             if self.initialized:
                 self.fault = 'Invalid VN attitude; revalidate navigation'
             return
@@ -182,6 +186,37 @@ class BridgeEstimator:
 
     def orientation(self):
         return yaw_rotate(self.raw_q, self.north_offset+self.heading_bias)
+
+    def recover_dvl(self, now):
+        """Explicit surfaced re-anchor; never invent displacement across a gap."""
+        if self.fault != 'DVL continuity lost; position uncertainty requires revalidation':
+            raise ValueError('Recovery is only available for a DVL continuity fault')
+        if (not self.heading_validated or self.heading_continuity_lost
+                or not self.fresh(self.imu_at, now)):
+            raise ValueError('VN continuity or north reference lost; Prepare and align north again')
+        if not self.gps_eligible(now) or self.origin is None:
+            raise ValueError('Recovery requires calibrated floating surface and unchanged Cube origin')
+        rows = [r for r in self.history if 0 <= now-r['t'] <= 2.]
+        if (len(rows) < 10 or rows[-1]['t']-rows[0]['t'] < 1.5
+                or now-rows[-1]['t'] > .25 or not self.motion_valid
+                or not self.fresh(self.motion_at, now)):
+            raise ValueError('Hold stationary with continuous DVL bottom lock for two seconds')
+        if any(math.sqrt(sum(v*v for v in r['raw_velocity'])) > .05
+               or max(abs(math.degrees(v)) for v in r['rates']) > 2. for r in rows):
+            raise ValueError('Hold stationary during DVL recovery')
+        clock = self.gps.clock
+        self.gps = GPSAdmission()
+        self.gps.clock = clock
+        self.initialized = False
+        self.position[:2] = [0., 0.]
+        self.horizontal_variance = 9.
+        self.velocity_bias = [0., 0., 0.]
+        self.history.clear()
+        self.pending_gps = self.last_fix = self.last_correction = None
+        self.heading_since, self.heading_count = None, 0
+        self.dvl_gap_start, self.dvl_recovery_count = None, 0
+        self.fault = ''
+        return 'North alignment retained; waiting for fresh qualified GPS to re-anchor position'
 
     def align_known_heading(self, now, degrees):
         if (isinstance(degrees,bool) or not isinstance(degrees,(int,float))
@@ -364,6 +399,7 @@ class BridgeEstimator:
             self.gps.invalidate('Pressure surface eligibility unavailable')
             self.heading_since, self.heading_count = None, 0
         if self.initialized and not self.fresh(self.imu_at, now):
+            self.heading_continuity_lost = True
             self.fault = self.fault or 'VN freshness lost; revalidate navigation'
         if self.initialized and self.dvl_good_at is not None and now-self.dvl_good_at >= .5:
             self.fault = self.fault or 'DVL continuity lost; position uncertainty requires revalidation'
@@ -389,6 +425,7 @@ class BridgeEstimator:
                     position_sigma_m=math.sqrt(self.horizontal_variance),
                     heading_bias_deg=self.heading_bias, velocity_bias_mps=list(self.velocity_bias),
                     heading_reference_validated=self.heading_validated,
+                    heading_continuity_lost=self.heading_continuity_lost,
                     north_alignment=self.north_alignment.status() if self.north_alignment else None)
 
     def covariance(self):

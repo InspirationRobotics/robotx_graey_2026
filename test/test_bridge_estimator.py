@@ -32,6 +32,56 @@ class EstimatorTests(unittest.TestCase):
             self.step()
         self.assertTrue(self.e.status(self.t)['healthy'])
 
+    def recovery_fixture(self):
+        self.acquire()
+        self.e.north_offset = 30.
+        self.e.heading_bias = 2.
+        for _ in range(15):
+            self.t += .05
+            self.e.imu(self.t,(1.,0.,0.,0.),(0.,0.,0.))
+            self.e.pressure_depth(self.t,0.)
+            self.e.dvl(self.t,(),False)
+        for _ in range(45):
+            self.step(gps=False)
+        self.assertIn('DVL continuity lost',self.e.fault)
+
+    def test_explicit_dvl_recovery_retains_heading_and_requalifies_gps(self):
+        self.recovery_fixture()
+        before = self.e.orientation()
+        self.e.recover_dvl(self.t)
+        self.assertEqual(self.e.orientation(),before)
+        self.assertEqual((self.e.north_offset,self.e.heading_bias),(30.,2.))
+        self.assertFalse(self.e.initialized)
+        self.assertFalse(self.e.status(self.t)['healthy'])
+        self.assertIsNone(self.e.last_fix)
+        self.assertFalse(self.e.gps.status(self.t)['qualified'])
+        for _ in range(100):
+            self.step(north=12.)
+        self.assertTrue(self.e.status(self.t)['healthy'])
+        self.assertAlmostEqual(self.e.position[0],12.,places=2)
+
+    def test_dvl_recovery_rejects_vn_loss_even_after_updates_return(self):
+        self.recovery_fixture()
+        self.e.imu(self.t,(0.,0.,0.,0.),(0.,0.,0.))
+        for _ in range(45):self.step(gps=False)
+        with self.assertRaisesRegex(ValueError,'VN continuity'):
+            self.e.recover_dvl(self.t)
+
+    def test_dvl_recovery_rejects_submerged_and_moving(self):
+        self.recovery_fixture()
+        self.e.pressure_depth(self.t,.5)
+        with self.assertRaisesRegex(ValueError,'floating surface'):
+            self.e.recover_dvl(self.t)
+        for _ in range(50):self.step(gps=False,speed=.2)
+        with self.assertRaisesRegex(ValueError,'stationary'):
+            self.e.recover_dvl(self.t)
+
+    def test_dvl_recovery_does_not_clear_unrelated_fault(self):
+        self.recovery_fixture()
+        self.e.fault='Cube restarted; revalidate navigation frame'
+        with self.assertRaisesRegex(ValueError,'only available'):
+            self.e.recover_dvl(self.t)
+
     def test_surface_dwell_and_depth_immediate_rejection(self):
         self.acquire()
         p = tuple(self.e.position)

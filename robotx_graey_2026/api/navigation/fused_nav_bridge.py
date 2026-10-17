@@ -56,6 +56,7 @@ class FusedNavBridge(SteadyNode):
         self.create_subscription(String, '/graey/vn100/calibration', self.calibration_status, 10)
         self.create_service(Trigger, '/graey/navigation/pause_odometry', self.pause_odometry)
         self.create_service(SetBool, '/graey/navigation/prepare', self.prepare)
+        self.create_service(Trigger, '/graey/navigation/recover_dvl', self.recover_dvl)
         self.create_service(SetParametersAtomically, '/graey/navigation/align_heading', self.align_heading)
         if self.settings['sitl_depth_topic']:
             self.create_subscription(Float32, self.settings['sitl_depth_topic'],
@@ -93,6 +94,21 @@ class FusedNavBridge(SteadyNode):
             self.output_permitted = False
             self.est.fault = 'Navigation maintenance; Prepare required before reuse'
             response.success, response.message = True, 'Odometry paused for maintenance'
+        except (ValueError, OSError) as error:
+            response.success, response.message = False, str(error)
+        return response
+
+    def recover_dvl(self, request, response):
+        try:
+            require_maintenance()
+            if not self.configured(time.monotonic()):
+                raise ValueError('Cube external-navigation profile unavailable or mismatched')
+            message = self.est.recover_dvl(time.monotonic())
+            self.reset_counter = (self.reset_counter+1)%256
+            self.last_sent = None
+            self.output_permitted = True
+            self.get_logger().info('DVL_RECOVERY '+message)
+            response.success, response.message = True, message
         except (ValueError, OSError) as error:
             response.success, response.message = False, str(error)
         return response

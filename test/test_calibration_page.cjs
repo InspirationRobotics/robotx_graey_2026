@@ -29,5 +29,9 @@ async function render(state){
  e.trueHeading.value='90';e.headingConfirm.checked=true;e.headingConfirm.onchange();assert(!e.prepare.disabled);
  await e.prepare.onclick();assert.equal(page.posts[0].alignment_mode,'known');assert.equal(page.posts[0].true_heading_deg,90);assert(page.posts[0].heading_confirmed);
  assert(html.includes('not an independent compass reference'));assert(html.includes('not save flash'));
- console.log('Calibration page confirmations, stale/armed controls, progress and instructions pass');
+ const recovery={controller:safe,job:{phase:'ready'},navigation:{streams:{bridge:{fresh:true,data:{fault:'DVL continuity lost; position uncertainty requires revalidation',heading_reference_validated:true,heading_continuity_lost:false,inputs:{vn:true,dvl:true}}}}}};
+ page=await render(recovery);e=page.elements;assert(e.recoverDvl.disabled);e.surfaceConfirm.checked=true;e.surfaceConfirm.onchange();assert(!e.recoverDvl.disabled);
+ await e.recoverDvl.onclick();assert.equal(page.posts[0].action,'recover_dvl');assert(page.posts[0].surface_confirmed);
+ page=await render({...recovery,controller:{...safe,armed:true}});e=page.elements;e.surfaceConfirm.checked=true;e.surfaceConfirm.onchange();assert(e.recoverDvl.disabled);
+ console.log('Calibration/recovery page confirmations, stale/armed controls, progress and instructions pass');
 })().catch(error=>{console.error(error);process.exit(1)});

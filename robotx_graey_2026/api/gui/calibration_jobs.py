@@ -20,6 +20,7 @@ class ServiceQueue:
             ('suspend','/graey/navigation/suspend',Trigger),
             ('pause','/graey/navigation/pause_odometry',Trigger),
             ('prepare','/graey/navigation/prepare',SetBool),
+            ('recover_dvl','/graey/navigation/recover_dvl',Trigger),
             ('align_heading','/graey/navigation/align_heading',SetParametersAtomically),
             ('calibrate','/graey/vn100/calibrate_start',Trigger),
             ('cancel','/graey/vn100/calibrate_cancel',Trigger),
@@ -90,7 +91,7 @@ class CalibrationJobs:
 
     def request(self, body):
         action = body.get('action')
-        if action not in ('calibrate','prepare','cancel'):
+        if action not in ('calibrate','prepare','recover_dvl','cancel'):
             raise ValueError('Unknown calibration action')
         if action == 'cancel':
             with self.lock:
@@ -104,7 +105,7 @@ class CalibrationJobs:
             raise ValueError(reason or 'Stop the mission before calibration or preparation')
         if body.get('confirmed') is not True:
             raise ValueError('Confirm that you read the instructions and maintained kill/disarm')
-        if action == 'prepare' and body.get('surface_confirmed') is not True:
+        if action in ('prepare','recover_dvl') and body.get('surface_confirmed') is not True:
             raise ValueError('Confirm floating stationary at the water surface before pressure calibration')
         mode=body.get('alignment_mode','gps')
         heading=body.get('true_heading_deg')
@@ -132,7 +133,8 @@ class CalibrationJobs:
     def run(self, action):
         try:
             self.service('suspend')
-            self.service('pause')
+            if action != 'recover_dvl':
+                self.service('pause')
             if self.snapshot().get('cancel'):
                 raise ValueError('Preparation cancelled; navigation remains suspended')
             if action == 'calibrate':
@@ -158,7 +160,7 @@ class CalibrationJobs:
                     self.sleep(.5)
                 self.service('cancel')
                 raise ValueError('Calibration timed out; inspect sensor status')
-            self.update(phase='preparing',message=self.service('prepare',True))
+            self.update(phase='preparing',message=(self.service('recover_dvl') if action=='recover_dvl' else self.service('prepare',True)))
             # While the first suspend/pause/reset was in flight, supervisor can
             # legitimately latch the OLD bridge fault. Wait for post-reset clean
             # bridge status, then explicitly suspend once more while maintained.
@@ -176,7 +178,7 @@ class CalibrationJobs:
             if self.snapshot().get('cancel') or maintenance_reason(self.controller()):
                 raise ValueError('Preparation cancelled or safety state changed')
             self.service('suspend')
-            if self.snapshot().get('alignment_mode')=='known':
+            if action!='recover_dvl' and self.snapshot().get('alignment_mode')=='known':
                 self.update(message='Hold level and stationary with kill engaged; capturing measured true heading')
                 self.sleep(2.2)
                 if self.snapshot().get('cancel') or maintenance_reason(self.controller()):

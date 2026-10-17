@@ -351,10 +351,18 @@ class KillSwitch(Node):
         return self.vehicle_fresh() and self.mode in AUTO_MODES
 
     def mission_claimed(self):
-        # Conservative interlock for GUI selection/recovery only.
+        # Lease interlock for selection/recovery and stale pilot retries.
+        # It never grants arming or bypasses kill/connection health checks.
         return self.now() < self.auto_until
 
     def on_auto(self, msg):
+        if msg.data and not self.mission_claimed():
+            # A pilot retry can predate mission ownership. Do not let its
+            # three-second resend window disarm or force MANUAL after GUIDED.
+            self.cmd_until = 0.0
+            self.mission_disarm_until=0.0
+            pwm=self.rc.get(self.arm_ch,0)
+            self.armed_req=(pwm>self.high) if valid(pwm) else None
         self.auto_until = self.now() + 2.0 if msg.data else 0.0
 
     def request_rc(self):
@@ -420,6 +428,7 @@ class KillSwitch(Node):
     def cancel_arm_request(self):
         self.cmd_until = 0.0
         self.armed_req = None
+        self.mission_disarm_until=0.0
 
     def disarm(self):
         self.link.command(
@@ -644,6 +653,9 @@ class KillSwitch(Node):
             'esc_commanded_on': self.esc_commanded_on,
             'autonomous': self.autonomous(),
             'mission_claimed': self.mission_claimed(),
+            'pilot_arm_switch_pwm': self.rc.get(self.arm_ch) if self.rc_fresh() else None,
+            'pilot_mode_switch_pwm': self.rc.get(self.mode_ch) if self.rc_fresh() else None,
+            'pilot_retry_remaining_s': max(0.,self.cmd_until-self.now()),
             'can_select_rf': self.select_reason('RF') is None,
             'can_select_tether': self.select_reason('TETHER') is None,
             'can_recover_tether': self.recovery_reason() is None,
@@ -747,6 +759,21 @@ class KillSwitch(Node):
 
     def do_arm(self, pwm, selected_healthy):
         want = pwm > self.high
+
+        if self.autonomous() or self.mission_claimed():
+            previous=self.armed_req
+            self.armed_req=want
+            self.cmd_until=0.0
+            # Only a NEW deliberate SB high-to-low edge disarms a mission.
+            # Static SB-low or an old retry is not a mission disarm command.
+            if previous is True and not want:
+                self.get_logger().warn('Pilot DISARM edge during mission')
+                self.mission_disarm_until=self.now()+CMD_HOLD_S
+            elif want:
+                self.mission_disarm_until=0.0
+            if self.now()<getattr(self,'mission_disarm_until',0.) and self.armed is not False:
+                self.disarm()
+            return
 
         # Adopt the current switch after kill/recovery/source change.
         # A later low-to-high transition is needed for a new ARM request.

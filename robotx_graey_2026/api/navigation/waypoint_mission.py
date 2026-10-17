@@ -148,6 +148,11 @@ class WaypointMission(Node):
         status = self.logic.snapshot()
         status.update(simulation=self.sim, published_monotonic=now,
                       telemetry_fresh=bool(o['fresh']), confirmed_source=self.supervisor.get('confirmed_source'))
+        status['control_evidence']={k:self.safety.get(k) for k in (
+            'source','inhibit','armed','mode','sa_active','esc_commanded_on',
+            'mission_claimed','pilot_arm_switch_pwm','pilot_mode_switch_pwm','pilot_retry_remaining_s')}
+        status['cube_mode_id']=o.get('mode')
+        status['cube_armed']=o.get('armed')
         if self.logic.stage != self.last_stage:
             self.last_stage = self.logic.stage
             self.get_logger().info('WAYPOINT_STAGE '+json.dumps(status, allow_nan=False))
