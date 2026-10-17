@@ -1121,3 +1121,8 @@ fallback, one depth source for baseline/GPS/odometry, and vertical-offset change
 and pressure overshoot guards0.15m. 215 tests + GUI checks pass. See
 robotx_graey_2026/docs/depth-pressure-source-2026-10-17.md. Satellite mapping uses
 geographic tiles; no surveyed evidence yet separates image offset from GNSSbias.
+
+2026-10-17 pressure-fix deployment attempt blocked before changes: controller
+still reports armed/kill released/ESC-on despite user confirmation. Code9003d0a
+pushed; Jetson remains1efe6fd. Do not claim pressure fix deployed. Await matching
+live maintenance state. No source/service/parameter changes made by failed run.

@@ -74,3 +74,6 @@ sensor-instance mapping error; transport regression uses the observed mapping.
 
 Final native GUI waypoint simulation waypoint-b857686e92 passed with DVL and supervisor interruptions, target0.5m and final simulated horizontal error0.105m. GUI now names the selected pressure channel and distinguishes DVL bottom clearance. No physical dive was run by the agent.
 
+
+Deployment attempt stopped before any source/service changes: fresh controller telemetry reported armed=true, sa_active=false, esc_commanded_on=true despite user reporting killed/disarmed. Code9003d0a is pushed, but Jetson remains1efe6fd until states agree. No safety gate bypassed. Recheck safe state before deploying.
+
