@@ -5,7 +5,7 @@
 <header><strong>Graey · calibration</strong><a href="/">System</a><a href="/waypoint">Waypoint mission</a><a href="/navigation">Sensor readings</a></header>
 <main><h1>Calibrate, align north, then prepare</h1>
 <p class="intro">VN-100 supplies external attitude. DVL supplies velocity, GPS anchors surface position and north alignment, and pressure supplies depth. Cube EKF combines bridge odometry with its onboard inertial measurements and controls the vehicle. A Cube heading comparison checks fusion consistency; it is not an independent compass reference.</p>
-<div id="status" role="status" aria-live="polite">Connecting…</div><p id="message" role="alert"></p>
+<div id="status" role="status" aria-live="polite">Connecting…</div><p id="message" role="alert"></p><style>#alignmentStatus{white-space:pre-line}</style>
 <div class="grid"><section class="card"><h2>1 · Calibrate VN magnetic sensor</h2>
 <ol><li>Keep the assembled sub powered, <strong>disarmed, kill engaged and ESC power off</strong>. Keep VN mounted in its normal position.</li><li>Choose a place away from nearby metal and changing magnetic sources. Support the sub safely with room and tether slack for rotation.</li><li>Click <strong>Calibrate VN</strong>. Wait for “Rotate now” before moving it.</li><li>Over 120 seconds, slowly turn through yaw, pitch and roll: upright, inverted, left side, right side, nose up and nose down. Keep kill engaged throughout.</li><li>Check that all six face counters reach at least five. Coverage collected does not certify accuracy. Settings remain volatile; this does not save flash.</li></ol>
 <label><input type="checkbox" id="calConfirm">I read the rotation instructions and will maintain disarm, kill and ESC-off throughout.</label>
@@ -46,8 +46,28 @@ $('progress').value=v?.phase==='collecting'?120-v.remaining_s:v?.phase==='collec
 $('calibrate').disabled=sending||!safe||j.busy||!$('calConfirm').checked;$('prepare').disabled=sending||!safe||j.busy||!$('surfaceConfirm').checked||!v||v?.phase==='collecting'||v?.phase==='failed';$('cancel').disabled=sending||!fresh||!j.busy;
 const known=$('alignmentMode').value==='known',heading=Number($('trueHeading').value);$('knownInstructions').hidden=!known;
 const distance=Number($('alignmentDistance').value),motion=sample('north_maneuver');
-$('alignAuto').disabled=sending||!fresh||!j.busy||j.action!=='prepare'||j.alignment_mode!=='gps'||j.auto_started||known||!$('clearanceConfirm').checked||!Number.isFinite(distance)||distance<3||distance>10||!c.vehicle_fresh||c.armed!==true||c.mode!=='MANUAL'||c.sa_active!==false||c.esc_commanded_on!==true||!!c.inhibit||!b?.gps_eligible||!b?.inputs?.vn||!b?.inputs?.dvl||!b?.gps_admission?.qualified;
-$('alignmentStatus').textContent=j.auto_verified?'Automatic north maneuver verified for this bridge session. Disarm and engage kill for commissioning; brief DVL recovery does not require a new alignment.':motion?`${motion.stage} · ${motion.reason} · travel ${number(motion.distance_m)} / ${number(motion.maximum_distance_m)} m`:'Prepare first, then wait for qualified sensors. Enable propulsion in MANUAL only when the corridor is clear.';
+const alignmentBlocks=[];
+if(sending)alignmentBlocks.push('Request in progress');
+if(!fresh||!c.online||!c.vehicle_fresh)alignmentBlocks.push('Fresh controller telemetry required');
+if(!j.busy||j.action!=='prepare')alignmentBlocks.push('Run Prepare Navigation first while floating stationary, killed and disarmed; magnetic calibration alone does not prepare navigation');
+if(known||j.alignment_mode!=='gps')alignmentBlocks.push('Choose GPS/DVL surface movement');
+if(c.inhibit)alignmentBlocks.push('Control inhibited: '+c.inhibit+'; restore the selected control link and follow its normal recovery procedure');
+if(!b)alignmentBlocks.push('Bridge telemetry unavailable');
+if(b?.fault)alignmentBlocks.push('Bridge: '+b.fault);
+for(const [name,value] of Object.entries(b?.profile_mismatches||{}))alignmentBlocks.push(`${name}: ${value.actual??'unavailable'}; required ${value.expected}`);
+if(!b?.inputs?.vn)alignmentBlocks.push('Wait for fresh VN');
+if(!b?.inputs?.dvl)alignmentBlocks.push('Wait for valid DVL bottom lock');
+if(!b?.gps_eligible)alignmentBlocks.push('Surface pressure baseline/antenna exposure not confirmed');
+if(!b?.gps_admission?.qualified)alignmentBlocks.push('GPS: '+(b?.gps_admission?.reason||'not qualified'));
+if(!Number.isFinite(distance)||distance<3||distance>10)alignmentBlocks.push('Enter a travel limit from 3 to 10 m');
+if(!$('clearanceConfirm').checked)alignmentBlocks.push('Confirm clear travel plus stopping clearance');
+if(c.armed!==true||c.mode!=='MANUAL'||c.sa_active!==false||c.esc_commanded_on!==true)alignmentBlocks.push('After Prepare and sensor checks pass, deliberately enable propulsion and arm in MANUAL to run the movement script');
+if(c.mission_claimed||c.autonomous)alignmentBlocks.push('Another mission owns control');
+if(b?.north_alignment?.aligned&&!j.auto_started)alignmentBlocks.push('North is already aligned; wait for verification instead of starting another movement');
+$('alignAuto').disabled=alignmentBlocks.length>0||!!j.auto_started;
+const motionText=motion?`${motion.stage} · ${motion.reason} · travel ${number(motion.distance_m)} / ${number(motion.maximum_distance_m)} m`:'Automatic movement ready. Start only with a clear corridor and immediate takeover available.';
+$('alignmentStatus').textContent=j.auto_verified?'Automatic north maneuver verified for this bridge session. Disarm and engage kill for commissioning; brief DVL recovery does not require a new alignment.':j.auto_started?motionText:alignmentBlocks.length?'Alignment blocked:\n• '+alignmentBlocks.join('\n• '):motionText;
+$('alignAuto').title=alignmentBlocks.join('; ');
 if(known&&(!$('headingConfirm').checked||String($('trueHeading').value??'').trim()===''||!Number.isFinite(heading)||heading<0||heading>=360))$('prepare').disabled=true;
 $('alignmentMode').disabled=sending||!!j.busy;$('trueHeading').disabled=sending||!!j.busy;$('headingConfirm').disabled=sending||!!j.busy;
 }

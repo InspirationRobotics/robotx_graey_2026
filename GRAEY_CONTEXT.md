@@ -1070,3 +1070,12 @@ bridge disabled/Observation; EK3_SRC1_POSZ actual1 vs required6 unchanged (no li
 parameter writes). No alignment maneuver or mission started. Backup:
  /home/graey/deployment-backups/20261017-navigation-203454. See deployment doc and
  docs/evidence/deployment-2026-10-17.json. Jetson clock showedOct13; sessionOct17.
+
+2026-10-17 alignment-button investigation: live calibration collected, but no
+Prepare job; RF_LOST inhibit, DVL invalid, baseline0 and EK3_SRC1_POSZ1 vs6 remain.
+Button was correctly interlocked but hid the reasons. Calibration HTML now lists
+all blockers, including Prepare-vs-calibration distinction, control/sensor state,
+exact parameter mismatch and clearance/arming prerequisites. Enables on qualified
+state; no bypass of safety or server gates. Node test covers the actual blocked
+snapshot and a ready state. Static-only deployment; no restart/calibration reset
+or live parameter change required.

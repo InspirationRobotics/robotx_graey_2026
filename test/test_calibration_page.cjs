@@ -37,6 +37,10 @@ async function render(state){
  e.alignmentDistance.value='6';e.clearanceConfirm.checked=true;e.clearanceConfirm.onchange();assert(!e.alignAuto.disabled);
  await e.alignAuto.onclick();assert.equal(page.posts[0].action,'align_auto');assert.equal(page.posts[0].max_distance_m,6);assert(page.posts[0].clearance_confirmed);
  page=await render({...auto,controller:safe});e=page.elements;e.clearanceConfirm.checked=true;e.alignmentDistance.value='6';e.clearanceConfirm.onchange();assert(e.alignAuto.disabled);
+ const blocked={controller:{...safe,sa_active:false,inhibit:'RF_LOST'},job:{action:'calibrate',phase:'collected',busy:false,alignment_mode:'gps'},navigation:{streams:{bridge:{fresh:true,data:{fault:'Navigation maintenance; Prepare required before reuse',inputs:{vn:true,dvl:false},profile_mismatches:{EK3_SRC1_POSZ:{actual:1,expected:6}}}}}}};
+ page=await render(blocked);e=page.elements;assert(e.alignAuto.disabled);
+ for(const reason of ['Prepare Navigation first','RF_LOST','DVL bottom lock','EK3_SRC1_POSZ: 1; required 6'])assert(e.alignmentStatus.textContent.includes(reason),reason);
+ assert(e.alignAuto.title.includes('RF_LOST'));
  page=await render({...recovery,controller:{...safe,armed:true}});e=page.elements;e.surfaceConfirm.checked=true;e.surfaceConfirm.onchange();assert(e.recoverDvl.disabled);
  console.log('Calibration/recovery page confirmations, stale/armed controls, progress and instructions pass');
 })().catch(error=>{console.error(error);process.exit(1)});
