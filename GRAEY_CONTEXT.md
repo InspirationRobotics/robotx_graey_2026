@@ -1089,3 +1089,16 @@ DVL still invalid at final snapshot; baseline0/north unaligned until Prepare.
 Evidence: docs/evidence/posz-profile-correction-2026-10-17.json. Earlier deployment
 notes describing the parameter blocker are historical; this correction supersedes
 that blocker. Supervisor still Observation until normal preparation/commission.
+
+2026-10-17 robust DVL/GPS follow-up: verified deployed730fd75 latched after six
+DVL dropouts exhausted a cumulative0.75m allowance despite fresh valid DVL.
+Replaced lifetime allowance with existing position-uncertainty validity policy:
+one-second bounded coast, output withheld after that, automatic consistent-DVL
+reacquisition unless actual modeled position sigma exceeds existing5m ceiling.
+Preserve north/reference on routine reacquisition; no automatic mission restart.
+GPS movement anchors now survive dropout, retain stationary reference beyond
+rolling window and reject confidently inconsistent GPS speed. Existing pressure,
+timing, accuracy and stationary-hold gates remain. Cannot detect constant bias.
+210 Python + both GUI tests pass; native DVL recovery fee0ad0d and GUI waypoint
+7f690703db pass (QGC forwarding disabled; no physical mission). See
+robotx_graey_2026/docs/dvl-gps-recovery-2026-10-17.md for scope and deployment.

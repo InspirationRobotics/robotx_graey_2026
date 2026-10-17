@@ -36,7 +36,7 @@ class EstimatorTests(unittest.TestCase):
         self.acquire()
         self.e.north_offset = 30.
         self.e.heading_bias = 2.
-        for _ in range(25):
+        for _ in range(80):
             self.t += .05
             self.e.imu(self.t,(1.,0.,0.,0.),(0.,0.,0.))
             self.e.pressure_depth(self.t,0.)
@@ -130,8 +130,10 @@ class EstimatorTests(unittest.TestCase):
     def test_dvl_loss_latches_without_zero_velocity(self):
         self.acquire()
         self.e.dvl(self.t+.05, (), False)
-        self.e.status(self.t+.6)
-        self.t += .6
+        self.e.imu(self.t+4.,(1.,0.,0.,0.),(0.,0.,0.))
+        self.e.pressure_depth(self.t+4.,0.)
+        self.e.status(self.t+4.)
+        self.t += 4.
         for _ in range(50):
             self.step()
         self.assertTrue(self.e.fault)
@@ -161,9 +163,9 @@ class EstimatorTests(unittest.TestCase):
 
     def test_dvl_absent_without_invalid_packet_still_latches(self):
         self.acquire()
-        self.e.imu(self.t+1.01,(1.,0.,0.,0.),(0.,0.,0.))
-        self.e.pressure_depth(self.t+1.01,0.)
-        self.assertIn('DVL continuity',self.e.status(self.t+1.01)['fault'])
+        self.e.imu(self.t+4.,(1.,0.,0.,0.),(0.,0.,0.))
+        self.e.pressure_depth(self.t+4.,0.)
+        self.assertIn('DVL continuity',self.e.status(self.t+4.)['fault'])
 
     def test_inconsistent_recovery_velocities_cannot_reenable_output(self):
         self.acquire()
@@ -270,14 +272,37 @@ class EstimatorTests(unittest.TestCase):
 
     def test_repeated_dropouts_cannot_erase_unknown_displacement_budget(self):
         self.acquire()
-        for cycle in range(20):
+        for cycle in range(100):
             self.t+=.05
             self.e.imu(self.t,(1.,0.,0.,0.),(0.,0.,0.))
             self.e.pressure_depth(self.t,0.);self.e.dvl(self.t,(),False)
             for _ in range(6):self.step(gps=False)
             if self.e.fault:break
         self.assertTrue(self.e.fault)
-        self.assertGreaterEqual(self.e.missing_distance_bound,.75)
+        self.assertGreater(self.e.horizontal_variance,25.)
+
+    def test_six_dropouts_do_not_latch_arbitrary_lifetime_budget(self):
+        self.acquire()
+        for cycle in range(6):
+            self.t+=.05
+            self.e.imu(self.t,(1.,0.,0.,0.),(0.,0.,0.))
+            self.e.pressure_depth(self.t,0.);self.e.dvl(self.t,(),False)
+            for _ in range(8):self.step(gps=False)
+            self.assertFalse(self.e.fault)
+            self.assertTrue(self.e.status(self.t)['healthy'])
+        self.assertTrue(self.e.heading_validated)
+
+    def test_silence_stops_prediction_then_recovers_without_recalibration(self):
+        self.acquire()
+        self.e.imu(self.t+1.2,(1.,0.,0.,0.),(0.,0.,0.))
+        self.e.pressure_depth(self.t+1.2,0.)
+        s=self.e.status(self.t+1.2)
+        self.assertFalse(s['healthy']);self.assertFalse(self.e.fault)
+        self.assertEqual(s['dvl_continuity']['state'],'WAITING_FOR_DVL')
+        self.t+=1.2
+        for _ in range(8):self.step(gps=False)
+        self.assertTrue(self.e.status(self.t)['healthy'])
+        self.assertTrue(self.e.heading_validated)
 
     def test_coasting_never_supplies_a_gps_or_north_measurement(self):
         self.acquire();self.e.dvl(self.t+.05,(),False)
