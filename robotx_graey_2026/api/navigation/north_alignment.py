@@ -19,8 +19,11 @@ class NorthAlignment:
         self.reference = None
         self.reason = 'Make a steady surface movement with qualified GPS and DVL'
 
-    def reject(self, reason):
-        self.samples.clear()
+    def reject(self, reason, reset=False):
+        # A rejected measurement is not a request to erase all accepted windows.
+        # Their finite lifetime is enforced when the next valid sample arrives.
+        if reset:
+            self.samples.clear()
         self.reason = reason
         return False
 
@@ -32,7 +35,7 @@ class NorthAlignment:
             return False
         if self.last_fix is not None and stamp < self.last_fix:
             self.last_fix = stamp
-            return self.reject('GPS time regressed during north alignment')
+            return self.reject('GPS time regressed during north alignment', reset=True)
         self.last_fix = stamp
         speed, course, sigma = (fix.get(k) for k in
                                ('speed_mps', 'course_deg', 'speed_accuracy_mps'))
@@ -56,18 +59,20 @@ class NorthAlignment:
             return self.reject('Keep rotation below 5 deg/s during north alignment')
         if abs(speed-horizontal) > max(.15, 3*sigma):
             return self.reject('GPS and DVL speeds disagree during north alignment')
-        if self.samples and not 0 < now-self.samples[-1][0] <= .5:
+        if self.samples and not 0 < now-self.samples[-1][0] <= 4.:
             self.samples.clear()
         angle = wrap(course-math.degrees(math.atan2(world_velocity[1], world_velocity[0])))
         self.samples.append((now, angle, horizontal))
-        while self.samples and now-self.samples[0][0] > 6.:
+        while self.samples and now-self.samples[0][0] > 12.:
             self.samples.pop(0)
         mean = math.degrees(math.atan2(sum(math.sin(math.radians(s[1])) for s in self.samples),
                                       sum(math.cos(math.radians(s[1])) for s in self.samples)))
         if any(abs(wrap(s[1]-mean)) > 5 for s in self.samples):
-            return self.reject('North alignment inconsistent; repeat steady surface movement')
-        span = now-self.samples[0][0]
-        distance = sum((b[0]-a[0])*(a[2]+b[2])/2 for a, b in zip(self.samples, self.samples[1:]))
+            return self.reject('North alignment inconsistent; repeat steady surface movement', reset=True)
+        # Invalid/missing intervals never count toward duration or distance.
+        pairs=[(a,b) for a,b in zip(self.samples,self.samples[1:]) if 0 < b[0]-a[0] <= .5]
+        span = sum(b[0]-a[0] for a,b in pairs)
+        distance = sum((b[0]-a[0])*(a[2]+b[2])/2 for a,b in pairs)
         if span < 5 or len(self.samples) < 15 or distance < 2.5:
             self.reason = f'Collecting north alignment: {span:.1f}/5 s; {distance:.1f}/2.5 m'
             return False

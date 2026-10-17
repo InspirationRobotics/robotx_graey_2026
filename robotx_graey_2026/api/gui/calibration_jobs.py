@@ -74,12 +74,13 @@ class ServiceQueue:
 
 
 class CalibrationJobs:
-    def __init__(self, controller, navigation, service, mission_running, clock=time.monotonic, sleep=time.sleep):
+    def __init__(self, controller, navigation, service, mission_running, clock=time.monotonic, sleep=time.sleep, maneuver=None):
         self.controller, self.navigation, self.service = controller, navigation, service
         self.mission_running, self.clock, self.sleep = mission_running, clock, sleep
         self.lock = threading.RLock()
         self.job = dict(phase='idle',message='Read instructions before starting',busy=False)
         self.waypoint_permission = False
+        self.maneuver = maneuver
 
     def snapshot(self):
         with self.lock:
@@ -91,6 +92,21 @@ class CalibrationJobs:
 
     def request(self, body):
         action = body.get('action')
+        if action == 'align_auto':
+            with self.lock:
+                if (not self.maneuver or not self.job.get('busy') or self.job.get('action')!='prepare'
+                        or self.job.get('alignment_mode')!='gps' or self.job.get('auto_started')):
+                    raise ValueError('Run GPS/DVL Prepare before starting one automatic alignment maneuver')
+                if body.get('clearance_confirmed') is not True:
+                    raise ValueError('Confirm clear surface travel and stopping clearance')
+                b=self.sample('bridge')
+                if (not b or b.get('fault') or not b.get('gps_eligible') or not b.get('inputs',{}).get('dvl')
+                        or not b.get('inputs',{}).get('vn') or not (b.get('gps_admission') or {}).get('qualified')
+                        or (b.get('north_alignment') or {}).get('aligned')):
+                    raise ValueError('Wait for qualified surface GPS, DVL and VN before starting movement')
+                self.maneuver('start',body.get('max_distance_m'))
+                self.job.update(auto_started=True,auto_started_at=self.clock(),phase='aligning',message='Automatic surface alignment started; keep clear and supervise Abort')
+                return self.snapshot()
         if action not in ('calibrate','prepare','recover_dvl','cancel'):
             raise ValueError('Unknown calibration action')
         if action == 'cancel':
@@ -99,6 +115,8 @@ class CalibrationJobs:
                     raise ValueError('No active job to cancel')
                 self.job['cancel'] = True
                 self.waypoint_permission = False
+                if self.maneuver and self.job.get('auto_started'):
+                    self.maneuver('abort',None)
             return self.snapshot()
         reason = maintenance_reason(self.controller())
         if reason or self.mission_running():
@@ -210,6 +228,27 @@ class CalibrationJobs:
                         message += '; previous reset: '+gps['last_rejection']
                     message += '. Stay stationary until GPS is qualified.'
                 self.update(north=a,message=message)
+                if self.snapshot().get('auto_started') and not self.snapshot().get('auto_verified'):
+                    motion=self.sample('north_maneuver')
+                    started=self.snapshot()['auto_started_at']
+                    stamp=motion.get('published_monotonic',-math.inf)
+                    if not started <= stamp <= self.clock() or self.clock()-stamp > .7:
+                        # ROS CLI import/discovery may take several seconds.
+                        # Once a status has arrived, loss is a short deadline;
+                        # startup grace never permits stale motion commands.
+                        seen=self.snapshot().get('auto_last_status_at')
+                        if (seen is not None and self.clock()-seen > .7) or self.clock()-started > 10:
+                            raise ValueError('Automatic alignment status missing or stale; Abort requested')
+                        self.sleep(.2)
+                        continue
+                    self.update(auto_last_status_at=stamp)
+                    if motion.get('stage')=='ABORTED':
+                        raise ValueError('Alignment maneuver stopped: '+motion.get('reason','Inspect navigation'))
+                    if motion.get('stage')!='COMPLETE':
+                        self.update(message=motion.get('reason','Waiting for automatic alignment maneuver'))
+                        self.sleep(.2)
+                        continue
+                    self.update(auto_verified=True)
                 if s.get('state') == 'Fault':
                     raise ValueError(s.get('reason','Navigation fault'))
                 if a.get('aligned'):
@@ -229,4 +268,6 @@ class CalibrationJobs:
                 self.sleep(1.)
             raise ValueError('Preparation timed out; no waypoint permission granted')
         except Exception as error:
+            if self.maneuver and self.snapshot().get('auto_started'):
+                self.maneuver('abort',None)
             self.update(phase='failed',busy=False,message=str(error))

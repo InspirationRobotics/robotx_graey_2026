@@ -160,6 +160,19 @@ class NorthTests(unittest.TestCase):
         for i in range(50):
             a.observe(i, self.fix(i), (1.,0.,0.), (0.,0.,0.), (1.,0.,0.,0.))
         self.assertIsNone(a.offset)
+
+    def test_rejected_sample_retains_recent_accepted_windows_but_gap_does_not_count(self):
+        a=NorthAlignment()
+        for i in range(13):a.observe(i*.2,self.fix(i*.2),(1.,0.,0.),(0.,0.,0.),(1.,0.,0.,0.))
+        count=len(a.samples)
+        a.reject('DVL briefly unavailable')
+        self.assertEqual(len(a.samples),count)
+        # Pause two seconds, then collect only 0.4 s: elapsed wall time exceeds
+        # five seconds but there is insufficient accepted motion to align.
+        for i in range(3):a.observe(4.8+i*.2,self.fix(4.8+i*.2),(1.,0.,0.),(0.,0.,0.),(1.,0.,0.,0.))
+        self.assertIsNone(a.offset)
+        for i in range(3,18):a.observe(4.8+i*.2,self.fix(4.8+i*.2),(1.,0.,0.),(0.,0.,0.),(1.,0.,0.,0.))
+        self.assertIsNotNone(a.offset)
         a = NorthAlignment()
         for i in range(100):
             a.observe(i*.2, self.fix(i*.2, course=90.+(20 if i%2 else 0)),

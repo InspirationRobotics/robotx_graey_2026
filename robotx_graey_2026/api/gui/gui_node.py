@@ -75,6 +75,7 @@ LED_SOURCE = 'pixhawk_led_node'
 
 MISSION = 'prequal_mission_cv'
 MISSION_EXECUTABLES = (
+    'north_maneuver',
     'waypoint_mission',
     'sitl_mission',
     'prequal_mission',
@@ -127,6 +128,33 @@ waypoint_aborts = queue.Queue()
 waypoint_process = None
 waypoint_launch = None
 calibration_jobs = None
+north_process = None
+north_aborts = queue.Queue()
+north_cancel_pending = False
+
+
+def north_maneuver_request(action, distance):
+    global north_process, north_cancel_pending
+    if action == 'abort':
+        north_aborts.put(True)
+        return
+    from robotx_graey_2026.api.navigation.north_maneuver import NorthManeuver
+    NorthManeuver(time.monotonic(),distance)  # Validate before starting a process.
+    c=control_bridge.snapshot() if control_bridge else {}
+    if not (c.get('online') and c.get('vehicle_fresh') and c.get('armed') is True
+            and c.get('mode')=='MANUAL' and c.get('sa_active') is False
+            and c.get('esc_commanded_on') is True and not c.get('inhibit')
+            and not c.get('mission_claimed')):
+        raise ValueError('Deliberately enable propulsion and arm in MANUAL; keep the surface corridor clear')
+    if any_mission_running() or (north_process is not None and north_process.poll() is None):
+        raise ValueError('Another mission or alignment maneuver is running')
+    while not north_aborts.empty():north_aborts.get_nowait()
+    north_cancel_pending=False
+    folder=Path(os.environ.get('GRAEY_WAYPOINT_LOG_DIR',str(Path.home()/'robotx_ws/logs')))
+    folder.mkdir(parents=True,exist_ok=True)
+    with (folder/('north-maneuver-'+uuid.uuid4().hex+'.log')).open('w') as log:
+        north_process=subprocess.Popen(['ros2','run','robotx_graey_2026','north_maneuver','--ros-args',
+            '-p','max_distance_m:='+str(float(distance))],stdout=log,stderr=subprocess.STDOUT)
 
 
 def waypoint_simulation():
@@ -478,7 +506,8 @@ def pids_for(name):
 
 
 def any_mission_running():
-    return ((waypoint_process is not None and waypoint_process.poll() is None)
+    return ((north_process is not None and north_process.poll() is None)
+            or (waypoint_process is not None and waypoint_process.poll() is None)
             or any(pids_for(name) for name in MISSION_EXECUTABLES))
 
 
@@ -631,6 +660,9 @@ def mission_start(query):
 
 
 def mission_stop():
+    if (north_process is not None and north_process.poll() is None) or pids_for('north_maneuver'):
+        north_aborts.put(True)
+        return True, 'North alignment abort requested; verify neutral thrust and take control'
     if waypoint_launch and waypoint_process is not None and waypoint_process.poll() is None:
         waypoint_aborts.put(waypoint_launch['run_id'])
         return True, 'Waypoint abort requested; verify MANUAL mode and take control'
@@ -945,7 +977,7 @@ class GuiNode(Node):
         self.control_bridge = control_bridge
         self.calibration_services = ServiceQueue(self)
         calibration_jobs = CalibrationJobs(control_bridge.snapshot,navigation.snapshot,
-            self.calibration_services.request,any_mission_running)
+            self.calibration_services.request,any_mission_running,maneuver=north_maneuver_request)
         self.create_timer(.05,self.calibration_services.pump)
         self.create_subscription(String, '/graey/vn100/calibration',
             lambda msg: self.calibration_sample('vn_calibration',msg),10)
@@ -987,6 +1019,9 @@ class GuiNode(Node):
         self.create_subscription(String, '/graey/navigation/status', self.on_navigation_status, 10)
         self.create_subscription(String, '/graey/waypoint/status', self.on_waypoint_status, 10)
         self.waypoint_abort_pub = self.create_publisher(String, '/graey/waypoint/abort', 10)
+        self.north_abort_pub = self.create_publisher(String, '/graey/navigation/north_abort', 10)
+        self.create_subscription(String,'/graey/navigation/north_maneuver',
+            lambda msg:self.calibration_sample('north_maneuver',msg),10)
         self.waypoint_abort_runs = set()
         self.create_timer(.2, self.flush_waypoint_aborts)
         self.create_timer(0.1, self.pump)
@@ -1020,6 +1055,12 @@ class GuiNode(Node):
             pass
 
     def flush_waypoint_aborts(self):
+        global north_cancel_pending
+        if not north_aborts.empty():
+            while not north_aborts.empty():north_aborts.get_nowait()
+            north_cancel_pending=True
+        if north_cancel_pending:
+            self.north_abort_pub.publish(String(data='cancel'))
         while not waypoint_aborts.empty():
             self.waypoint_abort_runs.add(waypoint_aborts.get_nowait())
         current = navigation.snapshot()['streams'].get('waypoint', {}).get('data', {})

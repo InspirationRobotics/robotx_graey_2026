@@ -23,6 +23,7 @@ def api(body=None):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--abort', action='store_true')
+    parser.add_argument('--dvl-dropout',action='store_true',help='Inject brief invalid DVL during underwater transit')
     parser.add_argument('--continuous', action='store_true', default=True)
     parser.add_argument('--auto-north', action='store_true', help='Manual surface movement with a 40-degree synthetic VN reference error')
     args=parser.parse_args()
@@ -57,6 +58,15 @@ def main():
     manual_link = None
     alignment_stopped = False
     alignment_drive_started = None
+    injector=None
+    if args.dvl_dropout:
+        os.environ.update(ROS_DOMAIN_ID='73',ROS_LOCALHOST_ONLY='1')
+        import rclpy
+        from std_msgs.msg import String
+        from rclpy.clock import Clock,ClockType
+        rclpy.init();injector=rclpy.create_node('waypoint_short_dvl_dropout')
+        dvl_pub=injector.create_publisher(String,'/graey/dvl/sample',10)
+        dvl_clock=Clock(clock_type=ClockType.STEADY_TIME)
     try:
         with (folder/'runner.log').open('w') as output:
             proc=subprocess.Popen(['bash','sitl/run.sh'],cwd=root,env=env,stdout=output,
@@ -114,6 +124,11 @@ def main():
                         if not result['stages'] or result['stages'][-1]!=m['stage']: result['stages'].append(m['stage'])
                         gps=streams.get('gps',{}).get('data',{})
                         if m['stage']=='TRANSIT':
+                            if args.dvl_dropout and not result.get('dvl_dropout_injected'):
+                                for _ in range(3):
+                                    dvl_pub.publish(String(data=json.dumps(dict(stamp_ns=dvl_clock.now().nanoseconds,velocity=[],valid=False,sensor_time=None))))
+                                    time.sleep(.03)
+                                result['dvl_dropout_injected']=True
                             result['gps_outage_seen'] |= gps.get('fix',99)<3
                             result['underwater_cube_seen'] |= bool(c['valid'] and c['heading_deg'] is not None and s.get('depth_m',0)>.4)
                             if args.abort and result['gps_outage_seen'] and not abort_sent:
@@ -134,6 +149,10 @@ def main():
                             if args.auto_north:
                                 result['passed'] &= bool(alignment_stopped and abs(
                                     result.get('north_alignment',{}).get('offset_deg',999)+40.) < 5.)
+                            if args.dvl_dropout:
+                                b=streams.get('bridge',{}).get('data',{})
+                                result['dvl_continuity']=b.get('dvl_continuity')
+                                result['passed'] &= bool(result.get('dvl_dropout_injected') and not b.get('fault') and (b.get('dvl_continuity') or {}).get('dropouts',0)>0)
                             break
                 except (OSError,KeyError,ValueError) as error:
                     result['last_retry']=str(error)
@@ -141,6 +160,8 @@ def main():
             else: result['error']='Validation deadline exceeded'
     except Exception as error: result['error']=repr(error)
     finally:
+        if injector:
+            injector.destroy_node();rclpy.shutdown()
         if manual_link:
             manual_link.mav.manual_control_send(1,0,0,500,0,0)
             manual_link.mav.command_long_send(1,1,400,0,0,0,0,0,0,0,0)

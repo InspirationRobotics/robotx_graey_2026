@@ -1013,3 +1013,33 @@ changes: live armed MANUAL, kill released, ESC-on, TETHER. Await user disarm/kil
 Retry /home/graey/deploy-stationary-hold.py with sudo after fresh safety check;
 script then installs changed estimator/supervisor and forces verified runtime
 copies. Requires new Prepare after restart. See stationary-position-hold doc.
+
+2026-10-17 authorized recovery/north work on tether_toggle_beichen only (local
+implementation; NOT deployed). Operator confirmed north/east position feedback
+with VN retained for body-to-world orientation, and a separately started bounded
+surface alignment maneuver with a pool-aware travel limit. Bridge now coasts
+brief DVL gaps at last trusted earth velocity, grows uncertainty and automatically
+reacquires consistent DVL; supervisor trusts this bounded health instead of raw
+per-packet lock. One-second/0.75m accumulated missing-distance limits remain
+provisional stop conditions. No calibration, north or origin reset on brief loss.
+New /calibration automatic alignment button drives only after operator enables
+propulsion and arms in MANUAL; never arms/releases kill itself. Uses raw relative
+VN yaw, qualified GPS/DVL, travel/time/speed/rotation bounds, then a 3-second
+stationary verification and killed/disarmed Cube commissioning. This is not
+geographic position hold or obstacle avoidance. Existing waypoint code already
+uses NED position setpoints, not timed heading/distance driving. Off-target
+underwater/surface re-anchoring policy documented as consideration only; no new
+behavior implemented. 198 Python and both Node page suites pass; isolated native
+GUI waypoint with underwater DVL dropout passes (~0.153m simulated error), and
+GUI automatic north alignment recovered an injected 40-degree reference error.
+See docs/recovery-and-automatic-north-2026-10-17.md for failed runs, evidence,
+provisional assumptions and wet-test limitations. The reported long-term VN
+heading error remains undiagnosed; this is not a fix for that sensor problem.
+2026-10-17 final validation: 202 Python regressions and both Node page suites pass.
+Final GUI/native automatic north run e691860d passes with bounded DVL velocity
+braking for the stationary check (5.080m within6m; injected40deg alignment error
+recovered). Earlier passive-coast and freshness/startup failures are documented,
+not hidden. Native waypoint388892ffec completes despite injected underwater DVL
+loss; recovery2c0beae6 passes. Evidence and source hashes are in
+ docs/evidence/recovery-north-2026-10-17.json. No vehicle deployment or physical
+accuracy verification occurred this session.

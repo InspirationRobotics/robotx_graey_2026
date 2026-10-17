@@ -60,11 +60,24 @@ class FusedNavBridge(SteadyNode):
         self.create_service(SetParametersAtomically, '/graey/navigation/align_heading', self.align_heading)
         if self.settings['sitl_depth_topic']:
             self.create_subscription(Float32, self.settings['sitl_depth_topic'],
-                lambda m: self.est.pressure_depth(time.monotonic(), m.data), 20)
+                self.sitl_depth, 20)
         # Service TIMESYNC faster than its 50 ms RTT acceptance bound. Keep
         # ODOMETRY/status at 20 Hz separately below.
         self.create_timer(.01, self.tick)
         self.create_timer(1., self.request)
+        self.create_timer(.2, self.sync_clock)
+
+    def sitl_depth(self, msg):
+        # The isolated depth fixture must also exercise Prepare's pressure
+        # history requirement, rather than bypassing the production service.
+        now=time.monotonic()
+        if not math.isfinite(msg.data) or not -.25 <= msg.data <= 100:
+            self.est.pressure_depth(now,math.nan)
+            return
+        pressure=1013.25+msg.data*self.settings['water_density']*9.80665/100
+        self.pressures.append((now,pressure))
+        base=self.settings['surface_pressure_hpa']
+        self.est.pressure_depth(now,(pressure-base)*100/(self.settings['water_density']*9.80665) if base>0 else math.nan)
 
     def calibration_status(self, msg):
         try:
@@ -183,11 +196,17 @@ class FusedNavBridge(SteadyNode):
 
     def request(self):
         self.link.heartbeat()
-        self.link.send('timesync_send', 0, self.est.gps.clock.request(time.monotonic_ns()))
+        self.sync_clock()
         for mid in (24, 137, 49):
             self.link.command(511, mid, 100000)
         for name in PROFILE:
             self.link.send('param_request_read_send', 1, 1, name.encode(), -1)
+
+    def sync_clock(self):
+        now=time.monotonic_ns()
+        pending=self.est.gps.clock.pending
+        if pending is None or now-pending > 50000000:
+            self.link.send('timesync_send',0,self.est.gps.clock.request(now))
 
     def configured(self, now):
         return all(k in self.params and self.params[k][1] == v and 0 <= now-self.params[k][0] < 3.
@@ -246,7 +265,8 @@ class FusedNavBridge(SteadyNode):
         configured = self.configured(now)
         if self.start_checked and self.output_permitted and configured and status['healthy'] and (self.last_sent is None or now-self.last_sent >= .05):
             self.link.odometry(self.est.position, self.est.orientation(), self.est.velocity(),
-                               self.est.rates, reset_counter=self.reset_counter, covariance=self.est.covariance(), quality=80)
+                               self.est.rates, reset_counter=self.reset_counter, covariance=self.est.covariance(),
+                               quality=40 if status.get('dvl_continuity',{}).get('prediction_active') else 80)
             self.last_sent = now
         status.update(instance=self.instance, fusion_policy='bridge_odometry',
                       clock_mapping=dict(offset=self.est.gps.clock.offset,
@@ -262,6 +282,7 @@ class FusedNavBridge(SteadyNode):
                       inputs=dict(vn=self.est.fresh(self.est.imu_at, now),
                                   dvl=self.est.motion_valid and self.est.fresh(self.est.motion_at, now)),
                       heading_vn=dict(received=self.est.imu_at, yaw=yaw(self.est.orientation()) % 360,
+                                      raw_yaw=yaw(self.est.raw_q) % 360,
                                       rate=math.degrees(self.est.rates[2])),
                       heading_dvl=dict(received=self.est.motion_at, velocity=self.est.velocity(),
                                        valid=self.est.motion_valid))

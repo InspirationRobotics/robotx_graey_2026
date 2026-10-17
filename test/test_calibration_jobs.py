@@ -8,6 +8,38 @@ from robotx_graey_2026.api.navigation.vn_calibration import VNCalibration
 
 
 class CalibrationJobsTests(unittest.TestCase):
+    def test_missing_automatic_maneuver_status_fails_without_commission(self):
+        self.job.job=dict(busy=True,cancel=False,auto_started=True,auto_started_at=0.)
+        self.put('supervisor',dict(north_alignment=dict(aligned=True)))
+        self.job.run('prepare')
+        self.assertEqual(self.job.snapshot()['phase'],'failed')
+        self.assertIn('status missing',self.job.snapshot()['message'])
+        self.assertNotIn(('commission',None),self.calls)
+
+    def test_verified_maneuver_completion_survives_child_status_expiry(self):
+        self.job.job=dict(busy=True,cancel=False,auto_started=True,auto_started_at=0.,auto_verified=True)
+        self.put('supervisor',dict(north_alignment=dict(aligned=True)))
+        self.job.run('prepare')
+        self.assertTrue(self.job.waypoint_permission)
+
+    def test_automatic_alignment_requires_prepare_clearance_and_qualified_inputs(self):
+        from unittest.mock import Mock
+        self.job.maneuver=Mock()
+        with self.assertRaisesRegex(ValueError,'Run GPS/DVL Prepare'):
+            self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=6.))
+        self.job.job=dict(busy=True,action='prepare',alignment_mode='gps')
+        with self.assertRaisesRegex(ValueError,'Confirm clear'):
+            self.job.request(dict(action='align_auto',max_distance_m=6.))
+        with self.assertRaisesRegex(ValueError,'Wait for qualified'):
+            self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=6.))
+        self.put('bridge',dict(gps_eligible=True,inputs=dict(vn=True,dvl=True),gps_admission=dict(qualified=True)))
+        self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=6.))
+        self.job.maneuver.assert_called_once_with('start',6.)
+        self.assertTrue(self.job.snapshot()['auto_started'])
+        self.assertFalse(self.job.waypoint_permission)
+        self.job.request(dict(action='cancel'))
+        self.job.maneuver.assert_called_with('abort',None)
+
     def test_dvl_recovery_requires_surface_confirmation_and_safe_controller(self):
         with self.assertRaisesRegex(ValueError,'floating stationary'):
             self.job.request(dict(action='recover_dvl',confirmed=True))

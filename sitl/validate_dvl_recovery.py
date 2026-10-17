@@ -36,12 +36,12 @@ try:
     deadline=time.monotonic()+4
     while time.monotonic()<deadline:
         b=read()
-        if b['dvl_continuity']['dropouts']>before and b['healthy'] and b['transmitting']:break
+        if b['dvl_continuity']['dropouts']>before and b['healthy'] and b['transmitting'] and not b['dvl_continuity']['recovering']:break
         time.sleep(.02)
     else:raise RuntimeError('Short invalid DVL did not recover')
     result.update(short_drop_recovered=True,short_status=b)
-    # Continuous invalid reports prevent two consecutive valid recovery samples.
-    deadline=time.monotonic()+.8
+    # Continuous invalid reports exceed the bounded one-second coast envelope.
+    deadline=time.monotonic()+1.3
     while time.monotonic()<deadline:
         pub.publish(String(data=json.dumps(dict(stamp_ns=clock.now().nanoseconds,velocity=[0.,0.,0.],valid=False,sensor_time=None))))
         time.sleep(.005)

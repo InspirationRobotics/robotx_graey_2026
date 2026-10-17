@@ -236,7 +236,10 @@ class NavigationSupervisor(Node):
         intent = self.fresh('intent') or {}
         depth = self.fresh('depth')
         pose = self.fresh('pose', 0.5)
-        checks = [('Cube link', self.fresh('heartbeat', 3)), ('EKF estimate', self.fresh('ekf', 2)), ('Cube position', pose), ('DVL velocity', self.fresh('dvl', 0.5)), ('DVL validity', self.fresh('dvl_valid', 0.5)), ('VN-100', self.fresh('vn', 0.5))]
+        # The bridge owns bounded DVL dropout prediction and its uncertainty.
+        # Raw bottom-lock state remains visible and gates north/reference capture;
+        # it must not independently abort an already-authorized dive per packet.
+        checks = [('Cube link', self.fresh('heartbeat', 3)), ('EKF estimate', self.fresh('ekf', 2)), ('Cube position', pose), ('VN-100', self.fresh('vn', 0.5))]
         checks.append(('Navigation bridge', (self.fresh('bridge', 0.5) or {}).get('healthy')))
         checks.append(('Odometry output', (self.fresh('bridge', 0.5) or {}).get('transmitting')))
         checks.append(('Bridge position uncertainty', (self.fresh('bridge', 0.5) or {}).get('navigation_valid')))
