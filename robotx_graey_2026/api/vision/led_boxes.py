@@ -45,17 +45,33 @@ def colour_fractions(rgb):
     }
 
 
+def red_green_fractions(rgb):
+    """The survey's colours (Ruth, Oct 17): while the pipeline is surveyed its lights are
+    only GREEN or RED, so every bright, strongly coloured pixel counts as whichever of
+    the two its hue is nearer. On the hue circle that is simply g > r: yellow (r = g)
+    and blue (r = g, b high) are the boundaries. A green LED's cyan fringe is green,
+    not a third colour (Oct 16 footage: 'blue' 4% at a green light's edge)."""
+    d = rgb.astype(np.int16)
+    r, g = d[..., 0], d[..., 1]
+    mx, mn = d.max(-1), d.min(-1)
+    bright = (mx > 140) & (mx - mn > 70)
+    n = float(r.size)
+    return {'red': float((bright & (r > g)).sum()) / n, 'green': float((bright & (g > r)).sum()) / n}
+
+
 class BoxTracker:
-    def __init__(self, min_frac=0.02, gap_s=1.0, same_m=0.5, new_frac=0.04, minor_share=0.35):
+    def __init__(self, min_frac=0.02, gap_s=1.0, same_m=0.5, new_frac=0.04, minor_share=0.35,
+                 palette='all'):
         self.min_frac, self.gap_s, self.same_m = min_frac, gap_s, same_m
         self.new_frac, self.minor_share = new_frac, minor_share
+        self.fractions = red_green_fractions if palette == 'red-green' else colour_fractions
         self.boxes = []            # dicts: n, e, colour, colours {colour: peak share}, sightings, first_t, last_t
         self._cur = {}             # colour -> the sighting of it in progress
 
     def update(self, t, rgb, pos):
         """One frame at time t (s); pos = (north, east) of the camera, or None.
         Returns the boxes whose sightings just ended (new or seen again): a list."""
-        f = colour_fractions(rgb)
+        f = self.fractions(rgb)
         top = max(f.values())
         done = []
         for colour, share in f.items():
