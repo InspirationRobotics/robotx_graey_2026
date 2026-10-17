@@ -249,6 +249,8 @@ class PipelineMission(MissionBase):
         p('follow_sector', '240 300')       # sonar looks straight down +-30 deg: one cross-section per sweep
         p('follow_range', 2.5)              # m; short range, quicker pings
         p('follow_band', '0.12 0.65')       # m ABOVE THE FLOOR (DVL altitude): pipe top ~0.3, box top ~0.45
+        p('follow_near_m', 0.3)             # look this close while following (0 = the 0.75 m blind zone):
+                                            # the pool pipe sat 0.5-0.7 m under the sonar (Oct 16)
         p('follow_band_from', 'floor')      # 'sonar': follow_band is m from the sonar, up + (Ruth, Oct 16:
                                             # the pool pipe sits 0.6-0.85 m under the sonar wherever the floor is)
         p('sonar_above_dvl_m', 0.3)         # the floor shows at DVL altitude + this (every pool session)
@@ -310,6 +312,7 @@ class PipelineMission(MissionBase):
             raise ValueError(f"pool_after_pick must be follow or approach, not {self.after_pick!r}")
         self.follow_sector, self.follow_range = g('follow_sector'), float(g('follow_range'))
         self.follow_band = tuple(float(v) for v in g('follow_band').split())
+        self.follow_near = float(g('follow_near_m'))
         self.follow_band_from = g('follow_band_from').strip().lower()
         if self.follow_band_from not in ('floor', 'sonar'):
             raise ValueError(f"follow_band_from must be floor or sonar, not {self.follow_band_from!r}")
@@ -997,7 +1000,7 @@ class PipelineMission(MissionBase):
         self.map_post('/threshold', threshold)
         self.map_post('/floorcut', 0.0)
         self.map_post('/compact', 'on' if self.pool_compact else 'off')
-        self.map_post('/near', 'off')
+        self.map_post('/near', str(self.follow_near) if self.follow_near > 0 else 'off')
         self.map_post('/far', 'off')
         self.map_post('/fade', 'off')
         band = self.follow_band_now()
@@ -1034,7 +1037,7 @@ class PipelineMission(MissionBase):
             self.f_t0 = self.f_sweep_t = self.f_log_t = self.now()
             self.f_seen = None                  # nothing moves until the pipe shows under the sonar
             self.f_dist, self.f_logged, self.f_period, self.f_sweep = 0.0, 0.0, 8.0, m.get('sweep', 0)
-            self.f_lat, self.f_known, self.f_box = 0.0, set(), None
+            self.f_lat, self.f_known, self.f_box, self.f_line = 0.0, set(), None, None
             self.f_reversed, self.f_hold_pt, self.f_leg_t0, self.f_creep0 = False, None, self.now(), None
             self.f_start, self.f_dir0 = (here[0], here[1]), self.f_dir.copy()
             self.start_camera()
@@ -1088,6 +1091,7 @@ class PipelineMission(MissionBase):
             under = fresh & (np.abs(along) <= 0.2) & (np.abs(across) <= 0.6)
             if under.any():
                 self.f_lat = float(np.median((c[under] - sonar) @ right))
+                self.f_line = sonar + self.f_lat * right        # a point ON the pipe, fixed in NED
                 self.f_seen = now
                 # a box sits on the pipe (~0.15 m tall): a fresh dot clearly above the pipe's line
                 level = corridor & ~fresh
@@ -1134,6 +1138,7 @@ class PipelineMission(MissionBase):
                     pass
             self.f_dir, self.f_reversed = -self.f_dir, True
             self.f_seen, self.f_leg_t0, self.f_lat, self.f_creep0, self.f_hold_pt = None, now, 0.0, None, None
+            self.f_line = None
             return
         if now - seen > self.follow_lost:
             why = (f'no pipe under the sonar for {self.follow_lost:.0f} s (it ended, or it was lost)'
@@ -1179,7 +1184,10 @@ class PipelineMission(MissionBase):
             tn, te = self.f_hold_pt
         else:
             self.f_hold_pt, self.f_creep0 = None, None
-            goal = sonar + self.f_lat * right + d * v                # where the sonar should be in ~1 s
+            # sideways: to the pipe as last seen, a fixed point - not f_lat from wherever the sonar
+            # is now, which slid the sub on past the pipe between 5 s sweeps (pool, Oct 16)
+            lat = float((self.f_line - sonar) @ right) if self.f_line is not None else 0.0
+            goal = sonar + lat * right + d * v                       # where the sonar should be in ~1 s
             tn, te = goal[0] - ahead * math.cos(h), goal[1] - ahead * math.sin(h)
         self.stream_posvel(tn, te, self.hold[2], v * d[0], v * d[1], rate, 'follow')
         if self.f_dist - self.f_logged >= 0.5 or now - self.f_log_t >= (2.0 if self.dry else 10.0):
@@ -1239,6 +1247,7 @@ class PipelineMission(MissionBase):
             ahead = sonar_settings.SONAR_FWD_M
             self.f_dir = d.copy()
             self.f_seen, self.f_leg_t0, self.f_lat, self.f_creep0, self.f_hold_pt = None, now, 0.0, None, None
+            self.f_line = None
             self.f_prev = np.array([here[0] + ahead * math.cos(h), here[1] + ahead * math.sin(h)])
             self.get_logger().info(f'    following the other part: heading {math.degrees(math.atan2(d[1], d[0])) % 360:.0f} deg')
             if self.recording:
