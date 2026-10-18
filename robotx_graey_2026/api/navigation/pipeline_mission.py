@@ -672,6 +672,9 @@ class PipelineMission(MissionBase):
         elif ph == 'follow backup':
             self.follow_back_up()
 
+        elif ph == 'survey turn':
+            self.survey_turn_first()
+
         elif ph == 'repair go':
             self.repair_go()
 
@@ -1074,8 +1077,26 @@ class PipelineMission(MissionBase):
     def follow_map(self):
         if self.survey:
             self.survey_begin()
+            if self.s_turn_first:               # the buoy is behind: turn first, then follow
+                here = self.cur if self.cur else self.hold
+                self.s_turn_at = (here[0], here[1])
+                self.carrot, self.last_t = self.s_turn_at, self.now()
+                self.get_logger().info('    turning 180 on the spot toward the buoy first, then following')
+                self.to_phase('survey turn')
+                return
         self.look_view('follow start')
         self.to_phase('follow start')
+
+    def survey_turn_first(self):
+        """The buoy is behind the sub: turn on the spot before following. Turning while
+        following made the pipe come and go under the swinging sonar for 30 s, which read
+        as the buoy end after 1.0 m (pool, Oct 17). The map is reset once turned."""
+        d = self.f_dir
+        _, err = self.walk_to(self.s_turn_at, self.return_speed, math.atan2(d[1], d[0]), 'turning toward the buoy')
+        if abs(err) < math.radians(5) or (self.dry and self.now() - self.state_t0 > 5):
+            self.get_logger().info('    turned toward the buoy - following from here')
+            self.look_view('follow start')
+            self.to_phase('follow start')
 
     def look_view(self, what):
         """The map's follow settings (straight down, the band from the floor), then a reset
@@ -1481,6 +1502,7 @@ class PipelineMission(MissionBase):
         it - the lights are noted from that end on (handbook: the report starts with the
         part of the pipeline closest to the active buoy)."""
         self.s_red, self.s_red_new, self.s_repair_mono, self.s_track = None, False, None, []
+        self.s_turn_first = False
         if self.survey_buoy == 'here':
             self.s_leg = 'survey'
             self.get_logger().info('survey: starting at the buoy end - noting the lights from here')
@@ -1500,6 +1522,7 @@ class PipelineMission(MissionBase):
             return
         if float(to_buoy @ self.f_dir) < 0:
             self.f_dir = -self.f_dir                       # the way along the pipe that gets closer to it
+            self.s_turn_first = True
         self.s_leg = 'to buoy'
         self.get_logger().info(f'survey: the green buoy ({where}) is {np.linalg.norm(to_buoy):.1f} m away - '
                                f'first along the pipe the way that gets closer to it, heading '
