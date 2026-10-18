@@ -268,6 +268,11 @@ class PipelineMission(MissionBase):
         p('follow_gate_m', 0.3)             # once seen, only echoes this far (sideways) from the pipe's
                                             # line count as the pipe (0 = off): not the wall (Oct 17)
         p('follow_gate_up_m', 0.2)          # ... and this far above or below the pipe's height
+        p('follow_threshold', 80)           # echo strength that makes a dot while following. 100 (the
+                                            # scan's) lost a tilted segment after an elbow: replayed, the map
+                                            # made 0 dots there at 100 and 2-6 a sweep at 80 (pool, Oct 17)
+        p('follow_start_gate_m', 0.25)      # before the first sighting: only this far to the side
+                                            # (line the sub up with the pipe straight below)
         p('follow_lost_s', 30.0)            # no pipe under the sonar this long: lost or ended
         p('follow_max_m', 8.0)              # stop after following this far
         p('follow_time_s', 300.0)           # ... or after this long (under phase_timeout)
@@ -310,6 +315,9 @@ class PipelineMission(MissionBase):
                                             # for the magnet repair); 0: just note it and go on (Ruth, Oct 17:
                                             # the magnet isn't on the sub yet)
         p('light_same_m', 0.3)              # sightings this close together are one light
+        p('light_min_share', 0.10)          # a new light must fill this share of the picture at its
+                                            # peak: real lights 12-61%, glimpses at the edge 5-8%, which
+                                            # sat in the wrong place and were counted twice (Oct 16-17)
         p('survey_backup_m', 0.6)           # at the buoy end, after turning 180: back up this far, so the
                                             # camera (0.2 m behind the sonar) starts at the end
         p('survey_dir', 'sonar_data')       # the survey report (JSON) is written here
@@ -351,6 +359,8 @@ class PipelineMission(MissionBase):
         self.follow_yaw = math.radians(g('follow_yaw_dps'))
         self.follow_fit, self.follow_lost = float(g('follow_fit_m')), float(g('follow_lost_s'))
         self.follow_gate, self.follow_gate_up = float(g('follow_gate_m')), float(g('follow_gate_up_m'))
+        self.follow_start_gate = float(g('follow_start_gate_m'))
+        self.follow_threshold = int(g('follow_threshold'))
         self.f_up = None
         self.follow_max, self.follow_time = float(g('follow_max_m')), float(g('follow_time_s'))
         self.follow_both, self.follow_toward = bool(g('follow_both_ways')), float(g('follow_toward'))
@@ -389,6 +399,7 @@ class PipelineMission(MissionBase):
                 raise ValueError(f'survey_buoy:=marked but no green buoy saved in {self.buoy_file} ({ex}): '
                                  f'run follow_mode:=mark_buoy with the sub at the buoy first')
         self.repair_hold, self.light_same = float(g('repair_hold_s')), float(g('light_same_m'))
+        self.light_min_share = float(g('light_min_share'))
         self.survey_backup = float(g('survey_backup_m'))
         self.survey_dir = g('survey_dir')
         self.s_leg = None                   # survey: 'to buoy', then 'survey'
@@ -1106,10 +1117,9 @@ class PipelineMission(MissionBase):
     def look_view(self, what):
         """The map's follow settings (straight down, the band from the floor), then a reset
         so the map holds only what this look sees; f_hold = where to hold meanwhile."""
-        _, sector, threshold, _ = self.scans['pool']
         self.map_post('/range', self.follow_range)
         self.map_post('/sector', self.follow_sector)
-        self.map_post('/threshold', threshold)
+        self.map_post('/threshold', self.follow_threshold)
         self.map_post('/floorcut', 0.0)
         self.map_post('/compact', 'on' if self.pool_compact else 'off')
         self.map_post('/near', str(self.follow_near) if self.follow_near > 0 else 'off')
@@ -1220,7 +1230,9 @@ class PipelineMission(MissionBase):
             if self.f_line is not None and self.follow_gate > 0:
                 near = np.abs(across - float((self.f_line - sonar) @ right)) <= self.follow_gate
             else:
-                near = np.abs(across) <= 0.8
+                # not seen yet: only almost straight below counts - the first sighting is what the
+                # gate then holds on to, and 0.5 m to the side it was the wall (pool, Oct 17)
+                near = np.abs(across) <= self.follow_start_gate
             if self.f_up is not None and self.follow_gate_up > 0:
                 near &= np.abs(up - self.f_up) <= self.follow_gate_up
             corridor = near & (along >= -self.follow_fit) & (along <= 0.4)
@@ -1500,7 +1512,8 @@ class PipelineMission(MissionBase):
 
     def start_camera(self):
         if (self.camera_boxes or self.survey) and self.camera is None:
-            tracker = led_boxes.LightTracker(same_m=self.light_same) if self.survey else None
+            tracker = (led_boxes.LightTracker(same_m=self.light_same, new_frac=self.light_min_share)
+                       if self.survey else None)
             self.camera = led_boxes.CameraWatcher(self.camera_url, self.camera_at,
                                                   lambda t: self.get_logger().info('    ' + t), self.on_box,
                                                   tracker=tracker).start()
