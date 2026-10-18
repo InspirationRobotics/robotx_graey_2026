@@ -1222,3 +1222,16 @@ remains. North commissioning NOT passed; no compass-to-bridge code deployed/enab
 Final profile matches, all COMPASS_USE*=0, ENABLE1, killed/disarmedESCoff. Next resolve
 mounting/frame vs magnetic bias and control MAVProxy autoaccept before recalibrating.
 See docs/m9n-compass-assessment-2026-10-17.md and evidence.
+
+2026-10-17 user stopped compass work and changed waypoint mission to surface travel.
+Implemented locally: GUI/default plans surface(depth0); explicit legacy dive only.
+SURFACE_NAV captures per-run reference, direct TRANSIT at pressure surface zero;
+qualified GPS aids existing DVL/VN bridge, rejects bad/stale/jumping fixes. GPS-only
+loss continues healthy DVL/VN max10s or3m cumulative travel, then MANUAL takeover.
+Arrival requires fresh admitted GPS within1.5m (accuracy<=2m), Cube<=.35m and low
+speed/surface depth. Existing kill/pilot/fault guards retained. Surface preparation
+retains valid exposure across<=4s GPS-only gaps, excluding rejected time;30s window.
+232tests+GUIpass. Native isolated GUI SITL2sGPSgap completed;12sgap yielded MANUAL.
+Initial WAIT_SURFACE timeout retained as failed evidence and brittleness fixed.
+No deployment/liveparams/mission for this request. Compass remains uncommissioned.
+See docs/surface-waypoint-2026-10-17.md and evidence; simulator accuracy not live truth.

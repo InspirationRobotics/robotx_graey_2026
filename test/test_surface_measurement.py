@@ -3,6 +3,17 @@ from robotx_graey_2026.api.navigation.surface_measurement import SurfaceMeasurem
 
 
 class SurfaceTests(unittest.TestCase):
+    def test_surface_mode_retains_valid_exposure_but_excludes_gps_gap(self):
+        s=SurfaceMeasurement(tolerated_gps_gap=4.)
+        for i in range(61):r=s.update(i*.2,self.sample(i*.2))
+        for i in range(61,76):
+            t=i*.2;b=self.sample(t);b['gps_admission']['qualified']=False
+            r=s.update(t,b);self.assertFalse(r['ready'])
+        for i in range(76,114):
+            t=i*.2;r=s.update(t,self.sample(t));self.assertFalse(r['ready'])
+        for i in range(114,119):r=s.update(i*.2,self.sample(i*.2))
+        self.assertTrue(r['ready'])
+
     def sample(self,t,north=0.,accuracy=1.):
         return dict(healthy=True,surfaced=True,gps_eligible=True,position_ned=[0.,0.,0.],
                     gps_observation=dict(received=t,cube_fix_time_us=round(t*1e6),lat=33.+north/111320,lon=-117.,accuracy=accuracy),

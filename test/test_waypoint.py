@@ -9,7 +9,7 @@ class WaypointTests(unittest.TestCase):
     def setUp(self):
         self.origin = (32.92357, -117.03855, 0.)
         lat, lon = ne_to_geo(1., 0., self.origin)
-        self.plan = dict(lat=lat, lon=lon, depth_m=.5, map='geographic')
+        self.plan = dict(lat=lat, lon=lon, depth_m=.5, map='geographic',mode='dive')
         self.run = WaypointRun(self.plan, 'run', 0.)
         self.now = 0.
         self.o = dict(fresh=True, surface_measurement=dict(ready=True), mode=19, armed=False, origin=self.origin, local=(0.,0.,0.),

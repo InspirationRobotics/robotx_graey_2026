@@ -49,7 +49,7 @@ class WaypointMission(Node):
         self.last_pause = False
         self.last_trace = -math.inf
         self.sent_target = None
-        self.surface_measurement=SurfaceMeasurement()
+        self.surface_measurement=SurfaceMeasurement(tolerated_gps_gap=4. if self.logic.plan['mode']=='surface' else 0.)
         self.surface_measurement_status={}
         self.fc_status_text = []
         self.pub = self.create_publisher(String, '/graey/waypoint/status', 10)
@@ -170,7 +170,21 @@ class WaypointMission(Node):
             and b.get('healthy') is True and b.get('navigation_valid') is True
             and b.get('transmitting') is True and b.get('configuration_verified') is True
             and not b.get('fault'))
+        gps=b.get('gps_admission') or {}
+        fix=b.get('gps_observation') or {}
+        gps_current=bool(0<=now-getattr(self,'bridge_time',-math.inf)<.3
+            and b.get('gps_eligible') is True and gps.get('qualified') is True
+            and (gps.get('applied_recently') is True or gps.get('stationary_validated_recently') is True))
+        gps_at_target=False
+        if gps_current:
+            try:
+                from .waypoint_logic import geo_to_ne
+                gps_at_target=(0<fix['accuracy']<=2. and math.dist(geo_to_ne(fix['lat'],fix['lon'],
+                    (self.logic.plan['lat'],self.logic.plan['lon'])),(0.,0.))<=1.5)
+            except (KeyError,ValueError,TypeError):
+                pass
         return dict(fresh=fresh, failure=failure, abort=self.aborted,
+            surface_gps_current=gps_current,surface_gps_at_target=gps_at_target,
             dvl_continuity=b.get('dvl_continuity') if 0<=now-getattr(self,'bridge_time',-math.inf)<.3 else {},
             vertical_limits_verified=limits_ready,
             navigation_hold_safe=hold_safe,
@@ -184,7 +198,7 @@ class WaypointMission(Node):
     def tick(self):
         now = time.monotonic()
         self.sequence += 1
-        # Keep the underwater profile through ascent; recover GPS after disarm.
+        # Surface missions keep SURFACE intent throughout; no GPS source switch.
         if self.logic.stage not in self.logic.terminal:
             self.intent_pub.publish(String(data=json.dumps(dict(run_id=self.logic.run_id,
                 phase=self.logic.phase, sequence=self.sequence, target_gps=self.logic.plan))))

@@ -22,13 +22,17 @@ def ne_to_geo(north, east, origin):
 def validate_plan(value):
     if not isinstance(value, dict):
         raise ValueError('Expected waypoint object')
-    lat, lon, depth = (value.get(k) for k in ('lat', 'lon', 'depth_m'))
+    lat, lon = (value.get(k) for k in ('lat', 'lon'))
+    mode = value.get('mode', 'surface')
+    if mode not in ('surface', 'dive'):
+        raise ValueError('Unknown waypoint mission mode')
+    depth = 0. if mode == 'surface' else value.get('depth_m')
     geo_to_ne(lat, lon, (0., 0.))
-    if isinstance(depth, bool) or not isinstance(depth, (int, float)) or not math.isfinite(depth) or not .3 <= depth <= 1.0:
+    if mode == 'dive' and (isinstance(depth, bool) or not isinstance(depth, (int, float)) or not math.isfinite(depth) or not .3 <= depth <= 1.0):
         raise ValueError('Dive depth must be 0.3 to 1.0 m')
     if value.get('map') not in ('pool', 'geographic'):
         raise ValueError('Unknown map')
-    return dict(lat=float(lat), lon=float(lon), depth_m=float(depth), map=value['map'])
+    return dict(lat=float(lat), lon=float(lon), depth_m=float(depth), map=value['map'], mode=mode)
 
 
 class WaypointRun:
@@ -55,9 +59,14 @@ class WaypointRun:
         self.navigation_wait_limit = .7
         self.abort_context = None
         self.vertical_offset_error = None
+        self.last_surface_gps = None
+        self.last_surface_gps_position = None
+        self.surface_unconfirmed_distance = 0.
 
     @property
     def phase(self):
+        if self.plan['mode'] == 'surface':
+            return 'SURFACE_NAV'
         if self.stage in ('WAIT_SURFACE', 'RECOVER_GPS', 'COMPLETE'):
             return 'SURFACE'
         return 'DIVE' if self.stage in ('PREPARE', 'GUIDED', 'ARM', 'DIVE') else 'UNDERWATER'
@@ -176,7 +185,7 @@ class WaypointRun:
             if not failure and s.get('state')!='Fault':
                 hold=self.navigation_wait(now,o,'Navigation permission temporarily unavailable: '+str(s.get('reason')))
                 if hold is not None:return hold
-            failure = failure or 'Underwater navigation permission or reference lost: '+str(s.get('reason'))
+            failure = failure or 'Navigation permission or reference lost: '+str(s.get('reason'))
         if s.get('state') == 'Fault':
             failure = 'Supervisor fault: '+str(s.get('reason'))
         if failure:
@@ -235,19 +244,40 @@ class WaypointRun:
             if not s.get('navigation_ready') or not s.get('reference_current'):
                 self.abort(now, 'Navigation permission lost before arming')
                 return self.command(now, 'manual') if o.get('mode') == 4 else []
+            if self.plan['mode']=='surface' and o.get('surface_gps_current') is not True:
+                self.reason='Waiting for current admitted GPS before surface departure'
+                return []
             if self.stage == 'GUIDED':
                 if o.get('mode') == 4:
                     self.enter('ARM', now, 'Waiting for arm confirmation')
                 else:
                     return self.command(now, 'guided')
             elif o.get('armed'):
-                self.enter('DIVE', now, 'Descending at the surface start')
+                self.last_surface_gps = now
+                self.last_surface_gps_position = tuple(o['local'][:2])
+                self.enter('TRANSIT' if self.plan['mode']=='surface' else 'DIVE', now,
+                           'Traveling at surface to waypoint' if self.plan['mode']=='surface' else 'Descending at the surface start')
             elif o.get('mode') != 4:
                 self.abort(now, 'GUIDED mode lost before arming', pilot=True)
             else:
                 return self.command(now, 'arm')
         elif moving:
             local = o['local']
+            if self.plan['mode']=='surface':
+                if o.get('surface_gps_current') is True:
+                    self.last_surface_gps = now
+                    self.last_surface_gps_position = tuple(local[:2])
+                    self.surface_unconfirmed_distance = 0.
+                    self.reason='Traveling at surface with admitted GPS, DVL and VN'
+                else:
+                    self.reason='GPS rejected/unavailable; bounded DVL/VN continuation'
+                    if self.last_position is not None:
+                        self.surface_unconfirmed_distance += math.dist(local[:2],self.last_position[1][:2])
+                if (self.last_surface_gps is None or now-self.last_surface_gps > 10.
+                        or self.last_surface_gps_position is None
+                        or self.surface_unconfirmed_distance>3.):
+                    self.abort(now,'Surface GPS unavailable beyond 10 seconds or 3 m of DVL/VN travel; pilot takeover')
+                    return self.abort_actions(now,o)
             if self.last_position:
                 t, p = self.last_position
                 if math.dist(local, p) > .5+2.*(now-t):
@@ -257,10 +287,13 @@ class WaypointRun:
             target = (self.start[0], self.start[1], self.target[2]) if self.stage == 'DIVE' else (
                 (*self.target[:2], self.surface_down) if self.stage == 'SURFACE' else self.target)
             depth = o['depth']
+            surface = self.plan['mode']=='surface'
             reached = (math.dist(local[:2], target[:2]) <= .35 and o['speed'] <= .15
-                       and (abs(depth-self.plan['depth_m']) <= .08 if self.stage != 'SURFACE' else -.1 <= depth <= .12))
+                       and ((-.1 <= depth <= .12 and o.get('surface_gps_current') is True
+                             and o.get('surface_gps_at_target') is True) if surface else
+                            (abs(depth-self.plan['depth_m']) <= .08 if self.stage != 'SURFACE' else -.1 <= depth <= .12)))
             if self.settled(now, reached):
-                next_stage = {'DIVE': 'TRANSIT', 'TRANSIT': 'SURFACE', 'SURFACE': 'DISARM'}[self.stage]
+                next_stage = 'DISARM' if surface else {'DIVE': 'TRANSIT', 'TRANSIT': 'SURFACE', 'SURFACE': 'DISARM'}[self.stage]
                 self.enter(next_stage, now, {'TRANSIT': 'Traveling underwater to waypoint',
                     'SURFACE': 'Ascending at waypoint', 'DISARM': 'Surface reached; waiting for disarm'}[next_stage])
                 return []

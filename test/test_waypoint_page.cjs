@@ -21,6 +21,7 @@ async function render(data,options={}){
   e.zoomIn.onclick();e.zoomOut.onclick();e.fit.onclick();
   e.map.onclick({clientX:500,clientY:300});assert.equal(e.posts.length,0);assert(!e.start.disabled);
   await e.refreshAt(60100);assert(!e.start.disabled);await e.start.onclick();assert.deepEqual(e.posts.map(p=>p.action),['preview','start']);assert.equal(e.posts[1].plan_id,'single-plan');assert(e.start.disabled);
+  assert.equal(e.posts[0].plan.mode,'surface');assert.equal(e.posts[0].plan.depth_m,0);
   e=await render(ready,{reject:true});e.map.onclick({clientX:500,clientY:300});await e.start.onclick();assert.equal(e.posts.length,1);assert.match(e.message.textContent,/Target rejected/);
   e=await render(ready,{timeoutStart:true});e.map.onclick({clientX:500,clientY:300});await e.start.onclick();await e.start.onclick();assert.deepEqual(e.posts.map(p=>p.action),['preview','start','start']);assert.equal(e.posts[1].plan_id,e.posts[2].plan_id);
   e=await render({...ready,capabilities:{enabled:true,simulation:false}});e.maptype.value='pool';e.maptype.onchange();

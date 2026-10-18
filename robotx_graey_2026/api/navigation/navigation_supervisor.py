@@ -131,7 +131,7 @@ class NavigationSupervisor(Node):
     def intent(self, msg):
         try:
             d = json.loads(msg.data)
-            if d['phase'] not in ('SURFACE', 'DIVE', 'UNDERWATER') or not d['run_id']:
+            if d['phase'] not in ('SURFACE', 'SURFACE_NAV', 'DIVE', 'UNDERWATER') or not d['run_id']:
                 return
             previous = self.fresh('intent', 3600)
             if previous and previous['run_id'] == d['run_id'] and (d['sequence'] <= self.intent_seq):
