@@ -1,5 +1,9 @@
 # Fast waypoint-test preparation
 
+**2026-10-17 current mission:** the waypoint GUI now defaults to surface travel,
+without a dive. Follow `surface-waypoint-2026-10-17.md`; the historical underwater
+test sequence below is retained for context, not today's default procedure.
+
 Use the current checkout inside the Jetson ROS container. This passive check
 collects 12 seconds of bridge data and current GUI/controller status without
 opening another MAVLink endpoint or changing parameters:

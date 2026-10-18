@@ -36,6 +36,7 @@ def rotate(q, v, inverse=False):
 
 
 class BridgeEstimator:
+    DVL_PREDICTION_LIMIT_S = 1.5
     def __init__(self, heading_validated=False, auto_north_alignment=False):
         self.gps = GPSAdmission()
         self.heading_validated = heading_validated
@@ -225,9 +226,9 @@ class BridgeEstimator:
     def coast(self, now):
         """Bounded constant earth-velocity prediction, never a DVL measurement.
 
-        Provisional envelope: one second, 0.2 m/s velocity error and 1 m/s²
+        Provisional envelope: 1.5 seconds, 0.2 m/s velocity error and 1 m/s²
         unobserved acceleration. Position uncertainty survives reacquisition;
-        good velocity cannot erase unobserved displacement. After one second
+        good velocity cannot erase unobserved displacement. After the horizon
         stop extrapolating and withhold output until measured motion returns.
         """
         if self.dvl_gap_start is None or self.fault:
@@ -250,7 +251,7 @@ class BridgeEstimator:
         if not self.fresh(self.imu_at,now) or not self.fresh(self.depth_at,now):
             return
         if self.propagated_at is not None and now >= self.propagated_at:
-            end=min(now,self.dvl_gap_start+1.)
+            end=min(now,self.dvl_gap_start+self.DVL_PREDICTION_LIMIT_S)
             dt = max(0.,end-self.propagated_at)
             for i in (0,1):
                 self.position[i] += self.coast_world[i]*dt
@@ -497,7 +498,7 @@ class BridgeEstimator:
             self.heading_continuity_lost = True
             self.fault = self.fault or 'VN freshness lost; revalidate navigation'
         recovering = self.dvl_gap_start is not None
-        coasting = recovering and not self.fault and 0<=now-self.dvl_gap_start<1.
+        coasting = recovering and not self.fault and 0<=now-self.dvl_gap_start<self.DVL_PREDICTION_LIMIT_S
         healthy = (self.initialized and not self.fault
                    and (coasting or (not recovering and self.motion_valid and self.fresh(self.motion_at, now)))
                    and self.fresh(self.imu_at, now)
@@ -516,7 +517,9 @@ class BridgeEstimator:
                         prediction_active=bool(coasting and healthy),
                         missing_distance_bound_m=self.missing_distance_bound,
                         dropouts=self.dvl_dropouts,valid_recovery_samples=self.dvl_recovery_count,
-                        maximum_gap_s=1.,position_sigma_limit_m=5.,
+                        maximum_gap_s=self.DVL_PREDICTION_LIMIT_S,
+                        gap_age_s=max(0.,now-self.dvl_gap_start) if recovering else 0.,
+                        position_sigma_limit_m=5.,
                         position_sigma_m=math.sqrt(self.horizontal_variance),
                         requires_position_revalidation=bool(self.fault)),
                     depth_m=self.depth if self.fresh(self.depth_at, now) else None,

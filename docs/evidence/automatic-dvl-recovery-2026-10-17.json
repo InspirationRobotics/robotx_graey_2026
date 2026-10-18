@@ -1,0 +1,408 @@
+{
+  "passed": true,
+  "short_drop_recovered": true,
+  "short_status": {
+    "healthy": true,
+    "navigation_valid": true,
+    "fault": "",
+    "initialized": true,
+    "dvl_continuity": {
+      "recovering": false,
+      "state": "TRACKING",
+      "prediction_active": false,
+      "missing_distance_bound_m": 0.11324592126532826,
+      "dropouts": 1,
+      "valid_recovery_samples": 5,
+      "maximum_gap_s": 1.5,
+      "gap_age_s": 0.0,
+      "position_sigma_limit_m": 5.0,
+      "position_sigma_m": 0.6169033763673644,
+      "requires_position_revalidation": false
+    },
+    "depth_m": 0.0,
+    "surfaced": true,
+    "gps_eligible": true,
+    "gps_admission": {
+      "qualified": true,
+      "reason": "GPS admitted; Cube-fix timing approximation",
+      "qualifying_s": 4.506948215999998,
+      "required_dwell_s": 3.0,
+      "last_rejection": "Pressure surface eligibility unavailable",
+      "cube_fix_age_upper_s": 0.18361861049898195,
+      "timing_basis": "Cube last-fix time; not receiver epoch",
+      "receiver_delay_bound_s": null,
+      "fault": "",
+      "fix": {
+        "cube_fix_time_us": 23220000,
+        "received": 123.166469391,
+        "lat": 32.9236125,
+        "lon": -117.0385235,
+        "alt": -0.15,
+        "fix": 6,
+        "accuracy": 0.3,
+        "speed_mps": 0.0,
+        "course_deg": 0.0,
+        "speed_accuracy_mps": 0.04
+      },
+      "applied_recently": false,
+      "stationary_validated_recently": false
+    },
+    "gps_observation": {
+      "cube_fix_time_us": 23620000,
+      "received": 123.664854499,
+      "lat": 32.9236125,
+      "lon": -117.0385235,
+      "alt": -0.16,
+      "fix": 6,
+      "accuracy": 0.3,
+      "speed_mps": 0.0,
+      "course_deg": 0.0,
+      "speed_accuracy_mps": 0.04
+    },
+    "position_ned": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "distance_travelled_m": 0.0,
+    "position_sigma_m": 0.6169033763673644,
+    "heading_bias_deg": 0.0,
+    "velocity_bias_mps": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "heading_reference_validated": true,
+    "heading_continuity_lost": false,
+    "stationary_hold": {
+      "active": false,
+      "dwell_s": 0.04915383899999881,
+      "anchor_ne": null,
+      "speed_threshold_mps": 0.03,
+      "reason": "Waiting for two seconds of stationary valid DVL/VN"
+    },
+    "north_alignment": null,
+    "instance": "a4e4697f-9fef-49db-976c-7c158760440a",
+    "fusion_policy": "bridge_odometry",
+    "automatic_recovery": {
+      "state": "idle",
+      "reason": "Monitoring DVL continuity",
+      "count": 0,
+      "completed": false,
+      "maintenance_safe": false
+    },
+    "clock_mapping": {
+      "offset": 99.86685676500001,
+      "uncertainty": 0.00526808,
+      "updated": 123.480583845
+    },
+    "pressure_sample": null,
+    "profile_mismatches": {},
+    "configuration_verified": true,
+    "enabled": true,
+    "surface_pressure_hpa": 1013.25,
+    "startup_output_enabled": true,
+    "transmitting": true,
+    "published_monotonic": 123.665188835,
+    "reset_counter": 0,
+    "inputs": {
+      "vn": true,
+      "dvl": true
+    },
+    "heading_vn": {
+      "received": 123.634317413,
+      "yaw": 0.0,
+      "raw_yaw": 0.0,
+      "rate": 0.0
+    },
+    "heading_dvl": {
+      "received": 123.634531076,
+      "velocity": [
+        0.0,
+        0.0,
+        0.002884133253246546
+      ],
+      "raw_velocity": [
+        0.0,
+        0.0,
+        0.002884133253246546
+      ],
+      "valid": true
+    }
+  },
+  "prediction_withheld_without_latch": true,
+  "extended_loss_recovered": true,
+  "long_loss_latched": true,
+  "long_status": {
+    "healthy": false,
+    "navigation_valid": false,
+    "fault": "DVL continuity lost; position uncertainty requires revalidation",
+    "initialized": true,
+    "dvl_continuity": {
+      "recovering": true,
+      "state": "POSITION_UNCERTAIN",
+      "prediction_active": false,
+      "missing_distance_bound_m": 4.50787375700037,
+      "dropouts": 3,
+      "valid_recovery_samples": 0,
+      "maximum_gap_s": 1.5,
+      "gap_age_s": 4.829247265999996,
+      "position_sigma_limit_m": 5.0,
+      "position_sigma_m": 5.011531212102408,
+      "requires_position_revalidation": true
+    },
+    "depth_m": 0.0,
+    "surfaced": true,
+    "gps_eligible": true,
+    "gps_admission": {
+      "qualified": false,
+      "reason": "DVL continuity lost; position uncertainty requires revalidation",
+      "qualifying_s": 0.0,
+      "required_dwell_s": 3.0,
+      "last_rejection": "DVL continuity lost; position uncertainty requires revalidation",
+      "cube_fix_age_upper_s": 0.1885517268780103,
+      "timing_basis": "Cube last-fix time; not receiver epoch",
+      "receiver_delay_bound_s": null,
+      "fault": "",
+      "fix": {
+        "cube_fix_time_us": 23220000,
+        "received": 123.166469391,
+        "lat": 32.9236125,
+        "lon": -117.0385235,
+        "alt": -0.15,
+        "fix": 6,
+        "accuracy": 0.3,
+        "speed_mps": 0.0,
+        "course_deg": 0.0,
+        "speed_accuracy_mps": 0.04
+      },
+      "applied_recently": false,
+      "stationary_validated_recently": false
+    },
+    "gps_observation": {
+      "cube_fix_time_us": 30420000,
+      "received": 130.359899952,
+      "lat": 32.9236125,
+      "lon": -117.0385235,
+      "alt": -0.14,
+      "fix": 6,
+      "accuracy": 0.3,
+      "speed_mps": 0.0,
+      "course_deg": 0.0,
+      "speed_accuracy_mps": 0.04
+    },
+    "position_ned": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "distance_travelled_m": 0.0,
+    "position_sigma_m": 5.011531212102408,
+    "heading_bias_deg": 0.0,
+    "velocity_bias_mps": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "heading_reference_validated": true,
+    "heading_continuity_lost": false,
+    "stationary_hold": {
+      "active": false,
+      "dwell_s": 0.0,
+      "anchor_ne": null,
+      "speed_threshold_mps": 0.03,
+      "reason": "Waiting for two seconds of stationary valid DVL/VN"
+    },
+    "north_alignment": null,
+    "instance": "a4e4697f-9fef-49db-976c-7c158760440a",
+    "fusion_policy": "bridge_odometry",
+    "automatic_recovery": {
+      "state": "waiting",
+      "reason": "Automatic recovery waits for MANUAL, killed/disarmed, ESC off and no mission",
+      "count": 0,
+      "completed": false,
+      "maintenance_safe": false
+    },
+    "clock_mapping": {
+      "offset": 99.85295839599999,
+      "uncertainty": 0.004550811,
+      "updated": 130.413706207
+    },
+    "pressure_sample": null,
+    "profile_mismatches": {},
+    "configuration_verified": true,
+    "enabled": true,
+    "surface_pressure_hpa": 1013.25,
+    "startup_output_enabled": true,
+    "transmitting": false,
+    "published_monotonic": 130.456954987,
+    "reset_counter": 0,
+    "inputs": {
+      "vn": true,
+      "dvl": true
+    },
+    "heading_vn": {
+      "received": 130.437279207,
+      "yaw": 0.0,
+      "raw_yaw": 0.0,
+      "rate": 0.0
+    },
+    "heading_dvl": {
+      "received": 130.437545842,
+      "velocity": [
+        0.0,
+        0.0,
+        -0.012362065725028515
+      ],
+      "raw_velocity": [
+        0.0,
+        0.0,
+        0.00045129633508622646
+      ],
+      "valid": true
+    }
+  },
+  "maintenance_controller": {
+    "session": "isolated-recovery-test",
+    "revision": 1,
+    "vehicle_fresh": true,
+    "armed": false,
+    "sa_active": true,
+    "esc_commanded_on": false,
+    "mission_claimed": false,
+    "autonomous": false,
+    "mode": "MANUAL",
+    "online": true
+  },
+  "explicit_recovery_passed": true,
+  "recovered_status": {
+    "healthy": true,
+    "navigation_valid": true,
+    "fault": "",
+    "initialized": true,
+    "dvl_continuity": {
+      "recovering": false,
+      "state": "TRACKING",
+      "prediction_active": false,
+      "missing_distance_bound_m": 0.0,
+      "dropouts": 3,
+      "valid_recovery_samples": 0,
+      "maximum_gap_s": 1.5,
+      "gap_age_s": 0.0,
+      "position_sigma_limit_m": 5.0,
+      "position_sigma_m": 0.5,
+      "requires_position_revalidation": false
+    },
+    "depth_m": 0.0,
+    "surfaced": true,
+    "gps_eligible": true,
+    "gps_admission": {
+      "qualified": true,
+      "reason": "GPS admitted; Cube-fix timing approximation",
+      "qualifying_s": 3.1597598470000037,
+      "required_dwell_s": 3.0,
+      "last_rejection": null,
+      "cube_fix_age_upper_s": 0.1171972491455029,
+      "timing_basis": "Cube last-fix time; not receiver epoch",
+      "receiver_delay_bound_s": null,
+      "fault": "",
+      "fix": {
+        "cube_fix_time_us": 39620000,
+        "received": 139.535830822,
+        "lat": 32.9236125,
+        "lon": -117.0385235,
+        "alt": -0.13,
+        "fix": 6,
+        "accuracy": 0.3,
+        "speed_mps": 0.0,
+        "course_deg": 0.0,
+        "speed_accuracy_mps": 0.04
+      },
+      "applied_recently": true,
+      "stationary_validated_recently": false
+    },
+    "gps_observation": {
+      "cube_fix_time_us": 39620000,
+      "received": 139.535830822,
+      "lat": 32.9236125,
+      "lon": -117.0385235,
+      "alt": -0.13,
+      "fix": 6,
+      "accuracy": 0.3,
+      "speed_mps": 0.0,
+      "course_deg": 0.0,
+      "speed_accuracy_mps": 0.04
+    },
+    "position_ned": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "distance_travelled_m": 0.0,
+    "position_sigma_m": 0.5,
+    "heading_bias_deg": 0.0,
+    "velocity_bias_mps": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "heading_reference_validated": true,
+    "heading_continuity_lost": false,
+    "stationary_hold": {
+      "active": false,
+      "dwell_s": 0.0,
+      "anchor_ne": null,
+      "speed_threshold_mps": 0.03,
+      "reason": "Waiting for two seconds of stationary valid DVL/VN"
+    },
+    "north_alignment": null,
+    "instance": "a4e4697f-9fef-49db-976c-7c158760440a",
+    "fusion_policy": "bridge_odometry",
+    "automatic_recovery": {
+      "state": "recovered",
+      "reason": "Position revalidated from surface GPS; north retained; mission not restarted",
+      "count": 1,
+      "completed": true,
+      "maintenance_safe": true
+    },
+    "clock_mapping": {
+      "offset": 99.85520901999999,
+      "uncertainty": 0.005299237,
+      "updated": 139.513898257
+    },
+    "pressure_sample": null,
+    "profile_mismatches": {},
+    "configuration_verified": true,
+    "enabled": true,
+    "surface_pressure_hpa": 1013.25,
+    "startup_output_enabled": true,
+    "transmitting": true,
+    "published_monotonic": 139.587099712,
+    "reset_counter": 1,
+    "inputs": {
+      "vn": true,
+      "dvl": true
+    },
+    "heading_vn": {
+      "received": 139.50560999,
+      "yaw": 0.0,
+      "raw_yaw": 0.0,
+      "rate": 0.0
+    },
+    "heading_dvl": {
+      "received": 139.505785626,
+      "velocity": [
+        0.0,
+        0.0,
+        -0.006988133769482374
+      ],
+      "raw_velocity": [
+        0.0,
+        0.0,
+        -0.006988133769482374
+      ],
+      "valid": true
+    }
+  },
+  "automatic_recovery_passed": true
+}

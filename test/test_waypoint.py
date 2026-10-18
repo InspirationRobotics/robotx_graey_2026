@@ -9,10 +9,10 @@ class WaypointTests(unittest.TestCase):
     def setUp(self):
         self.origin = (32.92357, -117.03855, 0.)
         lat, lon = ne_to_geo(1., 0., self.origin)
-        self.plan = dict(lat=lat, lon=lon, depth_m=.5, map='geographic')
+        self.plan = dict(lat=lat, lon=lon, depth_m=.5, map='geographic',mode='dive')
         self.run = WaypointRun(self.plan, 'run', 0.)
         self.now = 0.
-        self.o = dict(fresh=True, mode=19, armed=False, origin=self.origin, local=(0.,0.,0.),
+        self.o = dict(fresh=True, surface_measurement=dict(ready=True), mode=19, armed=False, origin=self.origin, local=(0.,0.,0.),
                       speed=0., depth=0., yaw=0., **{'global': self.origin[:2]},
                       supervisor=dict(run_id='run', navigation_ready=True, surfaced=True,
                       fusion_policy='continuous', gps_qualified_input=True, confirmed_source='Continuous fusion', reference_current=True,
@@ -69,6 +69,49 @@ class WaypointTests(unittest.TestCase):
         self.assertEqual(self.step(), [])
         self.assertEqual(self.step(), [])
         self.assertEqual(self.run.stage, 'DIVE')
+
+    def test_geographic_target_is_not_rotated_by_vehicle_heading(self):
+        # A southeast point stays southeast regardless of the nose direction.
+        for degrees in (0.,90.,108.,180.,270.):
+            with self.subTest(degrees=degrees):
+                self.setUp()
+                lat,lon=ne_to_geo(-1.,3.,self.origin)
+                self.run=WaypointRun(dict(self.plan,lat=lat,lon=lon),'run',0.)
+                self.o['yaw']=math.radians(degrees)
+                self.dive()
+                self.assertAlmostEqual(self.run.target[0],-1.,places=6)
+                self.assertAlmostEqual(self.run.target[1],3.,places=6)
+                self.assertAlmostEqual(self.run.heading,math.radians(degrees))
+
+    def test_dvl_gap_pauses_while_supervisor_still_ready_then_resumes(self):
+        self.dive();self.run.enter('TRANSIT',self.now,'Traveling')
+        self.o.update(local=(.1,0.,.5),depth=.5,navigation_hold_safe=True,
+                      dvl_continuity=dict(recovering=True))
+        target=self.run.target;first=self.step()
+        self.assertEqual(first[0][1][:3],(.1,0.,.5))
+        for _ in range(10):self.step()
+        self.assertEqual(self.run.stage,'TRANSIT')
+        self.o['dvl_continuity']['recovering']=False
+        resumed=self.step()
+        self.assertEqual(resumed[0][1][:3],target)
+        self.assertFalse(self.run.snapshot()['navigation_pause']['active'])
+
+    def test_dvl_recovery_cannot_extend_deadline_or_override_pilot(self):
+        self.dive();self.o.update(navigation_hold_safe=True,dvl_continuity=dict(recovering=True))
+        self.step()
+        for _ in range(17):self.step()
+        self.assertEqual(self.run.stage,'ABORTED')
+        self.o['dvl_continuity']['recovering']=False
+        self.assertFalse(any(a=='target' for a,_ in self.step()))
+        self.setUp();self.dive()
+        self.o.update(navigation_hold_safe=True,dvl_continuity=dict(recovering=True),armed=False)
+        self.assertEqual(self.step(),[])
+        self.assertTrue(self.run.pilot_takeover)
+
+    def test_surface_measurement_required_before_prepare(self):
+        self.o['surface_measurement']=dict(ready=False,reason='Surface measurement 3/20 s')
+        self.step();self.assertEqual(self.run.stage,'WAIT_SURFACE')
+        self.assertIn('3/20',self.run.reason)
 
     def test_changing_cube_pressure_offset_aborts_before_permission_hold(self):
         self.o.update(local=(0.,0.,.66),depth=.009)

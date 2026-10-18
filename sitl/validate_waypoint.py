@@ -23,11 +23,21 @@ def api(body=None):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--abort', action='store_true')
+    parser.add_argument('--abort-during-hold',action='store_true',help='Abort the armed surface qualification hold through the GUI API')
+    parser.add_argument('--dive', action='store_true', help='Explicit legacy underwater regression; default is surface travel')
+    parser.add_argument('--gps-dropout-seconds',type=float,default=0.,help='Surface transit GPS dropout injection')
+    parser.add_argument('--expect-gps-abort',action='store_true',help='Require bounded GPS outage to yield MANUAL')
     parser.add_argument('--dvl-dropout',action='store_true',help='Inject brief invalid DVL during underwater transit')
+    parser.add_argument('--dvl-gap-seconds',type=float,default=.1,help='Duration of injected DVL interruption')
     parser.add_argument('--supervisor-interruption',action='store_true',help='Inject a brief false permission status while Cube/bridge stay healthy')
     parser.add_argument('--continuous', action='store_true', default=True)
     parser.add_argument('--auto-north', action='store_true', help='Manual surface movement with a 40-degree synthetic VN reference error')
+    parser.add_argument('--target-north',type=float,default=1.5)
+    parser.add_argument('--target-east',type=float,default=1.)
     args=parser.parse_args()
+    if args.abort_during_hold:
+        if args.dive:parser.error('Surface hold does not apply to a dive mission')
+        args.abort=True
     from robotx_graey_2026.api.navigation.waypoint_logic import ne_to_geo
     root=Path(__file__).resolve().parents[1]
     folder=root/'sitl/logs'/('waypoint-'+uuid.uuid4().hex[:10]);folder.mkdir(parents=True)
@@ -116,16 +126,38 @@ def main():
                         result['north_alignment']=alignment
                         alignment_stopped=True
                     if run_id is None and c['valid'] and s.get('configuration_verified') and s.get('surfaced'):
-                        lat,lon=ne_to_geo(1.5,1.,(c['lat'],c['lon']))
-                        plan=api(dict(action='preview',plan=dict(lat=lat,lon=lon,depth_m=.5,map='geographic')))
+                        lat,lon=ne_to_geo(args.target_north,args.target_east,(c['lat'],c['lon']))
+                        result['requested_target']=dict(lat=lat,lon=lon)
+                        plan=api(dict(action='preview',plan=dict(lat=lat,lon=lon,depth_m=.5 if args.dive else 0.,mode='dive' if args.dive else 'surface',map='geographic')))
                         started=api(dict(action='start',plan_id=plan['plan_id']));run_id=started['run_id']
                         duplicate=api(dict(action='start',plan_id=plan['plan_id']))
                         result['duplicate_idempotent']=duplicate.get('duplicate') and duplicate['run_id']==run_id
                     m=streams.get('waypoint',{}).get('data',{})
                     if m.get('run_id')==run_id and run_id:
+                        assert abs(m['plan']['lat']-lat)<1e-9 and abs(m['plan']['lon']-lon)<1e-9,'Mission changed the selected geographic target'
                         if not result['stages'] or result['stages'][-1]!=m['stage']: result['stages'].append(m['stage'])
                         gps=streams.get('gps',{}).get('data',{})
+                        if m['stage']=='CHECK_SURFACE':
+                            result['armed_guided_surface_hold_seen']=bool(m.get('cube_armed') and m.get('cube_mode_id')==4)
+                            if args.abort_during_hold and not abort_sent:
+                                api(dict(action='abort',run_id=run_id));abort_sent=True
                         if m['stage']=='TRANSIT':
+                            if not args.dive:
+                                result['surface_cube_seen']=bool(c['valid'] and c['heading_deg'] is not None and abs(s.get('depth_m',999))<.15)
+                            if args.gps_dropout_seconds and not result.get('gps_dropout_injected'):
+                                from pymavlink import mavutil
+                                if manual_link is None:
+                                    manual_link=mavutil.mavlink_connection('udpout:127.0.0.1:14559',source_system=255,source_component=202)
+                                manual_link.mav.heartbeat_send(6,8,0,0,0)
+                                manual_link.mav.param_set_send(1,1,b'SIM_GPS_DISABLE',1.,9)
+                                injected_until=time.monotonic()+args.gps_dropout_seconds
+                                while time.monotonic()<injected_until:
+                                    state_gap=api()['navigation']['streams']
+                                    bgap=state_gap.get('bridge',{}).get('data',{})
+                                    result['gps_outage_seen'] |= not (bgap.get('gps_admission') or {}).get('qualified',True)
+                                    time.sleep(.1)
+                                manual_link.mav.param_set_send(1,1,b'SIM_GPS_DISABLE',0.,9)
+                                result['gps_dropout_injected']=True
                             if args.supervisor_interruption and not result.get('permission_interruption_injected'):
                                 original=dict(s)
                                 deadline_injection=time.monotonic()+.35
@@ -137,13 +169,14 @@ def main():
                                     result['navigation_pause_seen']=bool(result.get('navigation_pause_seen') or sample.get('navigation_pause',{}).get('active'))
                                 result['permission_interruption_injected']=True
                             if args.dvl_dropout and not result.get('dvl_dropout_injected'):
-                                for _ in range(3):
+                                gap_end=time.monotonic()+args.dvl_gap_seconds
+                                while time.monotonic()<gap_end:
                                     dvl_pub.publish(String(data=json.dumps(dict(stamp_ns=dvl_clock.now().nanoseconds,velocity=[],valid=False,sensor_time=None))))
                                     time.sleep(.03)
                                 result['dvl_dropout_injected']=True
                             result['gps_outage_seen'] |= gps.get('fix',99)<3
                             result['underwater_cube_seen'] |= bool(c['valid'] and c['heading_deg'] is not None and s.get('depth_m',0)>.4)
-                            if args.abort and result['gps_outage_seen'] and not abort_sent:
+                            if args.abort and not args.abort_during_hold and (result['gps_outage_seen'] or not args.dive) and not abort_sent:
                                 api(dict(action='abort',run_id=run_id));abort_sent=True
                         if m['stage'] in ('COMPLETE','ABORTED'):
                             if args.abort and m['stage']=='ABORTED' and streams['heartbeat']['data']['mode_id']!=19:
@@ -155,8 +188,12 @@ def main():
                                 result['final_target_error_m']=math.dist(result['final_local'][:2],m['target_cube'][:2])
                             outcome=(m['stage']=='ABORTED' and abort_sent and 'Operator aborted' in m['reason']) if args.abort else (
                                 m['stage']=='COMPLETE' and not streams['heartbeat']['data']['armed'])
-                            result['passed']=bool(outcome and result['gps_outage_seen']
-                                and result['underwater_cube_seen'] and result.get('duplicate_idempotent')
+                            if args.expect_gps_abort:
+                                outcome=(m['stage']=='ABORTED' and 'Surface GPS unavailable beyond' in m['reason']
+                                         and streams['heartbeat']['data']['mode_id']==19)
+                            surface_seen=(result.get('armed_guided_surface_hold_seen') if args.abort_during_hold else result.get('surface_cube_seen'))
+                            result['passed']=bool(outcome and (result['gps_outage_seen'] and result['underwater_cube_seen'] if args.dive else surface_seen and not any(x in result['stages'] for x in ('DIVE','SURFACE')))
+                                and (not args.gps_dropout_seconds or result.get('gps_dropout_injected') and result['gps_outage_seen']) and result.get('duplicate_idempotent')
                                 and (not args.abort or streams['heartbeat']['data']['mode_id']==19))
                             if args.auto_north:
                                 result['passed'] &= bool(alignment_stopped and abs(

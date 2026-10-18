@@ -21,6 +21,7 @@ from robotx_graey_2026.api.pixhawk.mavlink import Link
 from .bridge_estimator import BridgeEstimator, yaw
 from .odometry_profile import PROFILE
 from .maintenance_safety import require_maintenance
+from .automatic_recovery import AutomaticRecovery
 
 
 class FusedNavBridge(SteadyNode):
@@ -52,11 +53,15 @@ class FusedNavBridge(SteadyNode):
         self.reset_counter = 0
         self.pressures = deque(maxlen=80)
         self.vn_calibration = None
+        self.auto_recovery=AutomaticRecovery()
+        self.control_state={}
+        self.control_received=None
         self.pressure_sample = None
         self.pub = self.create_publisher(String, '/graey/navigation/bridge_status', 10)
         self.create_subscription(Imu, '/graey/vn100/imu', self.imu, 20)
         self.create_subscription(String, '/graey/dvl/sample', self.dvl, 20)
         self.create_subscription(String, '/graey/vn100/calibration', self.calibration_status, 10)
+        self.create_subscription(String, '/graey/control_watchdog/status', self.control_status, 10)
         self.create_service(Trigger, '/graey/navigation/pause_odometry', self.pause_odometry)
         self.create_service(SetBool, '/graey/navigation/prepare', self.prepare)
         self.create_service(Trigger, '/graey/navigation/recover_dvl', self.recover_dvl)
@@ -87,6 +92,14 @@ class FusedNavBridge(SteadyNode):
             self.vn_calibration = (time.monotonic(), json.loads(msg.data))
         except (ValueError, TypeError):
             self.vn_calibration = None
+
+    def control_status(self, msg):
+        try:
+            data=json.loads(msg.data)
+            if isinstance(data,dict):
+                self.control_state,self.control_received=data,time.monotonic()
+        except (ValueError,TypeError):
+            pass
 
     def align_heading(self, request, response):
         try:
@@ -150,6 +163,7 @@ class FusedNavBridge(SteadyNode):
             clock, origin = self.est.gps.clock, self.est.origin
             self.output_permitted = False
             self.est = BridgeEstimator(auto_north_alignment=True)
+            self.auto_recovery=AutomaticRecovery()
             self.est.gps.clock = clock
             if origin is not None:
                 self.est.set_origin(origin)
@@ -265,14 +279,20 @@ class FusedNavBridge(SteadyNode):
     def tick(self):
         self.link.drain(self.consume)
         now = time.monotonic()
+        if self.output_permitted and self.configured(now):
+            if self.auto_recovery.step(now,self.est,self.control_state,self.control_received):
+                self.reset_counter=(self.reset_counter+1)%256
+                self.last_sent=None
+                self.get_logger().warning('AUTOMATIC_DVL_RECOVERY '+self.auto_recovery.reason)
         status = self.est.status(now)
         configured = self.configured(now)
-        if self.start_checked and self.output_permitted and configured and status['healthy'] and (self.last_sent is None or now-self.last_sent >= .05):
+        if self.start_checked and self.output_permitted and not self.auto_recovery.pending and configured and status['healthy'] and (self.last_sent is None or now-self.last_sent >= .05):
             self.link.odometry(self.est.position, self.est.orientation(), self.est.velocity(),
                                self.est.rates, reset_counter=self.reset_counter, covariance=self.est.covariance(),
                                quality=40 if status.get('dvl_continuity',{}).get('prediction_active') else 80)
             self.last_sent = now
         status.update(instance=self.instance, fusion_policy='bridge_odometry',
+                      automatic_recovery=self.auto_recovery.status(now,self.control_state,self.control_received),
                       clock_mapping=dict(offset=self.est.gps.clock.offset,
                           uncertainty=self.est.gps.clock.uncertainty, updated=self.est.gps.clock.updated),
                       pressure_sample=getattr(self, 'pressure_sample', None),
@@ -289,6 +309,7 @@ class FusedNavBridge(SteadyNode):
                                       raw_yaw=yaw(self.est.raw_q) % 360,
                                       rate=math.degrees(self.est.rates[2])),
                       heading_dvl=dict(received=self.est.motion_at, velocity=self.est.velocity(),
+                                       raw_velocity=self.est.raw_velocity,
                                        valid=self.est.motion_valid))
         if now-getattr(self, 'last_published', -math.inf) >= .05:
             self.pub.publish(String(data=json.dumps(status, allow_nan=False)))

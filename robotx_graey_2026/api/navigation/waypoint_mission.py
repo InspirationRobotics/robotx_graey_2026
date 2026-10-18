@@ -10,6 +10,8 @@ from std_msgs.msg import Bool, String
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.gui.navigation_view import NavigationView
 from robotx_graey_2026.api.navigation.waypoint_logic import WaypointRun
+from robotx_graey_2026.api.navigation.surface_measurement import SurfaceMeasurement
+from robotx_graey_2026.api.navigation.surface_control import surface_velocity
 from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL
 
 
@@ -46,6 +48,11 @@ class WaypointMission(Node):
         self.gps_enabled = True
         self.last_stage = None
         self.last_pause = False
+        self.last_trace = -math.inf
+        self.sent_target = None
+        self.surface_measurement=(SurfaceMeasurement(duration=5.,tolerated_gps_gap=4.,tolerated_sensor_gap=1.5)
+                                  if self.logic.plan['mode']=='surface' else SurfaceMeasurement())
+        self.surface_measurement_status={}
         self.fc_status_text = []
         self.pub = self.create_publisher(String, '/graey/waypoint/status', 10)
         self.intent_pub = self.create_publisher(String, '/graey/navigation/intent', 10)
@@ -165,9 +172,25 @@ class WaypointMission(Node):
             and b.get('healthy') is True and b.get('navigation_valid') is True
             and b.get('transmitting') is True and b.get('configuration_verified') is True
             and not b.get('fault'))
+        gps=b.get('gps_admission') or {}
+        fix=b.get('gps_observation') or {}
+        gps_current=bool(0<=now-getattr(self,'bridge_time',-math.inf)<.3
+            and b.get('gps_eligible') is True and gps.get('qualified') is True
+            and (gps.get('applied_recently') is True or gps.get('stationary_validated_recently') is True))
+        gps_at_target=False
+        if gps_current:
+            try:
+                from .waypoint_logic import geo_to_ne
+                gps_at_target=(0<fix['accuracy']<=2. and math.dist(geo_to_ne(fix['lat'],fix['lon'],
+                    (self.logic.plan['lat'],self.logic.plan['lon'])),(0.,0.))<=1.5)
+            except (KeyError,ValueError,TypeError):
+                pass
         return dict(fresh=fresh, failure=failure, abort=self.aborted,
+            surface_gps_current=gps_current,surface_gps_at_target=gps_at_target,
+            dvl_continuity=b.get('dvl_continuity') if 0<=now-getattr(self,'bridge_time',-math.inf)<.3 else {},
             vertical_limits_verified=limits_ready,
             navigation_hold_safe=hold_safe,
+            velocity_ned=velocity,
             supervisor=s, armed=hb.get('armed'), mode=hb.get('mode_id'),
             local=ned, speed=math.hypot(*velocity[:2]) if velocity and all(v is not None for v in velocity) else math.inf,
             yaw=math.radians(att['rpy'][2]) if att and att['rpy'][2] is not None else None,
@@ -178,16 +201,29 @@ class WaypointMission(Node):
     def tick(self):
         now = time.monotonic()
         self.sequence += 1
-        # Keep the underwater profile through ascent; recover GPS after disarm.
+        # Surface missions keep SURFACE intent throughout; no GPS source switch.
         if self.logic.stage not in self.logic.terminal:
             self.intent_pub.publish(String(data=json.dumps(dict(run_id=self.logic.run_id,
                 phase=self.logic.phase, sequence=self.sequence, target_gps=self.logic.plan))))
         o = self.observation(now)
+        if self.logic.stage=='CHECK_SURFACE' and getattr(self,'measurement_stage',None)!='CHECK_SURFACE':
+            self.surface_measurement=SurfaceMeasurement(duration=5.,tolerated_gps_gap=4.,tolerated_sensor_gap=1.5)
+        self.measurement_stage=self.logic.stage
+        if self.logic.stage in ('WAIT_SURFACE','CHECK_SURFACE'):
+            b=self.bridge if 0<=now-self.bridge_time<.3 else {}
+            self.surface_measurement_status=self.surface_measurement.update(now,b)
+        o['surface_measurement']=self.surface_measurement_status
         if self.logic.stage=='WAIT_SURFACE' and not o['vertical_limits_verified']:
             self.logic.reason='Waiting for shallow waypoint vertical speed/acceleration limit readback'
         for action, payload in self.logic.step(now, o):
             if action == 'target':
-                self.link.goto_ned(*payload)
+                self.sent_target=payload
+                if self.logic.plan['mode']=='surface':
+                    v=surface_velocity(payload,o['local'],o['velocity_ned'],o['depth'])
+                    self.link.surface_velocity(*v,payload[3])
+                    self.sent_surface_velocity=v
+                else:
+                    self.link.goto_ned(*payload)
             elif action in ('guided', 'manual'):
                 self.get_logger().warning('MISSION_MODE_REQUEST '+json.dumps(dict(
                     run_id=self.logic.run_id,action=action,stage=self.logic.stage,
@@ -219,6 +255,7 @@ class WaypointMission(Node):
             self.get_logger().warning('MISSION_NAVIGATION_PAUSE '+json.dumps(dict(
                 run_id=self.logic.run_id,published_monotonic=now,**status['navigation_pause'])))
         status.update(simulation=self.sim, published_monotonic=now,
+                      surface_measurement=self.surface_measurement_status,
                       vertical_limits_verified=o['vertical_limits_verified'],
                       telemetry_fresh=bool(o['fresh']), confirmed_source=self.supervisor.get('confirmed_source'))
         status['control_evidence']={k:self.safety.get(k) for k in (
@@ -226,6 +263,24 @@ class WaypointMission(Node):
             'mission_claimed','pilot_arm_switch_pwm','pilot_mode_switch_pwm','pilot_retry_remaining_s')}
         status['cube_mode_id']=o.get('mode')
         status['cube_armed']=o.get('armed')
+        if self.logic.stage in self.logic.moving and now-self.last_trace>=.5:
+            self.last_trace=now
+            # Log independent inputs and sent frame references together. Stage
+            # summaries alone cannot diagnose wrong-axis motion after the run.
+            self.get_logger().info('WAYPOINT_TRACE '+json.dumps(dict(
+                run_id=self.logic.run_id,stage=self.logic.stage,monotonic=now,
+                plan=self.logic.plan,target_ned=self.logic.target,
+                last_sent_target_ned_yaw=self.sent_target,
+                last_sent_surface_velocity_ned=getattr(self,'sent_surface_velocity',None),
+                start_ned=self.logic.start,cube_ned=o.get('local'),
+                cube_yaw_rad=o.get('yaw'),pressure_depth_m=o.get('depth'),
+                bridge_ned=self.bridge.get('position_ned'),
+                bridge_velocity=self.bridge.get('heading_dvl'),
+                bridge_heading=self.bridge.get('heading_vn'),
+                dvl_continuity=self.bridge.get('dvl_continuity'),
+                gps_admission=self.bridge.get('gps_admission'),
+                gps_observation=self.bridge.get('gps_observation')),
+                allow_nan=False))
         if self.logic.stage != self.last_stage:
             self.last_stage = self.logic.stage
             self.get_logger().info('WAYPOINT_STAGE '+json.dumps(status, allow_nan=False))

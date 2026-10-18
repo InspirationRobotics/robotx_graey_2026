@@ -22,17 +22,21 @@ def ne_to_geo(north, east, origin):
 def validate_plan(value):
     if not isinstance(value, dict):
         raise ValueError('Expected waypoint object')
-    lat, lon, depth = (value.get(k) for k in ('lat', 'lon', 'depth_m'))
+    lat, lon = (value.get(k) for k in ('lat', 'lon'))
+    mode = value.get('mode', 'surface')
+    if mode not in ('surface', 'dive'):
+        raise ValueError('Unknown waypoint mission mode')
+    depth = 0. if mode == 'surface' else value.get('depth_m')
     geo_to_ne(lat, lon, (0., 0.))
-    if isinstance(depth, bool) or not isinstance(depth, (int, float)) or not math.isfinite(depth) or not .3 <= depth <= 1.0:
+    if mode == 'dive' and (isinstance(depth, bool) or not isinstance(depth, (int, float)) or not math.isfinite(depth) or not .3 <= depth <= 1.0):
         raise ValueError('Dive depth must be 0.3 to 1.0 m')
     if value.get('map') not in ('pool', 'geographic'):
         raise ValueError('Unknown map')
-    return dict(lat=float(lat), lon=float(lon), depth_m=float(depth), map=value['map'])
+    return dict(lat=float(lat), lon=float(lon), depth_m=float(depth), map=value['map'], mode=mode)
 
 
 class WaypointRun:
-    moving = {'DIVE', 'TRANSIT', 'SURFACE'}
+    moving = {'CHECK_SURFACE', 'DIVE', 'TRANSIT', 'SURFACE'}
     terminal = {'COMPLETE', 'ABORTED'}
 
     def __init__(self, plan, run_id, now):
@@ -52,11 +56,17 @@ class WaypointRun:
         self.navigation_wait_since = None
         self.navigation_hold = None
         self.navigation_wait_reason = ''
+        self.navigation_wait_limit = .7
         self.abort_context = None
         self.vertical_offset_error = None
+        self.last_surface_gps = None
+        self.last_surface_gps_position = None
+        self.surface_unconfirmed_distance = 0.
 
     @property
     def phase(self):
+        if self.plan['mode'] == 'surface':
+            return 'SURFACE_NAV'
         if self.stage in ('WAIT_SURFACE', 'RECOVER_GPS', 'COMPLETE'):
             return 'SURFACE'
         return 'DIVE' if self.stage in ('PREPARE', 'GUIDED', 'ARM', 'DIVE') else 'UNDERWATER'
@@ -70,7 +80,7 @@ class WaypointRun:
         self.takeover_requested = self.stage in self.moving | {'GUIDED', 'ARM', 'DISARM'}
         self.enter('ABORTED', now, reason)
 
-    def navigation_wait(self, now, o, reason):
+    def navigation_wait(self, now, o, reason, dvl=False):
         """Pause travel only with independent healthy pose/bridge evidence.
 
         This is not stale-sensor extrapolation. Capture one current Cube position
@@ -91,14 +101,15 @@ class WaypointRun:
         if self.navigation_wait_since is None:
             self.navigation_wait_since=now
             self.navigation_hold=tuple(o['local'])
-        if now-self.navigation_wait_since >= .7:
+            self.navigation_wait_limit=1.5 if dvl else .7
+        if now-self.navigation_wait_since >= self.navigation_wait_limit:
             return None
         self.navigation_wait_reason=reason
         # Last mission setpoint may still command forward travel. Replace it
         # immediately once, then refresh at the ordinary position-target rate.
         if self.last_command != -math.inf and now-self.navigation_wait_since < .001:
             self.last_command=-math.inf
-        return self.command(now,'target',(*self.navigation_hold,self.heading),interval=3.)
+        return self.command(now,'target',(*self.navigation_hold,self.heading),interval=.1 if self.plan['mode']=='surface' else 3.)
 
     def abort_actions(self, now, o):
         if self.takeover_requested and not self.pilot_takeover and o.get('mode') in (None, 4):
@@ -156,17 +167,27 @@ class WaypointRun:
             if (local and len(local)==3 and isinstance(depth,(int,float))
                     and math.isfinite(depth) and math.isfinite(local[2])):
                 self.vertical_offset_error = local[2]-depth-self.surface_down
-                if depth > self.plan['depth_m']+.15:
+                if self.plan['mode']=='surface' and depth>.08:
+                    failure='Surface pressure depth exceeded 0.08 m; pilot takeover'
+                elif depth > self.plan['depth_m']+.15:
                     failure = 'Pressure depth exceeded mission target by more than 0.15 m; pilot takeover'
                 elif abs(self.vertical_offset_error) > .15:
                     failure = 'Cube/pressure vertical reference changed by more than 0.15 m; pilot takeover'
+        # Stop advancing the target on the FIRST recoverable DVL gap, while
+        # bounded odometry is still healthy. Never wait for health to expire.
+        dvl=o.get('dvl_continuity') or {}
+        if moving and dvl.get('recovering'):
+            if not failure and s.get('state')!='Fault' and o.get('fresh'):
+                hold=self.navigation_wait(now,o,'DVL reacquiring; horizontal target held',dvl=True)
+                if hold is not None:return hold
+            failure=failure or 'DVL recovery exceeded bounded healthy navigation; pilot takeover'
         if (moving or self.stage in ('GUIDED', 'ARM')) and (not s.get('navigation_ready') or not s.get('reference_current')
                        or not (s.get('fusion_policy') == 'continuous')
                        or (s.get('reference') or {}).get('reference_id') != self.reference_id):
             if not failure and s.get('state')!='Fault':
                 hold=self.navigation_wait(now,o,'Navigation permission temporarily unavailable: '+str(s.get('reason')))
                 if hold is not None:return hold
-            failure = failure or 'Underwater navigation permission or reference lost: '+str(s.get('reason'))
+            failure = failure or 'Navigation permission or reference lost: '+str(s.get('reason'))
         if s.get('state') == 'Fault':
             failure = 'Supervisor fault: '+str(s.get('reason'))
         if failure:
@@ -186,7 +207,12 @@ class WaypointRun:
             self.arrival=None
         self.navigation_wait_since=self.navigation_hold=None
         self.navigation_wait_reason=''
+        self.navigation_wait_limit=.7
         if self.stage == 'WAIT_SURFACE':
+            measurement=o.get('surface_measurement') or {}
+            if self.plan['mode']!='surface' and not measurement.get('ready'):
+                self.reason=measurement.get('reason','Waiting for surface GPS/DVL measurements')
+                return []
             if s.get('surfaced') is True and (s.get('fusion_policy') == 'continuous' and s.get('gps_qualified_input') is True) and s.get('navigation_ready'):
                 self.enter('PREPARE', now, 'Capture surface start and validate continuous navigation')
         elif self.stage == 'PREPARE':
@@ -220,36 +246,67 @@ class WaypointRun:
             if not s.get('navigation_ready') or not s.get('reference_current'):
                 self.abort(now, 'Navigation permission lost before arming')
                 return self.command(now, 'manual') if o.get('mode') == 4 else []
+            if self.plan['mode']=='surface' and o.get('surface_gps_current') is not True:
+                self.reason='Waiting for current admitted GPS before surface departure'
+                return []
             if self.stage == 'GUIDED':
                 if o.get('mode') == 4:
                     self.enter('ARM', now, 'Waiting for arm confirmation')
                 else:
                     return self.command(now, 'guided')
             elif o.get('armed'):
-                self.enter('DIVE', now, 'Descending at the surface start')
+                self.last_surface_gps = now
+                self.last_surface_gps_position = tuple(o['local'][:2])
+                self.enter('CHECK_SURFACE' if self.plan['mode']=='surface' else 'DIVE', now,
+                           'Holding surface start while validating GPS/DVL/VN' if self.plan['mode']=='surface' else 'Descending at the surface start')
             elif o.get('mode') != 4:
                 self.abort(now, 'GUIDED mode lost before arming', pilot=True)
             else:
                 return self.command(now, 'arm')
         elif moving:
             local = o['local']
+            if self.plan['mode']=='surface':
+                if o.get('surface_gps_current') is True:
+                    self.last_surface_gps = now
+                    self.last_surface_gps_position = tuple(local[:2])
+                    self.surface_unconfirmed_distance = 0.
+                    self.reason='Traveling at surface with admitted GPS, DVL and VN'
+                else:
+                    self.reason='GPS rejected/unavailable; bounded DVL/VN continuation'
+                    if self.last_position is not None:
+                        self.surface_unconfirmed_distance += math.dist(local[:2],self.last_position[1][:2])
+                if (self.last_surface_gps is None or now-self.last_surface_gps > 10.
+                        or self.last_surface_gps_position is None
+                        or self.surface_unconfirmed_distance>3.):
+                    self.abort(now,'Surface GPS unavailable beyond 10 seconds or 3 m of DVL/VN travel; pilot takeover')
+                    return self.abort_actions(now,o)
             if self.last_position:
                 t, p = self.last_position
                 if math.dist(local, p) > .5+2.*(now-t):
                     self.abort(now, 'Cube position discontinuity')
                     return self.command(now, 'manual')
             self.last_position = (now, tuple(local))
+            if self.stage=='CHECK_SURFACE':
+                measurement=o.get('surface_measurement') or {}
+                if measurement.get('ready'):
+                    self.enter('TRANSIT',now,'Surface hold validated; traveling to waypoint')
+                    return []
+                self.reason='Surface position hold: '+measurement.get('reason','Collecting accepted GPS/DVL/VN measurements')
+                return self.command(now,'target',(*self.start,self.heading),interval=.1)
             target = (self.start[0], self.start[1], self.target[2]) if self.stage == 'DIVE' else (
                 (*self.target[:2], self.surface_down) if self.stage == 'SURFACE' else self.target)
             depth = o['depth']
+            surface = self.plan['mode']=='surface'
             reached = (math.dist(local[:2], target[:2]) <= .35 and o['speed'] <= .15
-                       and (abs(depth-self.plan['depth_m']) <= .08 if self.stage != 'SURFACE' else -.1 <= depth <= .12))
+                       and ((-.1 <= depth <= .12 and o.get('surface_gps_current') is True
+                             and o.get('surface_gps_at_target') is True) if surface else
+                            (abs(depth-self.plan['depth_m']) <= .08 if self.stage != 'SURFACE' else -.1 <= depth <= .12)))
             if self.settled(now, reached):
-                next_stage = {'DIVE': 'TRANSIT', 'TRANSIT': 'SURFACE', 'SURFACE': 'DISARM'}[self.stage]
+                next_stage = 'DISARM' if surface else {'DIVE': 'TRANSIT', 'TRANSIT': 'SURFACE', 'SURFACE': 'DISARM'}[self.stage]
                 self.enter(next_stage, now, {'TRANSIT': 'Traveling underwater to waypoint',
                     'SURFACE': 'Ascending at waypoint', 'DISARM': 'Surface reached; waiting for disarm'}[next_stage])
                 return []
-            return self.command(now, 'target', (*target, self.heading), interval=3.)
+            return self.command(now, 'target', (*target, self.heading), interval=.1 if surface else 3.)
         elif self.stage == 'DISARM':
             if o.get('armed'):
                 return self.command(now, 'disarm')

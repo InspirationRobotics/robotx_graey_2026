@@ -2,7 +2,7 @@ const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const code=fs.readFileSync('tools/waypoint.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 async function render(data,options={}){
   const elements={},posts=[],imageSources=[],ctx2d=new Proxy({},{get:()=>()=>{}});let now=100,starts=0;
-  const el=id=>elements[id]??=(id==='map'?{getContext:()=>ctx2d,getBoundingClientRect:()=>({width:900,height:600,...options.viewport,left:0,top:0})}:{value:id==='maptype'?'geographic':id==='depth'?'0.5':'',textContent:''});
+  const el=id=>elements[id]??=(id==='map'?{getContext:()=>ctx2d,getBoundingClientRect:()=>({width:900,height:600,...options.viewport,left:0,top:0})}:{value:id==='maptype'?'geographic':id==='imagery'?'current':id==='depth'?'0.5':'',textContent:''});
     const ctx={document:{getElementById:el},window:{},Image:class{complete=!!options.tilesLoaded;naturalWidth=options.tilesLoaded?256:0;set src(url){imageSources.push(url)}},devicePixelRatio:1,
     location:{pathname:'/waypoint'},performance:{now:()=>now},AbortSignal:{timeout:()=>null},
     setTimeout:()=>{},fetch:async(url,request)=>{if(!request?.body)return{ok:true,json:async()=>data};const body=JSON.parse(request.body);posts.push(body);if(body.action==='start'&&++starts===1&&options.timeoutStart)throw Error('Timeout');return{ok:!options.reject,json:async()=>options.reject?{ok:false,msg:'Target rejected'}:{ok:true,plan_id:'single-plan',run_id:'run'}}}};
@@ -21,6 +21,7 @@ async function render(data,options={}){
   e.zoomIn.onclick();e.zoomOut.onclick();e.fit.onclick();
   e.map.onclick({clientX:500,clientY:300});assert.equal(e.posts.length,0);assert(!e.start.disabled);
   await e.refreshAt(60100);assert(!e.start.disabled);await e.start.onclick();assert.deepEqual(e.posts.map(p=>p.action),['preview','start']);assert.equal(e.posts[1].plan_id,'single-plan');assert(e.start.disabled);
+  assert.equal(e.posts[0].plan.mode,'surface');assert.equal(e.posts[0].plan.depth_m,0);
   e=await render(ready,{reject:true});e.map.onclick({clientX:500,clientY:300});await e.start.onclick();assert.equal(e.posts.length,1);assert.match(e.message.textContent,/Target rejected/);
   e=await render(ready,{timeoutStart:true});e.map.onclick({clientX:500,clientY:300});await e.start.onclick();await e.start.onclick();assert.deepEqual(e.posts.map(p=>p.action),['preview','start','start']);assert.equal(e.posts[1].plan_id,e.posts[2].plan_id);
   e=await render({...ready,capabilities:{enabled:true,simulation:false}});e.maptype.value='pool';e.maptype.onchange();
@@ -32,6 +33,14 @@ async function render(data,options={}){
   e.map.onclick({clientX:500,clientY:300});assert(!e.start.disabled);await e.start.onclick();assert.equal(e.posts[0].plan.map,'geographic');
   for(const p of [{lat:32.9236125,lon:-117.0385235},{lat:-33.5,lon:151.2}]){const xy=e.tileXY(p,20),q=e.tileGeo(xy.x,xy.y,20);assert(Math.abs(q.lat-p.lat)<1e-10);assert(Math.abs(q.lon-p.lon)<1e-10)}
   e=await render(ready,{tilesLoaded:true});e.maptype.value='satellite';e.maptype.onchange();
+  e.map.onclick({clientX:450,clientY:400});
+  e.map.onclick({clientX:550,clientY:300});
+  await e.start.onclick();
+  assert(e.posts[0].plan.lon>ready.navigation.cube_estimate.lon);
+  assert(Math.abs(e.posts[0].plan.lat-ready.navigation.cube_estimate.lat)<1e-8);
+  e=await render(ready,{tilesLoaded:true});e.maptype.value='satellite';e.maptype.onchange();
+  assert.match(e.tileURL(183388,422631,20),/MapServer\/tile\/20\/422631\/183388$/);
+  e.imagery.value='archive2023';e.imagery.onchange();
   assert.match(e.tileURL(183388,422631,20),/tile\/64776\/20\/422631\/183388$/);
   e.findPool.onclick();e.retryTiles.onclick();e.map.onclick({clientX:450,clientY:300});
   assert.match(e.target.textContent,/32\.9236125, -117\.0385235/);assert.equal(e.posts.length,0);
@@ -49,12 +58,24 @@ async function render(data,options={}){
   e=await render(telemetry);assert.equal(e.headingDifference.textContent,'-2.0°');assert.match(e.alignedHeading.textContent,/1.0° · transmitting/);
   assert.match(e.depthSource.textContent,/SCALED_PRESSURE3 · 0.40 m/);
   assert.match(e.rawGPSStatus.textContent,/NOT AIDING/);
+  e=await render({...telemetry,navigation:{...telemetry.navigation,streams:{...telemetry.navigation.streams,
+    waypoint:{fresh:true,data:{stage:'WAIT_SURFACE',surface_measurement:{ready:false,reason:'Surface measurement 12/20 s'}}}}}});
+  assert.match(e.surfaceMeasurement.textContent,/pending.*12\/20.*not proof/);
   assert.equal(e.headingOffsets.textContent,'90.0° / 2.0°');assert.equal(e.cubeSpeed.textContent,'0.50');assert.equal(e.gpsSeparation.textContent,'0.00');assert.match(e.estimateAge.textContent,/local: 0.10 s/);
   e=await render({...telemetry,navigation:{...telemetry.navigation,streams:{...telemetry.navigation.streams,bridge:{fresh:false,age:4,data:telemetry.navigation.streams.bridge.data},local:{fresh:false,age:4,data:telemetry.navigation.streams.local.data}}}});
   assert.match(e.alignedHeading.textContent,/Unavailable/);assert.equal(e.headingDifference.textContent,'—');assert.equal(e.cubeSpeed.textContent,'—');assert.match(e.estimateAge.textContent,/4.00 s · stale/);
-  e=await render(ready,{tilesLoaded:true,viewport:{width:1440,height:900}});e.maptype.value='satellite';e.maptype.onchange();
+  e=await render(ready,{tilesLoaded:true,viewport:{width:1440,height:900}});e.maptype.value='satellite';e.imagery.value='archive2023';e.maptype.onchange();
   assert(e.imageSources.some(s=>s.includes('/tile/64776/20/')));assert(!e.imageSources.some(s=>s.includes('/tile/64776/21/')));
   assert.match(e.tileStatus.textContent,/zoom 20/);e.zoomIn.onclick();assert(!e.imageSources.some(s=>s.includes('/tile/64776/21/')));
   e.imagery.value='current';e.imagery.onchange();assert(e.imageSources.some(s=>s.includes('/MapServer/tile/21/')));
+  e.findLake.onclick();e.map.onclick({clientX:720,clientY:450});
+  assert.match(e.target.textContent,/32\.9160000, -117\.0990000/);
+  assert.equal(e.posts.length,0);
+  e.panN.onclick();e.map.onclick({clientX:720,clientY:450});assert(!e.target.textContent.includes('32.9160000'));
+  e=await render({...ready,navigation:{...ready.navigation,cube_estimate:{...ready.navigation.cube_estimate,lat:32.9137076,lon:-117.1001865}}},{tilesLoaded:true});
+  e.imagery.value='localMiramar';e.maptype.value='satellite';e.imagery.onchange();
+  assert(e.imageSources.some(s=>s==='/vendor/miramar/19-211332-91604.jpg'));
+  e.map.onclick({clientX:450,clientY:300});assert(!e.start.disabled);
+  e.findLake.onclick();assert(e.imageSources.some(s=>s==='/vendor/miramar/16-26416-11450.jpg'));
   console.log('Waypoint map, desktop archive resolution, readiness, Start retry and estimate stats checks pass');
 })().catch(e=>{console.error(e);process.exit(1)});

@@ -1150,3 +1150,187 @@ mission/arming. Receiver rawGPS accuracy recovered to1.325m on its own; do not
 claim rawGPS accuracy fixed by code. PriorDVL position fault remains, needs
 surfaced stationary Recover DVL action (north preserved), not IMU recalibration.
 See shallow-waypoint deployment evidence/doc.
+
+2026-10-17 offline wrong-waypoint investigation: user screenshots actualmarked
+32.9235546,-117.0385309 vs commanded32.9235847,-117.0385069 (~3.35mS/2.24mW).
+Accurate start followed by bad displacement not explained by constant mapoffset
+alone. No access to later3 missionlogs: hostname failed/tether timedout; user
+has no vehicle now. Target replacement test, heading-independentNEtarget tests
+and native southeastwaypoint344a552a2c pass (~0.086msimerror),216 regressions.
+DVL raw axes assumedbodyFRD without mountingtransform remains UNVERIFIED; not
+confirmed rootcause. Added0.5s WAYPOINT_TRACE including actualsenttarget and
+Cube/bridge/DVL/GPS data for futurediagnosis. No heading/axes/control tuning or
+live deployment. See docs/waypoint-displacement-debug-2026-10-17.md.
+
+2026-10-17 Wi-Fi read-only succeeds192.168.8.105. Vehiclecurrentlyarmed/MANUAL,
+killreleased/ESC-on; no livechanges. Jetson7ebb36c, diagnosticsnotdeployed.
+Retrieved3 consecutive runs5d8280d8(depthovershoot0.587m for0.4m),c6c3c7af
+(TRANSIT4.6s,thenDVLreacquisition/permissionabort),4d5705a4(pilotdisarm duringDIVE,
+neverTRANSIT). Last lateral deviation occurred under start-position hold before
+waypointtravel; correct map conversion alone cannot resolve it. Secondtarget
+~1.16mS/5.13mE, estimated movementonly0.097mS/0.690mE atabort. Cubeestimatesnot
+physicaltruth. Oldtlogoverwrittenafterrestart, needonboardBINfor11084..11154bootsec.
+See waypoint-displacement-debug doc and physical-waypoint-runs evidence.
+
+2026-10-17 local bounded mission DVL recovery: proactively hold originalposition
+on firstgap while independentCube/bridge healthy; bridge totalprediction1.5s
+includingreacquisition, fixedmissionpause1.5s, resumeoriginaltargetonlyaftervalid
+DVL+readiness. Realfaults/deadline/pilot/kill stillabort, noabortedmissionrestart.
+Added20s surface GPS/DVLmeasurement beforePREPARE/descent: accuracy<=2m,
+stationaryrawDVL<=.05m/s,VN<=2deg/s,scatter<=1.5m,independentDVLpathdisagreement<=2m.
+GUIprogressandstability-not-accuracy caveat.225tests+GUIpass; native1.05sgapresume,
+longloss+explicitrecovery,andoperatorAbortpass. Twofixturefailurespreserved.
+See docs/dvl-reacquisition-mission-2026-10-17.md. Usernowrequests tetherdeployment;
+freshpreflightdisarmedESCoffbutkillreleased, awaitingkill. No deployment yet.
+
+2026-10-17 bounded DVL/surface measurement codeDEPLOYEDthrough tether192.168.2.2,
+merge5bddc10 preservesnewerJetsona400020survey/vision work.225 installedtests pass,
+onebridge1.5shorizon verified. Backup20261017-reacquisition-204149. No liveparams
+changed. Postrestartkilled/disarmedESCoff, freshVN/DVL,baseline0/northunaligned,
+bridgeObservation/disabled;Prepare+alignmentneeded. BLOCKER:EK3_SRC1_POSZ1vs6
+mismatch;askeduserrestore6orleave1review. RFselected. No mission/arming/calibdone.
+See docs/dvl-reacquisition-mission-2026-10-17.md +postdeployevidence.
+
+2026-10-17 user explicitly approved restoring bridge depth6. Through tether,
+fresh killed/disarmedESCoff check passed; changed onlyEK3_SRC1_POSZ1->6,
+completePROFILE readback verified. Runningbridgeconfiguration_verified=true,
+profile_mismatches empty; bridgeinstance unchanged, no restart/calibration.
+Postrestartbaseline0/northunaligned stillrequires surfacedPrepare+alignment;
+RFselected. Evidence docs/evidence/reacquisition-posz-restored-2026-10-17.json.
+Earlier vertical-source blocker is resolved; other physical readiness unproven.
+
+2026-10-17 M9N compass acquisition assessment: user authorized stationary sampling.
+COMPASS_ENABLE was 0; all magnetic channels zero, so saved IDs did not establish
+sensor absence. User explicitly approved ENABLE=1 and Cube reboot. After reboot,
+external compass2 ID658945 IST8310 detected; internal ID590114 AK09916. All USE*=0
+and full ExternalNav profile verified. Quiet 65s external sample: std0.164deg,
+peak-to-peak0.804deg, field750.9mG; VN peak-to-peak1.807deg. These are variation
+statistics, not north accuracy. External calibration was identity/default. User
+confirmed upright/forward mounting and authorized rotation; external-only mask2
+calibration started with temporary USE2=1 required by ArduPilot, EKF yaw still6,
+helper restores USE2=0 finally. Calibration success and compass alignment remain
+unverified at this checkpoint. See docs/m9n-compass-assessment-2026-10-17.md.
+
+2026-10-17 compass assessment final correction: second 3D attempt returned SUCCESS,
+fitness13.70mG, proposed orientation6 (yaw270), vs user-confirmed upright/forward.
+Helper failed on MAVLink report attribute name (corrected locally), restored USE2=0.
+Installed MAVProxy calibration module AUTO-ACCEPTS MAG_CAL_REPORT: fit and orientation6
+WERE saved despite helper autosave0/no ACCEPT. Readback verified actual saved values.
+No additional yaw offset applied. Corrected physical reference356deg; time-matched
+VN-tilt compass approximation337.8deg, ~18deg discrepancy; motion/reference uncertainty
+remains. North commissioning NOT passed; no compass-to-bridge code deployed/enabled.
+Final profile matches, all COMPASS_USE*=0, ENABLE1, killed/disarmedESCoff. Next resolve
+mounting/frame vs magnetic bias and control MAVProxy autoaccept before recalibrating.
+See docs/m9n-compass-assessment-2026-10-17.md and evidence.
+
+2026-10-17 user stopped compass work and changed waypoint mission to surface travel.
+Implemented locally: GUI/default plans surface(depth0); explicit legacy dive only.
+SURFACE_NAV captures per-run reference, direct TRANSIT at pressure surface zero;
+qualified GPS aids existing DVL/VN bridge, rejects bad/stale/jumping fixes. GPS-only
+loss continues healthy DVL/VN max10s or3m cumulative travel, then MANUAL takeover.
+Arrival requires fresh admitted GPS within1.5m (accuracy<=2m), Cube<=.35m and low
+speed/surface depth. Existing kill/pilot/fault guards retained. Surface preparation
+retains valid exposure across<=4s GPS-only gaps, excluding rejected time;30s window.
+232tests+GUIpass. Native isolated GUI SITL2sGPSgap completed;12sgap yielded MANUAL.
+Initial WAIT_SURFACE timeout retained as failed evidence and brittleness fixed.
+No deployment/liveparams/mission for this request. Compass remains uncommissioned.
+See docs/surface-waypoint-2026-10-17.md and evidence; simulator accuracy not live truth.
+
+2026-10-17 surface waypoint DEPLOYED via tether, code439f5c8, backup
+/home/graey/deployment-backups/20261017-surface-waypoint-220725. Build/232installed
+Python tests passed; installedtrackedruntime byte-equal; served surface GUI and one
+bridge verified. User requested noM9Ncompass: COMPASS_ENABLE1->0,rebootedCube;
+allCOMPASS_USE*=0 and completeExternalNavprofile verified. M9NGPS stays enabled.
+No compass alignment code deployed. Saved calibration/orientation6 retained dormant.
+Postrestartkilled/disarmedESCoff, freshVN/DVL, VNflip180true/yawoffset0unchanged;
+bridgeenabledfalse/baseline0/northunaligned, supervisorObservation: Prepare+existing
+north alignment/commissioning needed. No arming/mission performed. PreservedJetson
+untracked files. Evidence docs/evidence/surface-waypoint-postdeploy-2026-10-17.jsonl.
+
+2026-10-17 surface mission stationary report: run575c0239 operator-aborted while
+WAIT_SURFACE, had only4.8/20smeasurement; neverGUIDED/transit.22sread-only sample
+found GPSaccuracy>2m83samples,DVLreacquire23,invalid13,yawrate>2deg/s71,speed>.05m/s51.
+User confirmed bobbing/moving. GPS aiding was supervisorstatus not missionmotion.
+Fix explicit per-sensor WAIT_SURFACE reasons+GUI mission-stage prominence; no limits
+relaxed. See docs/evidence/surface-wait-diagnosis-2026-10-17.json. Userconfirmed
+killed/disarmed for deployment; readiness must be freshlychecked. No missionauto-start.
+
+2026-10-17 CORRECTION to stationary report: user meant vehicle stayed physically
+still during the mission; do NOT conclude they moved it based on the earlier reply.
+Retrieved exact run575c0239log: WAIT_SURFACE at7118.3327->operatorABORTED7169.0336,
+~50.7s,4.8/20validmeasurement seconds; noGUIDED request/no positiontarget sent.
+Post-abort22ssample shows possible blockers but cannot establish mission-time resets.
+DiagnosticUI deployment a99bec8 completed,233installedtests pass,serviceactive,
+killed/disarmedESCoff verified. Limits unchanged. Actual resetting condition during
+that run remains unproven; new explicit live blocker reporting is for nextattempt.
+
+2026-10-17 user requests shorter/less brittle surface check. Surface mission now
+requires5s ACCEPTED exposure (not20),min10distinctfixsamples,15srecentwindow.
+Brief nonfatal DVL/motion/accuracy glitches pause up to1.5s;GPS-only requalifying
+up to4s. Rejected intervals nevercount; segmentIDs prevent bridging across short
+invalidsamples. Currentvalidinput needed to pass; realbridgefault/staleVN/lost
+surface state clearhistory. GPS/velocity/rate/scatter safety thresholds unchanged.
+SITLwaypoint8e53981a9d passedGUIproductionmission+2sGPSgap,qualification5.201s,
+surfacecomplete. Userconfirmedkilled/disarmedESCoff fordeployment;freshcheckrequired.
+
+2026-10-17 automatic surfaced DVL recovery implemented/tested peruserauthorization.
+Newautomatic_recovery state machine onlyclearsDVLpositionuncertaintyfault, requiring
+freshMANUAL/killed/disarmedESCoff/no mission,stationaryDVL/VN,continuousnorth,
+surfacepressure,unchangedorigin,independentGPSqualified3s/10fixes/<=2maccuracy/
+<=1mspread. Calls existingrecover_dvl;resetcounterincrements;normalGPSrequalification
+beforeodometry resumes. Supervisor invalidatesoldmissionrefs and clears ONLYsame
+DVLfault;neverrestorespropulsion/restartsmission/reactivatessuspendedsupervisor.
+Otherfaults/VNloss/underwaterremainblocked.241tests+GUIpass;nativeSITLdvl-recovery-
+4b69192apassedautomaticreanchorwithnorthretained. InitialASTtransportfixturefailures
+fixed and rerun. See docs/automatic-dvl-recovery-2026-10-17.md. Deploymentauthorized,
+userreportsMANUALkilled/disarmedESCoff;freshcheckrequired. StartupstillneedsPrepare.
+
+2026-10-18 local surface-descent mitigation completed; Graey unavailable, no SSH,
+deployment or vehicle parameter changes. Previous live incident commanded surface
+Z near zero but pressure reached 0.1958 m; physical root cause remains unconfirmed.
+Surface mission now requests bounded horizontal NED velocity (<=0.20 m/s),
+upward-only vertical velocity (-0.03 to -0.10 m/s), refreshed at 10 Hz;
+pressure >0.08 m aborts to pilot MANUAL takeover. Legacy dive path unchanged.
+GUIDED Z controller still runs: upward velocity is not proof of upward motor thrust.
+245 Python tests and waypoint GUI tests passed. Isolated native ArduSub/ROS/GUI
+SITL waypoint-cc5e87539a passed with 2s GPS outage, max recorded pressure 0.0400 m,
+final simulated target error 0.1207 m; waypoint-ad3bbb8925 operator Abort passed
+with MANUAL verified. QGC forwarding disabled. See docs/surface-descent-fix-2026-10-18.md
+and docs/evidence/surface-*2026-10-18.json. Physical vertical-response verification
+required before another live surface mission; last verified live release 9c1eab0.
+
+2026-10-18 Miramar preparation, LOCAL ONLY, no deployment/live access. Surface
+mission now enters armed GUIDED CHECK_SURFACE before TRANSIT, holding captured
+start NE via bounded surface velocity while collecting five accepted seconds of
+fresh GPS/DVL/VN measurements; pre-arm measurements cannot satisfy this hold.
+Kill/Abort, 0.08m pressure guard and all navigation limits remain. This is a
+Jetson horizontal hold in GUIDED, not firmware POSHOLD. Separate Capture north
+service/GUI can record an independently known true bearing on stationary level
+land without DVL/GPS/pressure. Does not commission/enable odometry. Session-only
+reference transfers through surface Prepare only with continuous VN; calibration,
+restart, >=0.5s VN gap/invalid attitude or detected orientation discontinuity
+invalidates it. GPS/DVL automatic movement alignment remains a surface alternative.
+Map defaults current Esri world imagery; Miramar overview is approximate browsing
+center32.916,-117.099, NOT a surveyed dock/mission anchor; wider zoom and pan added.
+HTTP200 image/jpeg confirmed for overview tile; operator browser still needs internet.
+253Python tests + both GUI JS suites pass. Native isolated GUI/SITL waypoint-
+9f24f15ce3 passed hold then transit+2sGPSoutage (0.2136m simulated final error);
+waypoint-2533f81f7d passed Abort during armed hold and MANUAL confirmation. Initial
+hold-Abort validator failure preserved and corrected (wrongly required TRANSIT).
+User reports prior descent/MANUAL/radio buzzing; no logs from these new attempts
+inspected, descent NOT expected, warning cause unconfirmed. City Miramar page
+currently warns algae bloom/no swimming/no wading; confirm staff testing permission
+and retrieval without entering water. See docs/miramar-surface-test-2026-10-18.md.
+No new GPS/DVL slow heading-consistency estimator implemented in this session.
+
+2026-10-18 user REVERSES land-north change: restore combined Prepare/north GUI,
+CalibrationJobs and bridge services from244f264; remove land_north implementation.
+Keep armed CHECK_SURFACE hold, upward-only surface requests and pressure guards.
+User reports online satellite blank; package58EsriWorldImageryJPEG tiles captured
+2026-10-18:9overviewlevel16 and49docklevel19 around32.9137076,-117.1001865.
+GUI defaults savedMiramar imagery served locally through explicit allowlisted paths;
+no browser internet or manual screenshot registration required. Saved imagery is
+not surveyed, shoreline/photo date unverified, coverage bounded; map20mmissionlimit
+unchanged. User initiallyrequestedWiFi thenauthorizedtether afterWiFiunreachable.
+Tetherreadback5e6b9be,killed/disarmedESCoff,landcapturefailedlevel/stationarycheck,
+noDVLlock;deploymentpending freshsafetycheck. See docs/miramar-offline-revert-2026-10-18.md.

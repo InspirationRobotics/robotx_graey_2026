@@ -65,7 +65,19 @@ class ContinuousSupervisor:
             self.reason = 'Waiting for mission intent'
         else:
             diving = o.intent in ('DIVE', 'UNDERWATER')
-            if not diving:
+            if o.intent == 'SURFACE_NAV':
+                if not o.reference_ready:
+                    self.reason = 'Waiting for admitted surface GPS and validated heading to capture reference'
+                    if self.active and self.surface and o.gps_good and o.heading_allowed:
+                        self.dive_heading_approved = True
+                        return [('capture_reference', None)]
+                else:
+                    # Mission adapter separately bounds GPS outages. Never
+                    # turn each rejected GPS packet into a permission reset.
+                    self.allowed = bool(self.active and self.surface
+                        and self.dive_heading_approved and o.reference_saved)
+                    self.reason = ('Surface GPS aiding' if o.gps_good else 'Surface DVL/VN continuation') if self.allowed else 'Surface navigation reference unavailable'
+            elif not diving:
                 self.dive_heading_approved = False
                 self.allowed = bool(self.active and o.gps_good and self.surface)
                 self.reason = 'GPS admitted' if self.allowed else 'Waiting for admitted GPS at surface'

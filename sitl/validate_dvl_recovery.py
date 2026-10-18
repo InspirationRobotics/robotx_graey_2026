@@ -5,6 +5,7 @@ from std_msgs.msg import String
 from std_srvs.srv import Trigger
 parser=argparse.ArgumentParser()
 parser.add_argument('--explicit-recovery',action='store_true')
+parser.add_argument('--automatic-recovery',action='store_true')
 args=parser.parse_args()
 root=pathlib.Path.cwd()
 folder=root/'sitl/logs'/('dvl-recovery-'+uuid.uuid4().hex[:8]);folder.mkdir(parents=True)
@@ -41,7 +42,7 @@ try:
     else:raise RuntimeError('Short invalid DVL did not recover')
     result.update(short_drop_recovered=True,short_status=b)
     # Exceed the prediction horizon without exhausting position confidence.
-    deadline=time.monotonic()+1.3
+    deadline=time.monotonic()+1.7
     while time.monotonic()<deadline:
         pub.publish(String(data=json.dumps(dict(stamp_ns=clock.now().nanoseconds,velocity=[0.,0.,0.],valid=False,sensor_time=None))))
         time.sleep(.005)
@@ -63,7 +64,7 @@ try:
     time.sleep(.3);b=read()
     assert b['fault'] and not b['healthy'] and not b['transmitting']
     result.update(passed=True,long_loss_latched=True,long_status=b)
-    if args.explicit_recovery:
+    if args.explicit_recovery or args.automatic_recovery:
         # Isolated simulator fixture only: no physical kill node is launched.
         # Publish a maintenance lease only after verifying the simulator is
         # disarmed. This does not claim to test hardware kill enforcement.
@@ -74,18 +75,30 @@ try:
         def lease():
             safe.publish(String(data=json.dumps(dict(session='isolated-recovery-test',revision=1,
                 vehicle_fresh=True,armed=False,sa_active=True,esc_commanded_on=False,
-                mission_claimed=False,autonomous=False))))
+                mission_claimed=False,autonomous=False,mode='MANUAL'))))
         node.create_timer(.1,lease)
-        end=time.monotonic()+2.5
-        while time.monotonic()<end:rclpy.spin_once(node,timeout_sec=.05)
-        client=node.create_client(Trigger,'/graey/navigation/recover_dvl')
-        assert client.wait_for_service(timeout_sec=3.)
+        end=time.monotonic()+10
+        # DDS discovery is asynchronous. Require the GUI's actual maintenance
+        # view, not a fixed sleep assuming our simulator lease was delivered.
+        while time.monotonic()<end:
+            rclpy.spin_once(node,timeout_sec=.05)
+            c=json.load(urllib.request.urlopen('http://127.0.0.1:8090/api/controller',timeout=2))
+            if c.get('online') and c.get('session')=='isolated-recovery-test' and c.get('armed') is False and c.get('sa_active') is True and c.get('esc_commanded_on') is False:break
+        else:raise RuntimeError('Simulator maintenance lease did not reach GUI: '+str(c))
+        result['maintenance_controller']=c
         prior_reset=b['reset_counter'];prior_north=b['north_alignment'];prior_bias=b['heading_bias_deg']
-        future=client.call_async(Trigger.Request())
-        rclpy.spin_until_future_complete(node,future,timeout_sec=5.)
-        assert future.done() and future.result().success, str(future.result())
-        result['recovery_ack']=future.result().message
-        deadline=time.monotonic()+15
+        # The authorization may arrive immediately; still collect the full
+        # production stationary DVL history after the injected loss ends.
+        settled_until=time.monotonic()+2.5
+        while time.monotonic()<settled_until:rclpy.spin_once(node,timeout_sec=.05)
+        if args.explicit_recovery:
+            client=node.create_client(Trigger,'/graey/navigation/recover_dvl')
+            assert client.wait_for_service(timeout_sec=3.)
+            future=client.call_async(Trigger.Request())
+            rclpy.spin_until_future_complete(node,future,timeout_sec=5.)
+            assert future.done() and future.result().success, str(future.result())
+            result['recovery_ack']=future.result().message
+        deadline=time.monotonic()+25
         while time.monotonic()<deadline:
             rclpy.spin_once(node,timeout_sec=.05);b=read()
             if b['healthy'] and b['transmitting']:break
@@ -93,7 +106,11 @@ try:
         assert b['reset_counter']==(prior_reset+1)%256
         assert b['north_alignment']==prior_north and b['heading_bias_deg']==prior_bias
         assert b['gps_admission']['qualified']
-        result.update(explicit_recovery_passed=True,recovered_status=b)
+        result.update(explicit_recovery_passed=bool(args.explicit_recovery),recovered_status=b)
+        if args.automatic_recovery:
+            assert b['automatic_recovery']['completed'] is True
+            assert b['automatic_recovery']['count']==1
+            result['automatic_recovery_passed']=True
 except Exception as e:
     result['passed']=False
     result['error']=str(e)

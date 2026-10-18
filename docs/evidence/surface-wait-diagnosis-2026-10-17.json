@@ -1,0 +1,20 @@
+{
+  "date": "2026-10-17",
+  "status": "Read-only sample, mission already operator-aborted in WAIT_SURFACE",
+  "samples": 112,
+  "counts": {
+    "GPS Fresh valid DVL motion unavailable": 10,
+    "DVL reacquiring": 23,
+    "DVL invalid": 13,
+    "GPS GPS qualifying": 31,
+    "yaw rate >2": 71,
+    "speed >.05": 51,
+    "GPS accuracy >2": 83,
+    "bridge unhealthy": 6,
+    "GPS GPS horizontal accuracy unavailable or excessive": 17
+  },
+  "user_explanation": "User clarified: vehicle stayed physically stationary during mission. Prior bobbing/moving reply was misinterpreted; later sample is not evidence of mission-period motion.",
+  "threshold_changes": "None",
+  "fix": "Show mission WAIT_SURFACE reason and explicit sensor blockers instead of generic supervisor GPS aiding",
+  "exact_mission_timeline": "7118.3327..7169.0336 monotonic: WAIT_SURFACE then operator ABORTED, 4.8/20 s measurement; no GUIDED, ARM or target command"
+}
