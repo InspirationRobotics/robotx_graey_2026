@@ -318,6 +318,8 @@ class PipelineMission(MissionBase):
         p('light_min_share', 0.10)          # a new light must fill this share of the picture at its
                                             # peak: real lights 12-61%, glimpses at the edge 5-8%, which
                                             # sat in the wrong place and were counted twice (Oct 16-17)
+        p('light_v_min', led_boxes.V_MIN)   # HSV (Ruth, Oct 18): a light's pixel is at least this bright
+        p('light_s_min', led_boxes.S_MIN)   # ... and this strongly coloured (0-255); hue ranges in led_boxes.py
         p('survey_backup_m', 0.6)           # at the buoy end, after turning 180: back up this far, so the
                                             # camera (0.2 m behind the sonar) starts at the end
         p('survey_dir', 'sonar_data')       # the survey report (JSON) is written here
@@ -400,6 +402,7 @@ class PipelineMission(MissionBase):
                                  f'run follow_mode:=mark_buoy with the sub at the buoy first')
         self.repair_hold, self.light_same = float(g('repair_hold_s')), float(g('light_same_m'))
         self.light_min_share = float(g('light_min_share'))
+        led_boxes.V_MIN, led_boxes.S_MIN = int(g('light_v_min')), int(g('light_s_min'))
         self.survey_backup = float(g('survey_backup_m'))
         self.survey_dir = g('survey_dir')
         self.s_leg = None                   # survey: 'to buoy', then 'survey'
@@ -1514,6 +1517,8 @@ class PipelineMission(MissionBase):
         if (self.camera_boxes or self.survey) and self.camera is None:
             tracker = (led_boxes.LightTracker(same_m=self.light_same, new_frac=self.light_min_share)
                        if self.survey else None)
+            self.get_logger().info(f'    camera: HSV - V >= {led_boxes.V_MIN}, S >= {led_boxes.S_MIN}, hues '
+                                   f'{led_boxes.SURVEY_HUES if self.survey else led_boxes.HUES}')
             self.camera = led_boxes.CameraWatcher(self.camera_url, self.camera_at,
                                                   lambda t: self.get_logger().info('    ' + t), self.on_box,
                                                   tracker=tracker).start()
