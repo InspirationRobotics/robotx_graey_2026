@@ -1182,3 +1182,11 @@ GUIprogressandstability-not-accuracy caveat.225tests+GUIpass; native1.05sgapresu
 longloss+explicitrecovery,andoperatorAbortpass. Twofixturefailurespreserved.
 See docs/dvl-reacquisition-mission-2026-10-17.md. Usernowrequests tetherdeployment;
 freshpreflightdisarmedESCoffbutkillreleased, awaitingkill. No deployment yet.
+
+2026-10-17 bounded DVL/surface measurement codeDEPLOYEDthrough tether192.168.2.2,
+merge5bddc10 preservesnewerJetsona400020survey/vision work.225 installedtests pass,
+onebridge1.5shorizon verified. Backup20261017-reacquisition-204149. No liveparams
+changed. Postrestartkilled/disarmedESCoff, freshVN/DVL,baseline0/northunaligned,
+bridgeObservation/disabled;Prepare+alignmentneeded. BLOCKER:EK3_SRC1_POSZ1vs6
+mismatch;askeduserrestore6orleave1review. RFselected. No mission/arming/calibdone.
+See docs/dvl-reacquisition-mission-2026-10-17.md +postdeployevidence.

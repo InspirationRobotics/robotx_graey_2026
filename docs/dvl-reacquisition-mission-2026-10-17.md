@@ -93,3 +93,22 @@ unchanged. Retain this failed result. Subsequent validation recorded below.
 
 Final225 Python tests and both GUI scripts pass. Second explicit-recovery run0a7753d5 reached the maintenance gate but failed the stationary-history gate: the new lease wait could finish immediately before the required history accumulated. The fixture now also collects2.5s stationary history. Final dvl-recovery-380fc670 passed all recovery paths preserving north; operator Abort runwaypoint-cb56e096af passed and requested MANUAL. Both failed fixtures remain in evidence. VN status rate is degrees/s (explicit regression); surface checks use raw DVL velocity, not GPS-corrected/clamped velocity.
 
+
+## Tether deployment verified
+
+User explicitly requested deployment. Fresh maintenance state confirmed killed,
+disarmed,ESC-off/no mission. Preserved Jetson teammate commitsa400020 (survey,
+pipeline and vision) in merge5bddc10; no main changes. Backed up at
+/home/graey/deployment-backups/20261017-reacquisition-204149, built, verified all
+tracked source/installed Python+GUI assets and repaired stale installed modules.
+225 tests passed against installed runtime. Restarted core; exactly one bridge,
+new1.5second horizon present, fresh VN/DVL, vehicle still killed/disarmed ESC-off.
+Source/GitHub/Jetson5bddc10 at code deployment.
+
+Postrestart baseline0/north unaligned/bridge disabled/Observation are expected
+until surfaced Prepare and north alignment. Controller selection returnedRF.
+Unexpected live configuration mismatch: EK3_SRC1_POSZ actual1 vs profile6.
+No live parameter write performed as part of deployment. Asked user whether to
+restore agreed ExternalNav6 or leave barometer1 for review. Mission not ready;
+do not bypass the profile gate. Evidence reacquisition-postdeploy-2026-10-17.json.
+No pressure calibration, north maneuver, arming or physical mission started.
