@@ -1198,3 +1198,27 @@ profile_mismatches empty; bridgeinstance unchanged, no restart/calibration.
 Postrestartbaseline0/northunaligned stillrequires surfacedPrepare+alignment;
 RFselected. Evidence docs/evidence/reacquisition-posz-restored-2026-10-17.json.
 Earlier vertical-source blocker is resolved; other physical readiness unproven.
+
+2026-10-17 M9N compass acquisition assessment: user authorized stationary sampling.
+COMPASS_ENABLE was 0; all magnetic channels zero, so saved IDs did not establish
+sensor absence. User explicitly approved ENABLE=1 and Cube reboot. After reboot,
+external compass2 ID658945 IST8310 detected; internal ID590114 AK09916. All USE*=0
+and full ExternalNav profile verified. Quiet 65s external sample: std0.164deg,
+peak-to-peak0.804deg, field750.9mG; VN peak-to-peak1.807deg. These are variation
+statistics, not north accuracy. External calibration was identity/default. User
+confirmed upright/forward mounting and authorized rotation; external-only mask2
+calibration started with temporary USE2=1 required by ArduPilot, EKF yaw still6,
+helper restores USE2=0 finally. Calibration success and compass alignment remain
+unverified at this checkpoint. See docs/m9n-compass-assessment-2026-10-17.md.
+
+2026-10-17 compass assessment final correction: second 3D attempt returned SUCCESS,
+fitness13.70mG, proposed orientation6 (yaw270), vs user-confirmed upright/forward.
+Helper failed on MAVLink report attribute name (corrected locally), restored USE2=0.
+Installed MAVProxy calibration module AUTO-ACCEPTS MAG_CAL_REPORT: fit and orientation6
+WERE saved despite helper autosave0/no ACCEPT. Readback verified actual saved values.
+No additional yaw offset applied. Corrected physical reference356deg; time-matched
+VN-tilt compass approximation337.8deg, ~18deg discrepancy; motion/reference uncertainty
+remains. North commissioning NOT passed; no compass-to-bridge code deployed/enabled.
+Final profile matches, all COMPASS_USE*=0, ENABLE1, killed/disarmedESCoff. Next resolve
+mounting/frame vs magnetic bias and control MAVProxy autoaccept before recalibrating.
+See docs/m9n-compass-assessment-2026-10-17.md and evidence.
