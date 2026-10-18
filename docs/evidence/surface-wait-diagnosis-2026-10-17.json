@@ -13,7 +13,8 @@
     "bridge unhealthy": 6,
     "GPS GPS horizontal accuracy unavailable or excessive": 17
   },
-  "user_explanation": "Vehicle was bobbing/moving",
+  "user_explanation": "User clarified: vehicle stayed physically stationary during mission. Prior bobbing/moving reply was misinterpreted; later sample is not evidence of mission-period motion.",
   "threshold_changes": "None",
-  "fix": "Show mission WAIT_SURFACE reason and explicit sensor blockers instead of generic supervisor GPS aiding"
+  "fix": "Show mission WAIT_SURFACE reason and explicit sensor blockers instead of generic supervisor GPS aiding",
+  "exact_mission_timeline": "7118.3327..7169.0336 monotonic: WAIT_SURFACE then operator ABORTED, 4.8/20 s measurement; no GUIDED, ARM or target command"
 }

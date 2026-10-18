@@ -1254,3 +1254,12 @@ User confirmed bobbing/moving. GPS aiding was supervisorstatus not missionmotion
 Fix explicit per-sensor WAIT_SURFACE reasons+GUI mission-stage prominence; no limits
 relaxed. See docs/evidence/surface-wait-diagnosis-2026-10-17.json. Userconfirmed
 killed/disarmed for deployment; readiness must be freshlychecked. No missionauto-start.
+
+2026-10-17 CORRECTION to stationary report: user meant vehicle stayed physically
+still during the mission; do NOT conclude they moved it based on the earlier reply.
+Retrieved exact run575c0239log: WAIT_SURFACE at7118.3327->operatorABORTED7169.0336,
+~50.7s,4.8/20validmeasurement seconds; noGUIDED request/no positiontarget sent.
+Post-abort22ssample shows possible blockers but cannot establish mission-time resets.
+DiagnosticUI deployment a99bec8 completed,233installedtests pass,serviceactive,
+killed/disarmedESCoff verified. Limits unchanged. Actual resetting condition during
+that run remains unproven; new explicit live blocker reporting is for nextattempt.
