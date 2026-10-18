@@ -1246,3 +1246,11 @@ Postrestartkilled/disarmedESCoff, freshVN/DVL, VNflip180true/yawoffset0unchanged
 bridgeenabledfalse/baseline0/northunaligned, supervisorObservation: Prepare+existing
 north alignment/commissioning needed. No arming/mission performed. PreservedJetson
 untracked files. Evidence docs/evidence/surface-waypoint-postdeploy-2026-10-17.jsonl.
+
+2026-10-17 surface mission stationary report: run575c0239 operator-aborted while
+WAIT_SURFACE, had only4.8/20smeasurement; neverGUIDED/transit.22sread-only sample
+found GPSaccuracy>2m83samples,DVLreacquire23,invalid13,yawrate>2deg/s71,speed>.05m/s51.
+User confirmed bobbing/moving. GPS aiding was supervisorstatus not missionmotion.
+Fix explicit per-sensor WAIT_SURFACE reasons+GUI mission-stage prominence; no limits
+relaxed. See docs/evidence/surface-wait-diagnosis-2026-10-17.json. Userconfirmed
+killed/disarmed for deployment; readiness must be freshlychecked. No missionauto-start.

@@ -3,6 +3,15 @@ from robotx_graey_2026.api.navigation.surface_measurement import SurfaceMeasurem
 
 
 class SurfaceTests(unittest.TestCase):
+    def test_waiting_message_identifies_real_limits(self):
+        b=self.sample(0.,accuracy=2.011)
+        b['heading_vn']['rate']=3.1
+        b['heading_dvl']['velocity']=[.08,0.,0.]
+        b['dvl_continuity']=dict(recovering=True)
+        r=SurfaceMeasurement().update(0.,b)
+        for message in ('GPS accuracy 2.011','VN turn rate 3.1','DVL speed 0.080','DVL reacquiring'):
+            self.assertIn(message,r['reason'])
+        self.assertFalse(r['ready'])
     def test_surface_mode_retains_valid_exposure_but_excludes_gps_gap(self):
         s=SurfaceMeasurement(tolerated_gps_gap=4.)
         for i in range(61):r=s.update(i*.2,self.sample(i*.2))

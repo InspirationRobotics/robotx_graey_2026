@@ -32,14 +32,33 @@ class SurfaceMeasurement:
               and abs(heading['rate'])<=2.)  # bridge reports degrees/second
         good=(independent_good and 0<=now-fix.get('received',-math.inf)<.5
               and admitted.get('qualified') is True)
-        reason='Hold stationary at the surface with qualified GPS (accuracy ≤2 m), DVL and VN'
+        blockers=[]
+        if bridge.get('healthy') is not True: blockers.append('navigation bridge not healthy')
+        if bridge.get('surfaced') is not True or bridge.get('gps_eligible') is not True:
+            blockers.append('calibrated surface pressure required')
+        if (bridge.get('dvl_continuity') or {}).get('recovering'): blockers.append('DVL reacquiring')
+        if dvl.get('valid') is not True: blockers.append('DVL bottom lock invalid')
+        if len(velocity)==3 and all(isinstance(v,(int,float)) and math.isfinite(v) for v in velocity):
+            speed=math.sqrt(sum(v*v for v in velocity))
+            if speed>.05: blockers.append(f'DVL speed {speed:.3f} m/s exceeds stationary limit 0.050')
+        rate=heading.get('rate')
+        if isinstance(rate,(int,float)) and math.isfinite(rate) and abs(rate)>2:
+            blockers.append(f'VN turn rate {rate:.1f} deg/s exceeds stationary limit 2.0')
+        accuracy=fix.get('accuracy')
+        if not isinstance(accuracy,(int,float)) or not math.isfinite(accuracy) or not 0<accuracy<=2:
+            blockers.append(f'GPS accuracy {accuracy} m; requires 0–2 m')
+        for name,sample in (('GPS',fix),('DVL',dvl),('VN',heading)):
+            if not 0<=now-sample.get('received',-math.inf)<.5: blockers.append(name+' telemetry stale')
+        if admitted.get('qualified') is not True:
+            blockers.append('GPS not admitted: '+str(admitted.get('reason','qualification pending')))
+        reason='Surface check waiting: '+('; '.join(blockers) or 'finite stationary DVL/VN/GPS measurements required')
         if not good:
             if (self.tolerated_gps_gap>0 and independent_good and self.last_received is not None
                     and 0<=now-self.last_received<=self.tolerated_gps_gap):
                 elapsed=sum(b[0]-a[0] for a,b in zip(self.rows,list(self.rows)[1:]) if 0<b[0]-a[0]<=.5)
                 self.motion_stamp=None
                 return dict(ready=False,elapsed_s=elapsed,required_s=self.duration,
-                            reason='GPS requalifying; earlier stationary samples retained, rejected time excluded')
+                            reason=reason+'; earlier stationary samples retained, rejected time excluded')
             self.rows.clear();self.last_stamp=self.last_received=None
             self.motion_stamp=None
             return dict(ready=False,elapsed_s=0.,required_s=self.duration,reason=reason)
