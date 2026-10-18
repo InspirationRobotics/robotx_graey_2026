@@ -1272,3 +1272,15 @@ invalidsamples. Currentvalidinput needed to pass; realbridgefault/staleVN/lost
 surface state clearhistory. GPS/velocity/rate/scatter safety thresholds unchanged.
 SITLwaypoint8e53981a9d passedGUIproductionmission+2sGPSgap,qualification5.201s,
 surfacecomplete. Userconfirmedkilled/disarmedESCoff fordeployment;freshcheckrequired.
+
+2026-10-17 automatic surfaced DVL recovery implemented/tested peruserauthorization.
+Newautomatic_recovery state machine onlyclearsDVLpositionuncertaintyfault, requiring
+freshMANUAL/killed/disarmedESCoff/no mission,stationaryDVL/VN,continuousnorth,
+surfacepressure,unchangedorigin,independentGPSqualified3s/10fixes/<=2maccuracy/
+<=1mspread. Calls existingrecover_dvl;resetcounterincrements;normalGPSrequalification
+beforeodometry resumes. Supervisor invalidatesoldmissionrefs and clears ONLYsame
+DVLfault;neverrestorespropulsion/restartsmission/reactivatessuspendedsupervisor.
+Otherfaults/VNloss/underwaterremainblocked.241tests+GUIpass;nativeSITLdvl-recovery-
+4b69192apassedautomaticreanchorwithnorthretained. InitialASTtransportfixturefailures
+fixed and rerun. See docs/automatic-dvl-recovery-2026-10-17.md. Deploymentauthorized,
+userreportsMANUALkilled/disarmedESCoff;freshcheckrequired. StartupstillneedsPrepare.

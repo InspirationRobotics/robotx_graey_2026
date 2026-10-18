@@ -11,6 +11,7 @@ from unittest.mock import Mock
 
 from robotx_graey_2026.api.navigation.bridge_estimator import BridgeEstimator, yaw
 from robotx_graey_2026.api.navigation.odometry_profile import PROFILE
+from robotx_graey_2026.api.navigation.automatic_recovery import AutomaticRecovery
 
 
 class TransportTests(unittest.TestCase):
@@ -46,10 +47,13 @@ class TransportTests(unittest.TestCase):
         self.clock = NS(now=10.)
         ns = dict(SteadyNode=object, math=math, json=json, String=NS, PROFILE=PROFILE,
                   yaw=yaw, time=NS(monotonic=lambda: self.clock.now),
-                  statistics=statistics, BridgeEstimator=BridgeEstimator, require_maintenance=Mock())
+                  statistics=statistics, BridgeEstimator=BridgeEstimator, require_maintenance=Mock(), AutomaticRecovery=AutomaticRecovery)
         exec(compile(tree, str(path), 'exec'), ns)
         self.b = ns['FusedNavBridge'].__new__(ns['FusedNavBridge'])
         self.b.est = BridgeEstimator()
+        self.b.auto_recovery=AutomaticRecovery()
+        self.b.control_state={}
+        self.b.control_received=None
         self.b.stamps, self.b.params = {}, {}
         self.b.boot_ms = self.b.last_sent = None
         self.b.start_checked = True

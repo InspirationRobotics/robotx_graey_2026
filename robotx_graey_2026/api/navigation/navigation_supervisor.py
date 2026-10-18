@@ -179,6 +179,20 @@ class NavigationSupervisor(Node):
                 and self.logic.active is False and d.get('enabled') is False)
             if d.get('fault') and not maintenance_pause:
                 self.logic.fault = d['fault']
+            recovery=d.get('automatic_recovery') or {}
+            token=(d['instance'],recovery.get('count'))
+            if (recovery.get('completed') is True and recovery.get('maintenance_safe') is True
+                    and recovery.get('count',0)>0 and not d.get('fault')
+                    and d.get('healthy') is True and d.get('transmitting') is True
+                    and token!=getattr(self,'automatic_recovery_seen',None)):
+                self.automatic_recovery_seen=token
+                # Re-anchoring invalidates every old mission reference. Never
+                # clear unrelated faults or reactivate a suspended supervisor.
+                self.reference=None
+                self.epoch=str(uuid.uuid4())
+                if self.logic.fault=='DVL continuity lost; position uncertainty requires revalidation':
+                    self.logic.fault=''
+                self.get_logger().warning('AUTOMATIC_DVL_RECOVERY reference invalidated; new mission required')
         except (ValueError, TypeError):
             return
 
