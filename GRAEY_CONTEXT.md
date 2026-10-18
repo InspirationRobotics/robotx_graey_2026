@@ -1334,3 +1334,12 @@ not surveyed, shoreline/photo date unverified, coverage bounded; map20mmissionli
 unchanged. User initiallyrequestedWiFi thenauthorizedtether afterWiFiunreachable.
 Tetherreadback5e6b9be,killed/disarmedESCoff,landcapturefailedlevel/stationarycheck,
 noDVLlock;deploymentpending freshsafetycheck. See docs/miramar-offline-revert-2026-10-18.md.
+
+2026-10-18 latest user decision RESTORES land VN/north preparation from5e6b9be,
+while retaining offline Miramar imagery/routes and all surface mission protections
+from2effc53. Calibration before land Capture north; independently known true bearing,
+continuous powered VN required; surface Prepare remains necessary for pressure,
+GPS/DVL/Cube commissioning. Not a land pressure calibration.254Python tests and
+both GUIJSsuitesPASS. WiFi deployment attempted only:graey.local unresolved,
+192.168.8.105 timedout. No live stateverified/no deployment/restart/parameters in
+this restoration session. Last verified Jetson2effc53. AwaitcurrentWiFiIP if needed.

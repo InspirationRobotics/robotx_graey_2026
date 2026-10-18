@@ -8,6 +8,17 @@ from robotx_graey_2026.api.navigation.vn_calibration import VNCalibration
 
 
 class CalibrationJobsTests(unittest.TestCase):
+    def test_land_alignment_job_never_prepares_pressure_or_commissions(self):
+        self.job.job=dict(busy=True,cancel=False,true_heading_deg=90.)
+        self.job.run('align_land')
+        self.assertEqual(self.calls,[('suspend',None),('pause',None),('align_land',90.)])
+        self.assertEqual(self.job.snapshot()['phase'],'aligned_land')
+        self.assertFalse(self.job.waypoint_permission)
+
+    def test_retained_prepare_requires_current_land_reference(self):
+        with self.assertRaisesRegex(ValueError,'Capture land north first'):
+            self.job.request(dict(action='prepare',confirmed=True,surface_confirmed=True,alignment_mode='retained'))
+
     def test_missing_automatic_maneuver_status_fails_without_commission(self):
         self.job.job=dict(busy=True,cancel=False,auto_started=True,auto_started_at=0.)
         self.put('supervisor',dict(north_alignment=dict(aligned=True)))
