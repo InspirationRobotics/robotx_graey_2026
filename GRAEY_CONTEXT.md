@@ -1171,3 +1171,14 @@ waypointtravel; correct map conversion alone cannot resolve it. Secondtarget
 ~1.16mS/5.13mE, estimated movementonly0.097mS/0.690mE atabort. Cubeestimatesnot
 physicaltruth. Oldtlogoverwrittenafterrestart, needonboardBINfor11084..11154bootsec.
 See waypoint-displacement-debug doc and physical-waypoint-runs evidence.
+
+2026-10-17 local bounded mission DVL recovery: proactively hold originalposition
+on firstgap while independentCube/bridge healthy; bridge totalprediction1.5s
+includingreacquisition, fixedmissionpause1.5s, resumeoriginaltargetonlyaftervalid
+DVL+readiness. Realfaults/deadline/pilot/kill stillabort, noabortedmissionrestart.
+Added20s surface GPS/DVLmeasurement beforePREPARE/descent: accuracy<=2m,
+stationaryrawDVL<=.05m/s,VN<=2deg/s,scatter<=1.5m,independentDVLpathdisagreement<=2m.
+GUIprogressandstability-not-accuracy caveat.225tests+GUIpass; native1.05sgapresume,
+longloss+explicitrecovery,andoperatorAbortpass. Twofixturefailurespreserved.
+See docs/dvl-reacquisition-mission-2026-10-17.md. Usernowrequests tetherdeployment;
+freshpreflightdisarmedESCoffbutkillreleased, awaitingkill. No deployment yet.

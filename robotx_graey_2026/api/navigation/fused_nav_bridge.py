@@ -289,6 +289,7 @@ class FusedNavBridge(SteadyNode):
                                       raw_yaw=yaw(self.est.raw_q) % 360,
                                       rate=math.degrees(self.est.rates[2])),
                       heading_dvl=dict(received=self.est.motion_at, velocity=self.est.velocity(),
+                                       raw_velocity=self.est.raw_velocity,
                                        valid=self.est.motion_valid))
         if now-getattr(self, 'last_published', -math.inf) >= .05:
             self.pub.publish(String(data=json.dumps(status, allow_nan=False)))

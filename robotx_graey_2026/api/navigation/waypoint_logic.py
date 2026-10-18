@@ -52,6 +52,7 @@ class WaypointRun:
         self.navigation_wait_since = None
         self.navigation_hold = None
         self.navigation_wait_reason = ''
+        self.navigation_wait_limit = .7
         self.abort_context = None
         self.vertical_offset_error = None
 
@@ -70,7 +71,7 @@ class WaypointRun:
         self.takeover_requested = self.stage in self.moving | {'GUIDED', 'ARM', 'DISARM'}
         self.enter('ABORTED', now, reason)
 
-    def navigation_wait(self, now, o, reason):
+    def navigation_wait(self, now, o, reason, dvl=False):
         """Pause travel only with independent healthy pose/bridge evidence.
 
         This is not stale-sensor extrapolation. Capture one current Cube position
@@ -91,7 +92,8 @@ class WaypointRun:
         if self.navigation_wait_since is None:
             self.navigation_wait_since=now
             self.navigation_hold=tuple(o['local'])
-        if now-self.navigation_wait_since >= .7:
+            self.navigation_wait_limit=1.5 if dvl else .7
+        if now-self.navigation_wait_since >= self.navigation_wait_limit:
             return None
         self.navigation_wait_reason=reason
         # Last mission setpoint may still command forward travel. Replace it
@@ -160,6 +162,14 @@ class WaypointRun:
                     failure = 'Pressure depth exceeded mission target by more than 0.15 m; pilot takeover'
                 elif abs(self.vertical_offset_error) > .15:
                     failure = 'Cube/pressure vertical reference changed by more than 0.15 m; pilot takeover'
+        # Stop advancing the target on the FIRST recoverable DVL gap, while
+        # bounded odometry is still healthy. Never wait for health to expire.
+        dvl=o.get('dvl_continuity') or {}
+        if moving and dvl.get('recovering'):
+            if not failure and s.get('state')!='Fault' and o.get('fresh'):
+                hold=self.navigation_wait(now,o,'DVL reacquiring; horizontal target held',dvl=True)
+                if hold is not None:return hold
+            failure=failure or 'DVL recovery exceeded bounded healthy navigation; pilot takeover'
         if (moving or self.stage in ('GUIDED', 'ARM')) and (not s.get('navigation_ready') or not s.get('reference_current')
                        or not (s.get('fusion_policy') == 'continuous')
                        or (s.get('reference') or {}).get('reference_id') != self.reference_id):
@@ -186,7 +196,12 @@ class WaypointRun:
             self.arrival=None
         self.navigation_wait_since=self.navigation_hold=None
         self.navigation_wait_reason=''
+        self.navigation_wait_limit=.7
         if self.stage == 'WAIT_SURFACE':
+            measurement=o.get('surface_measurement') or {}
+            if not measurement.get('ready'):
+                self.reason=measurement.get('reason','Waiting for surface GPS/DVL measurements')
+                return []
             if s.get('surfaced') is True and (s.get('fusion_policy') == 'continuous' and s.get('gps_qualified_input') is True) and s.get('navigation_ready'):
                 self.enter('PREPARE', now, 'Capture surface start and validate continuous navigation')
         elif self.stage == 'PREPARE':

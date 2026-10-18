@@ -24,6 +24,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--abort', action='store_true')
     parser.add_argument('--dvl-dropout',action='store_true',help='Inject brief invalid DVL during underwater transit')
+    parser.add_argument('--dvl-gap-seconds',type=float,default=.1,help='Duration of injected DVL interruption')
     parser.add_argument('--supervisor-interruption',action='store_true',help='Inject a brief false permission status while Cube/bridge stay healthy')
     parser.add_argument('--continuous', action='store_true', default=True)
     parser.add_argument('--auto-north', action='store_true', help='Manual surface movement with a 40-degree synthetic VN reference error')
@@ -141,7 +142,8 @@ def main():
                                     result['navigation_pause_seen']=bool(result.get('navigation_pause_seen') or sample.get('navigation_pause',{}).get('active'))
                                 result['permission_interruption_injected']=True
                             if args.dvl_dropout and not result.get('dvl_dropout_injected'):
-                                for _ in range(3):
+                                gap_end=time.monotonic()+args.dvl_gap_seconds
+                                while time.monotonic()<gap_end:
                                     dvl_pub.publish(String(data=json.dumps(dict(stamp_ns=dvl_clock.now().nanoseconds,velocity=[],valid=False,sensor_time=None))))
                                     time.sleep(.03)
                                 result['dvl_dropout_injected']=True

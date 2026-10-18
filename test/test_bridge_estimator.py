@@ -294,12 +294,12 @@ class EstimatorTests(unittest.TestCase):
 
     def test_silence_stops_prediction_then_recovers_without_recalibration(self):
         self.acquire()
-        self.e.imu(self.t+1.2,(1.,0.,0.,0.),(0.,0.,0.))
-        self.e.pressure_depth(self.t+1.2,0.)
-        s=self.e.status(self.t+1.2)
+        self.e.imu(self.t+1.7,(1.,0.,0.,0.),(0.,0.,0.))
+        self.e.pressure_depth(self.t+1.7,0.)
+        s=self.e.status(self.t+1.7)
         self.assertFalse(s['healthy']);self.assertFalse(self.e.fault)
         self.assertEqual(s['dvl_continuity']['state'],'WAITING_FOR_DVL')
-        self.t+=1.2
+        self.t+=1.7
         for _ in range(8):self.step(gps=False)
         self.assertTrue(self.e.status(self.t)['healthy'])
         self.assertTrue(self.e.heading_validated)

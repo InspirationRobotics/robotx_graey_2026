@@ -10,6 +10,7 @@ from std_msgs.msg import Bool, String
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.gui.navigation_view import NavigationView
 from robotx_graey_2026.api.navigation.waypoint_logic import WaypointRun
+from robotx_graey_2026.api.navigation.surface_measurement import SurfaceMeasurement
 from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL
 
 
@@ -48,6 +49,8 @@ class WaypointMission(Node):
         self.last_pause = False
         self.last_trace = -math.inf
         self.sent_target = None
+        self.surface_measurement=SurfaceMeasurement()
+        self.surface_measurement_status={}
         self.fc_status_text = []
         self.pub = self.create_publisher(String, '/graey/waypoint/status', 10)
         self.intent_pub = self.create_publisher(String, '/graey/navigation/intent', 10)
@@ -168,6 +171,7 @@ class WaypointMission(Node):
             and b.get('transmitting') is True and b.get('configuration_verified') is True
             and not b.get('fault'))
         return dict(fresh=fresh, failure=failure, abort=self.aborted,
+            dvl_continuity=b.get('dvl_continuity') if 0<=now-getattr(self,'bridge_time',-math.inf)<.3 else {},
             vertical_limits_verified=limits_ready,
             navigation_hold_safe=hold_safe,
             supervisor=s, armed=hb.get('armed'), mode=hb.get('mode_id'),
@@ -185,6 +189,10 @@ class WaypointMission(Node):
             self.intent_pub.publish(String(data=json.dumps(dict(run_id=self.logic.run_id,
                 phase=self.logic.phase, sequence=self.sequence, target_gps=self.logic.plan))))
         o = self.observation(now)
+        if self.logic.stage=='WAIT_SURFACE':
+            b=self.bridge if 0<=now-self.bridge_time<.3 else {}
+            self.surface_measurement_status=self.surface_measurement.update(now,b)
+        o['surface_measurement']=self.surface_measurement_status
         if self.logic.stage=='WAIT_SURFACE' and not o['vertical_limits_verified']:
             self.logic.reason='Waiting for shallow waypoint vertical speed/acceleration limit readback'
         for action, payload in self.logic.step(now, o):
@@ -222,6 +230,7 @@ class WaypointMission(Node):
             self.get_logger().warning('MISSION_NAVIGATION_PAUSE '+json.dumps(dict(
                 run_id=self.logic.run_id,published_monotonic=now,**status['navigation_pause'])))
         status.update(simulation=self.sim, published_monotonic=now,
+                      surface_measurement=self.surface_measurement_status,
                       vertical_limits_verified=o['vertical_limits_verified'],
                       telemetry_fresh=bool(o['fresh']), confirmed_source=self.supervisor.get('confirmed_source'))
         status['control_evidence']={k:self.safety.get(k) for k in (

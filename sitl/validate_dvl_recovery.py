@@ -41,7 +41,7 @@ try:
     else:raise RuntimeError('Short invalid DVL did not recover')
     result.update(short_drop_recovered=True,short_status=b)
     # Exceed the prediction horizon without exhausting position confidence.
-    deadline=time.monotonic()+1.3
+    deadline=time.monotonic()+1.7
     while time.monotonic()<deadline:
         pub.publish(String(data=json.dumps(dict(stamp_ns=clock.now().nanoseconds,velocity=[0.,0.,0.],valid=False,sensor_time=None))))
         time.sleep(.005)
@@ -76,8 +76,19 @@ try:
                 vehicle_fresh=True,armed=False,sa_active=True,esc_commanded_on=False,
                 mission_claimed=False,autonomous=False))))
         node.create_timer(.1,lease)
-        end=time.monotonic()+2.5
-        while time.monotonic()<end:rclpy.spin_once(node,timeout_sec=.05)
+        end=time.monotonic()+10
+        # DDS discovery is asynchronous. Require the GUI's actual maintenance
+        # view, not a fixed sleep assuming our simulator lease was delivered.
+        while time.monotonic()<end:
+            rclpy.spin_once(node,timeout_sec=.05)
+            c=json.load(urllib.request.urlopen('http://127.0.0.1:8090/api/controller',timeout=2))
+            if c.get('online') and c.get('session')=='isolated-recovery-test' and c.get('armed') is False and c.get('sa_active') is True and c.get('esc_commanded_on') is False:break
+        else:raise RuntimeError('Simulator maintenance lease did not reach GUI: '+str(c))
+        result['maintenance_controller']=c
+        # The authorization may arrive immediately; still collect the full
+        # production stationary DVL history after the injected loss ends.
+        settled_until=time.monotonic()+2.5
+        while time.monotonic()<settled_until:rclpy.spin_once(node,timeout_sec=.05)
         client=node.create_client(Trigger,'/graey/navigation/recover_dvl')
         assert client.wait_for_service(timeout_sec=3.)
         prior_reset=b['reset_counter'];prior_north=b['north_alignment'];prior_bias=b['heading_bias_deg']
