@@ -1322,3 +1322,15 @@ inspected, descent NOT expected, warning cause unconfirmed. City Miramar page
 currently warns algae bloom/no swimming/no wading; confirm staff testing permission
 and retrieval without entering water. See docs/miramar-surface-test-2026-10-18.md.
 No new GPS/DVL slow heading-consistency estimator implemented in this session.
+
+2026-10-18 user REVERSES land-north change: restore combined Prepare/north GUI,
+CalibrationJobs and bridge services from244f264; remove land_north implementation.
+Keep armed CHECK_SURFACE hold, upward-only surface requests and pressure guards.
+User reports online satellite blank; package58EsriWorldImageryJPEG tiles captured
+2026-10-18:9overviewlevel16 and49docklevel19 around32.9137076,-117.1001865.
+GUI defaults savedMiramar imagery served locally through explicit allowlisted paths;
+no browser internet or manual screenshot registration required. Saved imagery is
+not surveyed, shoreline/photo date unverified, coverage bounded; map20mmissionlimit
+unchanged. User initiallyrequestedWiFi thenauthorizedtether afterWiFiunreachable.
+Tetherreadback5e6b9be,killed/disarmedESCoff,landcapturefailedlevel/stationarycheck,
+noDVLlock;deploymentpending freshsafetycheck. See docs/miramar-offline-revert-2026-10-18.md.

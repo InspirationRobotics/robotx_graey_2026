@@ -68,7 +68,14 @@ TYPES = {
     '.css': 'text/css',
     '.html': 'text/html',
     '.png': 'image/png',
+    '.jpg': 'image/jpeg',
 }
+# Explicit allowlist for packaged georeferenced imagery; no arbitrary file route.
+for _z,_x0,_y0,_radius in ((16,11450,26416,1),(19,91604,211332,3)):
+    for _x in range(_x0-_radius,_x0+_radius+1):
+        for _y in range(_y0-_radius,_y0+_radius+1):
+            _tile=f'vendor/miramar/{_z}-{_y}-{_x}.jpg'
+            FILES['/'+_tile]=_tile
 LED_NAMES = {0: 'off', 1: 'RED', 2: 'YELLOW', 3: 'GREEN'}
 LED_DRIVER = 'led_node'
 LED_SOURCE = 'pixhawk_led_node'

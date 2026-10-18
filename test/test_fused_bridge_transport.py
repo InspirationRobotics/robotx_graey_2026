@@ -12,27 +12,9 @@ from unittest.mock import Mock
 from robotx_graey_2026.api.navigation.bridge_estimator import BridgeEstimator, yaw
 from robotx_graey_2026.api.navigation.odometry_profile import PROFILE
 from robotx_graey_2026.api.navigation.automatic_recovery import AutomaticRecovery
-from robotx_graey_2026.api.navigation.land_north import LandNorth
 
 
 class TransportTests(unittest.TestCase):
-    def test_land_capture_then_prepare_retains_north_without_land_depth_or_dvl(self):
-        self.b.land_north=LandNorth()
-        for i in range(51):self.b.land_north.observe(7.5+i*.05,(1.,0.,0.,0.),(0.,0.,0.))
-        self.b.output_permitted=False
-        self.b.get_logger=Mock(return_value=Mock())
-        request=NS(parameters=[NS(name='true_heading_deg',value=NS(type=3,double_value=90.))])
-        response=self.b.align_land(request,NS(result=NS()))
-        self.assertTrue(response.result.successful,response.result.reason)
-        self.assertFalse(self.b.output_permitted)
-        self.b.params={k:(10.,v) for k,v in PROFILE.items()}
-        self.b.pressures=deque((8.+i*.1,1000.) for i in range(21))
-        response=self.b.prepare(NS(data=True),NS())
-        self.assertTrue(response.success,response.message)
-        self.assertTrue(self.b.est.heading_validated)
-        self.assertEqual(self.b.est.north_offset,90.)
-        self.assertFalse(self.b.est.initialized)
-
     def test_known_heading_service_requires_maintenance_and_explicit_double(self):
         self.b.est.align_known_heading=Mock(return_value='captured')
         self.b.est.north_alignment=Mock(status=Mock(return_value={}))

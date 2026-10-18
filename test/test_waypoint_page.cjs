@@ -2,7 +2,7 @@ const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const code=fs.readFileSync('tools/waypoint.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 async function render(data,options={}){
   const elements={},posts=[],imageSources=[],ctx2d=new Proxy({},{get:()=>()=>{}});let now=100,starts=0;
-  const el=id=>elements[id]??=(id==='map'?{getContext:()=>ctx2d,getBoundingClientRect:()=>({width:900,height:600,...options.viewport,left:0,top:0})}:{value:id==='maptype'?'geographic':id==='depth'?'0.5':'',textContent:''});
+  const el=id=>elements[id]??=(id==='map'?{getContext:()=>ctx2d,getBoundingClientRect:()=>({width:900,height:600,...options.viewport,left:0,top:0})}:{value:id==='maptype'?'geographic':id==='imagery'?'current':id==='depth'?'0.5':'',textContent:''});
     const ctx={document:{getElementById:el},window:{},Image:class{complete=!!options.tilesLoaded;naturalWidth=options.tilesLoaded?256:0;set src(url){imageSources.push(url)}},devicePixelRatio:1,
     location:{pathname:'/waypoint'},performance:{now:()=>now},AbortSignal:{timeout:()=>null},
     setTimeout:()=>{},fetch:async(url,request)=>{if(!request?.body)return{ok:true,json:async()=>data};const body=JSON.parse(request.body);posts.push(body);if(body.action==='start'&&++starts===1&&options.timeoutStart)throw Error('Timeout');return{ok:!options.reject,json:async()=>options.reject?{ok:false,msg:'Target rejected'}:{ok:true,plan_id:'single-plan',run_id:'run'}}}};
@@ -72,5 +72,10 @@ async function render(data,options={}){
   assert.match(e.target.textContent,/32\.9160000, -117\.0990000/);
   assert.equal(e.posts.length,0);
   e.panN.onclick();e.map.onclick({clientX:720,clientY:450});assert(!e.target.textContent.includes('32.9160000'));
+  e=await render({...ready,navigation:{...ready.navigation,cube_estimate:{...ready.navigation.cube_estimate,lat:32.9137076,lon:-117.1001865}}},{tilesLoaded:true});
+  e.imagery.value='localMiramar';e.maptype.value='satellite';e.imagery.onchange();
+  assert(e.imageSources.some(s=>s==='/vendor/miramar/19-211332-91604.jpg'));
+  e.map.onclick({clientX:450,clientY:300});assert(!e.start.disabled);
+  e.findLake.onclick();assert(e.imageSources.some(s=>s==='/vendor/miramar/16-26416-11450.jpg'));
   console.log('Waypoint map, desktop archive resolution, readiness, Start retry and estimate stats checks pass');
 })().catch(e=>{console.error(e);process.exit(1)});
