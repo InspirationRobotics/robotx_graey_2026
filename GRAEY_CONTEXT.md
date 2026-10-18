@@ -1190,3 +1190,11 @@ changed. Postrestartkilled/disarmedESCoff, freshVN/DVL,baseline0/northunaligned,
 bridgeObservation/disabled;Prepare+alignmentneeded. BLOCKER:EK3_SRC1_POSZ1vs6
 mismatch;askeduserrestore6orleave1review. RFselected. No mission/arming/calibdone.
 See docs/dvl-reacquisition-mission-2026-10-17.md +postdeployevidence.
+
+2026-10-17 user explicitly approved restoring bridge depth6. Through tether,
+fresh killed/disarmedESCoff check passed; changed onlyEK3_SRC1_POSZ1->6,
+completePROFILE readback verified. Runningbridgeconfiguration_verified=true,
+profile_mismatches empty; bridgeinstance unchanged, no restart/calibration.
+Postrestartbaseline0/northunaligned stillrequires surfacedPrepare+alignment;
+RFselected. Evidence docs/evidence/reacquisition-posz-restored-2026-10-17.json.
+Earlier vertical-source blocker is resolved; other physical readiness unproven.

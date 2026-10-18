@@ -112,3 +112,6 @@ No live parameter write performed as part of deployment. Asked user whether to
 restore agreed ExternalNav6 or leave barometer1 for review. Mission not ready;
 do not bypass the profile gate. Evidence reacquisition-postdeploy-2026-10-17.json.
 No pressure calibration, north maneuver, arming or physical mission started.
+
+User approved restoring ExternalNav6. Changed onlyEK3_SRC1_POSZ1->6 through tether after fresh killed/disarmedESCoff verification. FullPROFILE readback matches, runningbridgeverified/no mismatches, sameinstance/no restart. Vertical-source blocker resolved; surfacedPrepare/northalignment stillneeded. Evidence reacquisition-posz-restored-2026-10-17.json.
+
