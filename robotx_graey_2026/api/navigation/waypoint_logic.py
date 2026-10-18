@@ -109,7 +109,7 @@ class WaypointRun:
         # immediately once, then refresh at the ordinary position-target rate.
         if self.last_command != -math.inf and now-self.navigation_wait_since < .001:
             self.last_command=-math.inf
-        return self.command(now,'target',(*self.navigation_hold,self.heading),interval=3.)
+        return self.command(now,'target',(*self.navigation_hold,self.heading),interval=.1 if self.plan['mode']=='surface' else 3.)
 
     def abort_actions(self, now, o):
         if self.takeover_requested and not self.pilot_takeover and o.get('mode') in (None, 4):
@@ -167,7 +167,9 @@ class WaypointRun:
             if (local and len(local)==3 and isinstance(depth,(int,float))
                     and math.isfinite(depth) and math.isfinite(local[2])):
                 self.vertical_offset_error = local[2]-depth-self.surface_down
-                if depth > self.plan['depth_m']+.15:
+                if self.plan['mode']=='surface' and depth>.08:
+                    failure='Surface pressure depth exceeded 0.08 m; pilot takeover'
+                elif depth > self.plan['depth_m']+.15:
                     failure = 'Pressure depth exceeded mission target by more than 0.15 m; pilot takeover'
                 elif abs(self.vertical_offset_error) > .15:
                     failure = 'Cube/pressure vertical reference changed by more than 0.15 m; pilot takeover'
@@ -297,7 +299,7 @@ class WaypointRun:
                 self.enter(next_stage, now, {'TRANSIT': 'Traveling underwater to waypoint',
                     'SURFACE': 'Ascending at waypoint', 'DISARM': 'Surface reached; waiting for disarm'}[next_stage])
                 return []
-            return self.command(now, 'target', (*target, self.heading), interval=3.)
+            return self.command(now, 'target', (*target, self.heading), interval=.1 if surface else 3.)
         elif self.stage == 'DISARM':
             if o.get('armed'):
                 return self.command(now, 'disarm')

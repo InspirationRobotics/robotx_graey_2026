@@ -59,6 +59,13 @@ class SurfaceWaypointTests(unittest.TestCase):
     def test_default_overrides_old_depth_and_dive_is_explicit(self):
         self.assertEqual(validate_plan(dict(lat=32.,lon=-117.,map='geographic',depth_m=.5))['depth_m'],0.)
 
+    def test_surface_descent_aborts_at_eight_centimetres(self):
+        f=self.setup_surface();f.o.update(local=(0.,0.,.081),depth=.081)
+        actions=f.step()
+        self.assertEqual(f.run.stage,'ABORTED')
+        self.assertIn('0.08',f.run.reason)
+        self.assertFalse(any(a=='target' for a,p in actions))
+
     def test_supervisor_captures_surface_reference_and_tolerates_gps_only_loss(self):
         s=ContinuousSupervisor(active=True)
         o=Observation(healthy=True,depth=0.,depth_valid=True,surface_authoritative=True,

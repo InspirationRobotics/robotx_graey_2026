@@ -1,0 +1,9 @@
+{
+  "run": "waypoint-cc5e87539a",
+  "trace_samples": 28,
+  "surface_velocity_samples": 27,
+  "maximum_pressure_depth_m": 0.04000000655651065,
+  "minimum_down_request_mps": -0.06200000524520852,
+  "maximum_down_request_mps": -0.03,
+  "maximum_horizontal_request_mps": 0.20000000000000004
+}

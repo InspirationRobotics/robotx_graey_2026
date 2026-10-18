@@ -11,6 +11,7 @@ from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.gui.navigation_view import NavigationView
 from robotx_graey_2026.api.navigation.waypoint_logic import WaypointRun
 from robotx_graey_2026.api.navigation.surface_measurement import SurfaceMeasurement
+from robotx_graey_2026.api.navigation.surface_control import surface_velocity
 from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL
 
 
@@ -189,6 +190,7 @@ class WaypointMission(Node):
             dvl_continuity=b.get('dvl_continuity') if 0<=now-getattr(self,'bridge_time',-math.inf)<.3 else {},
             vertical_limits_verified=limits_ready,
             navigation_hold_safe=hold_safe,
+            velocity_ned=velocity,
             supervisor=s, armed=hb.get('armed'), mode=hb.get('mode_id'),
             local=ned, speed=math.hypot(*velocity[:2]) if velocity and all(v is not None for v in velocity) else math.inf,
             yaw=math.radians(att['rpy'][2]) if att and att['rpy'][2] is not None else None,
@@ -213,7 +215,12 @@ class WaypointMission(Node):
         for action, payload in self.logic.step(now, o):
             if action == 'target':
                 self.sent_target=payload
-                self.link.goto_ned(*payload)
+                if self.logic.plan['mode']=='surface':
+                    v=surface_velocity(payload,o['local'],o['velocity_ned'],o['depth'])
+                    self.link.surface_velocity(*v,payload[3])
+                    self.sent_surface_velocity=v
+                else:
+                    self.link.goto_ned(*payload)
             elif action in ('guided', 'manual'):
                 self.get_logger().warning('MISSION_MODE_REQUEST '+json.dumps(dict(
                     run_id=self.logic.run_id,action=action,stage=self.logic.stage,
@@ -261,6 +268,7 @@ class WaypointMission(Node):
                 run_id=self.logic.run_id,stage=self.logic.stage,monotonic=now,
                 plan=self.logic.plan,target_ned=self.logic.target,
                 last_sent_target_ned_yaw=self.sent_target,
+                last_sent_surface_velocity_ned=getattr(self,'sent_surface_velocity',None),
                 start_ned=self.logic.start,cube_ned=o.get('local'),
                 cube_yaw_rad=o.get('yaw'),pressure_depth_m=o.get('depth'),
                 bridge_ned=self.bridge.get('position_ned'),

@@ -1284,3 +1284,17 @@ Otherfaults/VNloss/underwaterremainblocked.241tests+GUIpass;nativeSITLdvl-recove
 4b69192apassedautomaticreanchorwithnorthretained. InitialASTtransportfixturefailures
 fixed and rerun. See docs/automatic-dvl-recovery-2026-10-17.md. Deploymentauthorized,
 userreportsMANUALkilled/disarmedESCoff;freshcheckrequired. StartupstillneedsPrepare.
+
+2026-10-18 local surface-descent mitigation completed; Graey unavailable, no SSH,
+deployment or vehicle parameter changes. Previous live incident commanded surface
+Z near zero but pressure reached 0.1958 m; physical root cause remains unconfirmed.
+Surface mission now requests bounded horizontal NED velocity (<=0.20 m/s),
+upward-only vertical velocity (-0.03 to -0.10 m/s), refreshed at 10 Hz;
+pressure >0.08 m aborts to pilot MANUAL takeover. Legacy dive path unchanged.
+GUIDED Z controller still runs: upward velocity is not proof of upward motor thrust.
+245 Python tests and waypoint GUI tests passed. Isolated native ArduSub/ROS/GUI
+SITL waypoint-cc5e87539a passed with 2s GPS outage, max recorded pressure 0.0400 m,
+final simulated target error 0.1207 m; waypoint-ad3bbb8925 operator Abort passed
+with MANUAL verified. QGC forwarding disabled. See docs/surface-descent-fix-2026-10-18.md
+and docs/evidence/surface-*2026-10-18.json. Physical vertical-response verification
+required before another live surface mission; last verified live release 9c1eab0.

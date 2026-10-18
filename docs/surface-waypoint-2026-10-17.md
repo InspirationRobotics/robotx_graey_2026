@@ -1,5 +1,10 @@
 # Surface waypoint mission — 2026-10-17
 
+October 18 update: surface travel's XYZ position interface is replaced by bounded
+velocity commands with upward-only Z requests and a 0.08 m pressure abort. See
+`surface-descent-fix-2026-10-18.md` for evidence and deployment status; the original
+implementation details below are historical where they differ.
+
 User changed the mission to surface travel and stopped compass alignment work.
 This change is repository software only; no deployment, parameter change,
 arming or physical mission was performed for this request.

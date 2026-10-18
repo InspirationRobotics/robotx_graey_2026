@@ -19,6 +19,7 @@ to the origin and teleports the EKF's external-nav source. Reconnecting instead
 of dying keeps that state alive.
 """
 import os
+import math
 import time
 
 os.environ['MAVLINK20'] = '1'                       # ODOMETRY (331) is v2-only
@@ -145,6 +146,14 @@ class Link:
         self.send('set_position_target_local_ned_send',
                   0, TARGET_SYS, TARGET_COMP, FRAME_LOCAL_NED, MASK_POS_YAW,
                   n, e, down, 0, 0, 0, 0, 0, 0, yaw, 0)
+
+    def surface_velocity(self, north, east, down, yaw):
+        if (not all(math.isfinite(v) for v in (north,east,down,yaw))
+                or math.hypot(north,east)>.200001 or not -.100001<=down<=0):
+            raise ValueError('Surface velocity must be bounded and never downwards')
+        # Ignore XYZ position and acceleration; use XYZ velocity and yaw angle.
+        self.send('set_position_target_local_ned_send',0,TARGET_SYS,TARGET_COMP,
+                  FRAME_LOCAL_NED,0b100111000111,0,0,0,north,east,down,0,0,0,yaw,0)
 
     def goto_posvel(self, n, e, down, vn, ve, vd, yaw_rate):
         """Position WITH a velocity feed-forward, for a target that keeps moving.
