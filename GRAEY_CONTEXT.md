@@ -1235,3 +1235,14 @@ retains valid exposure across<=4s GPS-only gaps, excluding rejected time;30s win
 Initial WAIT_SURFACE timeout retained as failed evidence and brittleness fixed.
 No deployment/liveparams/mission for this request. Compass remains uncommissioned.
 See docs/surface-waypoint-2026-10-17.md and evidence; simulator accuracy not live truth.
+
+2026-10-17 surface waypoint DEPLOYED via tether, code439f5c8, backup
+/home/graey/deployment-backups/20261017-surface-waypoint-220725. Build/232installed
+Python tests passed; installedtrackedruntime byte-equal; served surface GUI and one
+bridge verified. User requested noM9Ncompass: COMPASS_ENABLE1->0,rebootedCube;
+allCOMPASS_USE*=0 and completeExternalNavprofile verified. M9NGPS stays enabled.
+No compass alignment code deployed. Saved calibration/orientation6 retained dormant.
+Postrestartkilled/disarmedESCoff, freshVN/DVL, VNflip180true/yawoffset0unchanged;
+bridgeenabledfalse/baseline0/northunaligned, supervisorObservation: Prepare+existing
+north alignment/commissioning needed. No arming/mission performed. PreservedJetson
+untracked files. Evidence docs/evidence/surface-waypoint-postdeploy-2026-10-17.jsonl.
