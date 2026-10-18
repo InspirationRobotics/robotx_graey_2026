@@ -49,7 +49,8 @@ class WaypointMission(Node):
         self.last_pause = False
         self.last_trace = -math.inf
         self.sent_target = None
-        self.surface_measurement=SurfaceMeasurement(tolerated_gps_gap=4. if self.logic.plan['mode']=='surface' else 0.)
+        self.surface_measurement=(SurfaceMeasurement(duration=5.,tolerated_gps_gap=4.,tolerated_sensor_gap=1.5)
+                                  if self.logic.plan['mode']=='surface' else SurfaceMeasurement())
         self.surface_measurement_status={}
         self.fc_status_text = []
         self.pub = self.create_publisher(String, '/graey/waypoint/status', 10)

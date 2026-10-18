@@ -1263,3 +1263,12 @@ Post-abort22ssample shows possible blockers but cannot establish mission-time re
 DiagnosticUI deployment a99bec8 completed,233installedtests pass,serviceactive,
 killed/disarmedESCoff verified. Limits unchanged. Actual resetting condition during
 that run remains unproven; new explicit live blocker reporting is for nextattempt.
+
+2026-10-17 user requests shorter/less brittle surface check. Surface mission now
+requires5s ACCEPTED exposure (not20),min10distinctfixsamples,15srecentwindow.
+Brief nonfatal DVL/motion/accuracy glitches pause up to1.5s;GPS-only requalifying
+up to4s. Rejected intervals nevercount; segmentIDs prevent bridging across short
+invalidsamples. Currentvalidinput needed to pass; realbridgefault/staleVN/lost
+surface state clearhistory. GPS/velocity/rate/scatter safety thresholds unchanged.
+SITLwaypoint8e53981a9d passedGUIproductionmission+2sGPSgap,qualification5.201s,
+surfacecomplete. Userconfirmedkilled/disarmedESCoff fordeployment;freshcheckrequired.

@@ -105,3 +105,12 @@ Postrestartkilled/disarmedESCoff, freshVN/DVL, VNflip180true/yawoffset0unchanged
 bridgeenabledfalse/baseline0/northunaligned, supervisorObservation: Prepare+existing
 north alignment/commissioning needed. No arming/mission performed. PreservedJetson
 untracked files. Evidence docs/evidence/surface-waypoint-postdeploy-2026-10-17.jsonl.
+
+2026-10-17 user requests shorter/less brittle surface check. Surface mission now
+requires5s ACCEPTED exposure (not20),min10distinctfixsamples,15srecentwindow.
+Brief nonfatal DVL/motion/accuracy glitches pause up to1.5s;GPS-only requalifying
+up to4s. Rejected intervals nevercount; segmentIDs prevent bridging across short
+invalidsamples. Currentvalidinput needed to pass; realbridgefault/staleVN/lost
+surface state clearhistory. GPS/velocity/rate/scatter safety thresholds unchanged.
+SITLwaypoint8e53981a9d passedGUIproductionmission+2sGPSgap,qualification5.201s,
+surfacecomplete. Userconfirmedkilled/disarmedESCoff fordeployment;freshcheckrequired.

@@ -3,6 +3,36 @@ from robotx_graey_2026.api.navigation.surface_measurement import SurfaceMeasurem
 
 
 class SurfaceTests(unittest.TestCase):
+    def test_five_second_surface_check_pauses_brief_dvl_and_motion_noise(self):
+        s=SurfaceMeasurement(duration=5.,tolerated_gps_gap=4.,tolerated_sensor_gap=1.5)
+        for i in range(42):
+            t=i*.2;b=self.sample(t)
+            if i in (8,17,26):
+                b['heading_dvl']['valid']=False
+                r=s.update(t,b)
+                self.assertGreater(r['elapsed_s'],0.)
+                self.assertFalse(r['ready'])
+            else:r=s.update(t,b)
+        self.assertTrue(r['ready'])
+        b=self.sample(8.4);b['fault']='Position uncertain';b['healthy']=False
+        self.assertEqual(s.update(8.4,b)['elapsed_s'],0.)
+
+    def test_rejected_samples_never_count_toward_five_seconds(self):
+        s=SurfaceMeasurement(duration=5.,tolerated_gps_gap=4.,tolerated_sensor_gap=1.5)
+        for i in range(101):
+            t=i*.2;b=self.sample(t)
+            if i%2:b['heading_vn']['rate']=3.
+            self.assertFalse(s.update(t,b)['ready'])
+
+    def test_sustained_sensor_loss_expires_retained_progress(self):
+        s=SurfaceMeasurement(duration=5.,tolerated_gps_gap=4.,tolerated_sensor_gap=1.5)
+        for i in range(11):s.update(i*.2,self.sample(i*.2))
+        for i in range(11,22):
+            t=i*.2;b=self.sample(t);b['heading_dvl']['valid']=False
+            r=s.update(t,b)
+        self.assertEqual(r['elapsed_s'],0.)
+        self.assertFalse(s.update(4.4,self.sample(4.4))['ready'])
+
     def test_waiting_message_identifies_real_limits(self):
         b=self.sample(0.,accuracy=2.011)
         b['heading_vn']['rate']=3.1
