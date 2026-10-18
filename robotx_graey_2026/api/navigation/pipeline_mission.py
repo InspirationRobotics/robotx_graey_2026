@@ -315,9 +315,12 @@ class PipelineMission(MissionBase):
                                             # for the magnet repair); 0: just note it and go on (Ruth, Oct 17:
                                             # the magnet isn't on the sub yet)
         p('light_same_m', 0.3)              # sightings this close together are one light
-        p('light_min_share', 0.10)          # a new light must fill this share of the picture at its
-                                            # peak: real lights 12-61%, glimpses at the edge 5-8%, which
+        p('light_min_share', 0.10)          # a new light must once be seen whole (clear of the picture's
+                                            # edge) or fill this share of it: glimpses at the edge (5-8%)
                                             # sat in the wrong place and were counted twice (Oct 16-17)
+        p('light_min_frac', 0.02)           # smallest blob that counts: 0.02 in the pool (camera close,
+                                            # the glow breaks into pieces); ~0.0005 at the lake, where a
+                                            # ring ~1 m below is 0.05-6% of the picture (Oct 18)
         p('light_v_min', led_boxes.V_MIN)   # HSV (Ruth, Oct 18): a light's pixel is at least this bright
         p('light_s_min', led_boxes.S_MIN)   # ... and this strongly coloured (0-255); hue ranges in led_boxes.py
         p('survey_backup_m', 0.6)           # at the buoy end, after turning 180: back up this far, so the
@@ -402,6 +405,7 @@ class PipelineMission(MissionBase):
                                  f'run follow_mode:=mark_buoy with the sub at the buoy first')
         self.repair_hold, self.light_same = float(g('repair_hold_s')), float(g('light_same_m'))
         self.light_min_share = float(g('light_min_share'))
+        self.light_min_frac = float(g('light_min_frac'))
         led_boxes.V_MIN, led_boxes.S_MIN = int(g('light_v_min')), int(g('light_s_min'))
         self.survey_backup = float(g('survey_backup_m'))
         self.survey_dir = g('survey_dir')
@@ -1515,7 +1519,8 @@ class PipelineMission(MissionBase):
 
     def start_camera(self):
         if (self.camera_boxes or self.survey) and self.camera is None:
-            tracker = (led_boxes.LightTracker(same_m=self.light_same, new_frac=self.light_min_share)
+            tracker = (led_boxes.LightTracker(same_m=self.light_same, new_frac=self.light_min_share,
+                                              min_frac=self.light_min_frac)
                        if self.survey else None)
             self.get_logger().info(f'    camera: HSV - V >= {led_boxes.V_MIN}, S >= {led_boxes.S_MIN}, hues '
                                    f'{led_boxes.SURVEY_HUES if self.survey else led_boxes.HUES}')
