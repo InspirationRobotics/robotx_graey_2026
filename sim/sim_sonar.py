@@ -53,7 +53,7 @@ TEE_M, ELBOW_M = 0.049, 0.022               # centre to socket bottom (typical)
 PIPE_450, PIPE_1000, STUB_200, LEG_1500 = 0.45, 1.0, 0.2, 1.5
 REDUCER_M = 0.04                            # 3"-2" coupler, laying length (typical)
 BASE_SIDE_M = 0.78
-N_BOXES = 4
+N_BOXES = int(os.environ.get("SIM_N_BOXES", "4"))   # light boxes on the pipe (the handbook gives no number)
 BASE_TEE_M = 0.038                          # 2" base cross, centre to socket bottom (typical)
 BOX_L, BOX_W, BOX_H = 0.20, 0.15, 0.15      # light box (Ruth: ~0.15 m tall)
 

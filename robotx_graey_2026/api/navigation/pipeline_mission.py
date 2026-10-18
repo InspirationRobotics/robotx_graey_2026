@@ -85,6 +85,9 @@ target deeper than max_depth is ever sent.
 """
 import json
 import math
+import os
+import sys
+import time
 import urllib.request
 
 import numpy as np
@@ -262,6 +265,9 @@ class PipelineMission(MissionBase):
         p('follow_step_m', 0.3)             # ... and at most this far per sonar sweep
         p('follow_yaw_dps', 5.0)            # turn no faster (fast turns made GUIDED slide, Oct 15)
         p('follow_fit_m', 1.2)              # line fit: pipe dots this far behind the sonar
+        p('follow_gate_m', 0.3)             # once seen, only echoes this far (sideways) from the pipe's
+                                            # line count as the pipe (0 = off): not the wall (Oct 17)
+        p('follow_gate_up_m', 0.2)          # ... and this far above or below the pipe's height
         p('follow_lost_s', 30.0)            # no pipe under the sonar this long: lost or ended
         p('follow_max_m', 8.0)              # stop after following this far
         p('follow_time_s', 300.0)           # ... or after this long (under phase_timeout)
@@ -289,6 +295,24 @@ class PipelineMission(MissionBase):
         p('spot_min_frac', 0.3)             # follow only from a spot that showed the pipe in this share of sweeps
         p('start_with', 'scan')             # 'follow': no scan - the pilot leaves the sub over the pipe,
                                             # facing along it, and it follows from there (Ruth, Oct 16)
+        # ---- survey the pipeline's lights (Ruth, Oct 17; handbook Task 2) ----
+        p('follow_mode', 'follow')          # 'survey': along the pipe to the end nearest the green buoy,
+                                            # turn round, then follow it to the far end noting each light
+                                            # GREEN or RED in order, stopping over the RED one on the way;
+                                            # 'mark_buoy': save where the sub is now as the green buoy, then
+                                            # quit - sends nothing to the vehicle
+        p('survey_buoy', 'start')           # the origin is the green buoy, no compass or GPS (Ruth, Oct 17):
+                                            # 'start' = where this mission started (begin it at the buoy);
+                                            # 'marked' = where follow_mode:=mark_buoy saved it; 'here' = the
+                                            # sub is already at the buoy's end of the pipe, facing along it
+        p('survey_buoy_file', 'sonar_data/green_buoy.json')   # mark_buoy writes it, 'marked' reads it
+        p('repair_hold_s', 0.0)             # > 0: go back over the RED light and hold this long (stands in
+                                            # for the magnet repair); 0: just note it and go on (Ruth, Oct 17:
+                                            # the magnet isn't on the sub yet)
+        p('light_same_m', 0.3)              # sightings this close together are one light
+        p('survey_backup_m', 0.6)           # at the buoy end, after turning 180: back up this far, so the
+                                            # camera (0.2 m behind the sonar) starts at the end
+        p('survey_dir', 'sonar_data')       # the survey report (JSON) is written here
 
     def read_extra_parameters(self):
         g = lambda n: self.get_parameter(n).value
@@ -326,6 +350,8 @@ class PipelineMission(MissionBase):
         self.follow_speed, self.follow_step = float(g('follow_speed')), float(g('follow_step_m'))
         self.follow_yaw = math.radians(g('follow_yaw_dps'))
         self.follow_fit, self.follow_lost = float(g('follow_fit_m')), float(g('follow_lost_s'))
+        self.follow_gate, self.follow_gate_up = float(g('follow_gate_m')), float(g('follow_gate_up_m'))
+        self.f_up = None
         self.follow_max, self.follow_time = float(g('follow_max_m')), float(g('follow_time_s'))
         self.follow_both, self.follow_toward = bool(g('follow_both_ways')), float(g('follow_toward'))
         self.follow_turn = g('follow_turn').strip().lower()
@@ -345,6 +371,27 @@ class PipelineMission(MissionBase):
         self.start_with = g('start_with').strip().lower()
         if self.start_with not in ('scan', 'follow'):
             raise ValueError(f"start_with must be scan or follow, not {self.start_with!r}")
+        mode = g('follow_mode').strip().lower()
+        if mode not in ('follow', 'survey', 'mark_buoy'):
+            raise ValueError(f"follow_mode must be follow, survey or mark_buoy, not {mode!r}")
+        self.survey, self.mark_buoy = mode == 'survey', mode == 'mark_buoy'
+        self.survey_buoy = g('survey_buoy').strip().lower()
+        if self.survey_buoy not in ('start', 'marked', 'here'):
+            raise ValueError(f"survey_buoy must be start, marked or here, not {self.survey_buoy!r}")
+        self.buoy_file = g('survey_buoy_file')
+        self.marked_buoy = None
+        if self.survey and self.survey_buoy == 'marked':      # check it now, not once armed and over the pipe
+            try:
+                with open(self.buoy_file) as f:
+                    j = json.load(f)
+                self.marked_buoy = (float(j['n']), float(j['e']))
+            except (OSError, ValueError, KeyError) as ex:
+                raise ValueError(f'survey_buoy:=marked but no green buoy saved in {self.buoy_file} ({ex}): '
+                                 f'run follow_mode:=mark_buoy with the sub at the buoy first')
+        self.repair_hold, self.light_same = float(g('repair_hold_s')), float(g('light_same_m'))
+        self.survey_backup = float(g('survey_backup_m'))
+        self.survey_dir = g('survey_dir')
+        self.s_leg = None                   # survey: 'to buoy', then 'survey'
         self.side = 1.0 if g('pool_side').strip().lower() == 'right' else -1.0
         self.pool_pick_any = bool(g('pool_pick_any'))
         band = g('pool_band').strip().lower()
@@ -371,6 +418,22 @@ class PipelineMission(MissionBase):
 
     # ---------- depth from the surface ----------
     def enter(self, s):
+        if s is S.ARM and self.mark_buoy:
+            # follow_mode:=mark_buoy: the sub is at the green buoy - save where, and quit before
+            # anything (mode, arm) is sent to the vehicle (Ruth, Oct 17: the buoy is the origin)
+            mark = {'n': round(self.start_x, 3), 'e': round(self.start_y, 3),
+                    'yaw_deg': round(math.degrees(self.start_yaw) % 360, 1), 'saved': time.strftime('%Y-%m-%d %H:%M:%S')}
+            try:
+                os.makedirs(os.path.dirname(self.buoy_file) or '.', exist_ok=True)
+                with open(self.buoy_file, 'w') as f:
+                    json.dump(mark, f)
+                self.get_logger().info(f'green buoy saved: the sub is here, NED ({mark["n"]:.2f}, {mark["e"]:.2f}), '
+                                       f'in {self.buoy_file} - use -p survey_buoy:=marked')
+            except OSError as ex:
+                self.get_logger().error(f'green buoy NOT saved to {self.buoy_file}: {ex}')
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(0)
         if s is S.ARM:
             self.z_surf = self.cur[2] if self.cur else 0.0
             self.get_logger().info(f'surface reads {self.z_surf:.2f} m; depths are from there')
@@ -613,6 +676,15 @@ class PipelineMission(MissionBase):
 
         elif ph == 'follow backup':
             self.follow_back_up()
+
+        elif ph == 'survey turn':
+            self.survey_turn_first()
+
+        elif ph == 'repair go':
+            self.repair_go()
+
+        elif ph == 'repair hold':
+            self.repair_hold_step()
 
         elif ph == 'poshold':
             if self.now() - self.poshold_t > 1.0:     # a dropped command: ask again
@@ -1008,8 +1080,28 @@ class PipelineMission(MissionBase):
         self.follow_map()
 
     def follow_map(self):
+        if self.survey:
+            self.survey_begin()
+            if self.s_turn_first:               # the buoy is behind: turn first, then follow
+                here = self.cur if self.cur else self.hold
+                self.s_turn_at = (here[0], here[1])
+                self.carrot, self.last_t = self.s_turn_at, self.now()
+                self.get_logger().info('    turning 180 on the spot toward the buoy first, then following')
+                self.to_phase('survey turn')
+                return
         self.look_view('follow start')
         self.to_phase('follow start')
+
+    def survey_turn_first(self):
+        """The buoy is behind the sub: turn on the spot before following. Turning while
+        following made the pipe come and go under the swinging sonar for 30 s, which read
+        as the buoy end after 1.0 m (pool, Oct 17). The map is reset once turned."""
+        d = self.f_dir
+        _, err = self.walk_to(self.s_turn_at, self.return_speed, math.atan2(d[1], d[0]), 'turning toward the buoy')
+        if abs(err) < math.radians(5) or (self.dry and self.now() - self.state_t0 > 5):
+            self.get_logger().info('    turned toward the buoy - following from here')
+            self.look_view('follow start')
+            self.to_phase('follow start')
 
     def look_view(self, what):
         """The map's follow settings (straight down, the band from the floor), then a reset
@@ -1070,10 +1162,12 @@ class PipelineMission(MissionBase):
             self.f_seen = None                  # nothing moves until the pipe shows under the sonar
             self.f_dist, self.f_logged, self.f_period, self.f_sweep = 0.0, 0.0, 8.0, m.get('sweep', 0)
             self.f_lat, self.f_known, self.f_box, self.f_line = 0.0, set(), None, None
+            self.f_up = None                    # the pipe's height from the sonar, once seen
             self.f_lost_now, self.f_prev_loss, self.f_stuck_t = False, None, None
             self.f_reversed, self.f_hold_pt, self.f_leg_t0, self.f_creep0 = False, None, self.now(), None
             self.f_start, self.f_dir0 = (here[0], here[1]), self.f_dir.copy()
-            self.start_camera()
+            if not self.survey or self.s_leg == 'survey':     # the survey notes lights from the buoy end on
+                self.start_camera()
             self.get_logger().info(f'    following: heading {math.degrees(math.atan2(self.f_dir[1], self.f_dir[0])) % 360:.0f} deg, '
                                    f'at most {self.follow_speed:.2f} m/s and {self.follow_step:.2f} m per sweep')
             self.to_phase('follow')
@@ -1084,6 +1178,14 @@ class PipelineMission(MissionBase):
         h = self.cur_yaw if self.cur_yaw is not None else math.atan2(self.f_dir[1], self.f_dir[0])
         ahead = sonar_settings.SONAR_FWD_M
         sonar = np.array([here[0] + ahead * math.cos(h), here[1] + ahead * math.sin(h)])
+        if self.survey and self.s_leg == 'survey':
+            if not self.s_track or float((sonar - self.s_track[-1]) @ self.f_dir) > 0.05:
+                self.s_track.append(sonar.copy())          # the way along the pipe: the lights' order
+            if self.s_red_new:                             # the camera has just passed the RED light
+                self.s_red_new = False
+                if self.repair_hold > 0:                   # no magnet on the sub (Oct 17): note it, go on
+                    self.repair_begin()
+                    return
         # sonar sweep period, for the speed limit
         sw = m.get('sweep', 0)
         if sw != self.f_sweep:
@@ -1111,7 +1213,17 @@ class PipelineMission(MissionBase):
             self.f_known.update(keys)
             rel = c - sonar
             along, across = rel @ d, rel @ right
-            corridor = (np.abs(across) <= 0.8) & (along >= -self.follow_fit) & (along <= 0.4)
+            # only echoes where the pipe should be count: near the line through the last point
+            # seen on it (f_line) and at its height (f_up). With the pipe missing from a sweep the
+            # wall or the sloping floor was taken for it and pulled the sub off the pipe (pool, Oct
+            # 17); now a missing pipe stays missing and the sub goes back to where it was last seen
+            if self.f_line is not None and self.follow_gate > 0:
+                near = np.abs(across - float((self.f_line - sonar) @ right)) <= self.follow_gate
+            else:
+                near = np.abs(across) <= 0.8
+            if self.f_up is not None and self.follow_gate_up > 0:
+                near &= np.abs(up - self.f_up) <= self.follow_gate_up
+            corridor = near & (along >= -self.follow_fit) & (along <= 0.4)
             if corridor.sum() >= 4 and np.ptp(along[corridor]) >= 0.3:
                 pts = c[corridor]
                 _, _, vt = np.linalg.svd(pts - pts.mean(axis=0))
@@ -1121,8 +1233,10 @@ class PipelineMission(MissionBase):
                     d = d / np.linalg.norm(d)
                     self.f_dir, right = d, np.array([-d[1], d[0]])
             # only FRESH dots say the pipe is under the sonar now; old ones linger behind it
-            under = fresh & (np.abs(along) <= 0.2) & (np.abs(across) <= 0.6)
+            under = fresh & (np.abs(along) <= 0.2) & (np.abs(across) <= 0.6) & near
             if under.any():
+                pipe_up = float(np.median(up[under]))
+                self.f_up = pipe_up if self.f_up is None else 0.7 * self.f_up + 0.3 * pipe_up
                 self.f_lat = float(np.median((c[under] - sonar) @ right))
                 self.f_line = sonar + self.f_lat * right        # a point ON the pipe, fixed in NED
                 self.f_lost_now = False
@@ -1149,7 +1263,12 @@ class PipelineMission(MissionBase):
         self.f_prev = sonar
         why = None
         seen = self.f_seen if self.f_seen is not None else self.f_leg_t0
-        if (now - seen > self.follow_lost and self.follow_both and not self.f_reversed
+        if (self.survey and self.s_leg == 'to buoy' and self.f_seen is not None
+                and (now - seen > self.follow_lost
+                     or (self.f_stuck_t is not None and now - self.f_stuck_t > self.follow_lost))):
+            self.survey_turn(now, here)                    # at the buoy end: the survey starts here
+            return
+        if (now - seen > self.follow_lost and self.follow_both and not self.f_reversed and not self.survey
                 and self.f_dist < self.follow_max and now - self.f_t0 < self.follow_time):
             if self.follow_turn == 'return':
                 self.get_logger().info(f'    end of the pipe this way after {self.f_dist:.1f} m - going back to '
@@ -1188,7 +1307,7 @@ class PipelineMission(MissionBase):
             poshold = self.follow_end == 'poshold' and not self.dry
             self.get_logger().info(f'follow done: {why}; {self.f_dist:.1f} m along the pipe - '
                                    + ('switching to POSHOLD, take over with the remote' if poshold else 'holding, then surfacing'))
-            self.stop_camera()
+            self.stop_camera(why)
             if poshold:
                 self.end_in_poshold()
                 return
@@ -1269,6 +1388,11 @@ class PipelineMission(MissionBase):
             self.f_prev_loss = pt
             self.get_logger().info('    pipe missing - going back over where it was last seen')
 
+    def on_pilot_takeover(self):
+        """The pilot took the sub mid-survey: still log and save what it saw so far."""
+        if self.survey:
+            self.stop_camera('the pilot took over')
+
     def end_in_poshold(self):
         """Hand the sub over armed and holding: MissionBase sees the mode leave GUIDED and
         ends the mission without disarming, as when the pilot takes over."""
@@ -1313,10 +1437,15 @@ class PipelineMission(MissionBase):
         _, err = self.walk_to(self.f_start, self.return_speed, math.atan2(d[1], d[0]), 'turning round')
         if abs(err) < math.radians(5) or (self.dry and self.now() - self.state_t0 > 5):
             here = self.cur if self.cur else self.f_start
-            self.f_backup_goal = (self.f_start[0] + self.follow_backup * self.f_dir0[0],
-                                  self.f_start[1] + self.follow_backup * self.f_dir0[1])
-            self.get_logger().info(f'    turned round - backing up {self.follow_backup:.2f} m so the sonar '
-                                   f'starts where it began')
+            back = self.survey_backup if self.survey else self.follow_backup
+            if self.survey:
+                # the camera starts once turned, as it backs up over the end: started before the
+                # turn, the spinning picture split one light into two (sim, Oct 17)
+                self.start_camera()
+            self.f_backup_goal = (self.f_start[0] + back * self.f_dir0[0],
+                                  self.f_start[1] + back * self.f_dir0[1])
+            self.get_logger().info(f'    turned round - backing up {back:.2f} m so the '
+                                   + ('camera starts at the end' if self.survey else 'sonar starts where it began'))
             self.carrot, self.last_t = (here[0], here[1]), self.now()
             self.to_phase('follow backup')
 
@@ -1333,6 +1462,8 @@ class PipelineMission(MissionBase):
             self.f_line = None
             self.f_lost_now, self.f_prev_loss, self.f_stuck_t = False, None, None
             self.f_prev = np.array([here[0] + ahead * math.cos(h), here[1] + ahead * math.sin(h)])
+            if self.survey:                     # the survey's own distance and clock; f_reversed: if the
+                self.f_dist, self.f_t0, self.f_reversed = 0.0, now, True   # pipe isn't under the sonar, creep to it
             self.get_logger().info(f'    following the other part: heading {math.degrees(math.atan2(d[1], d[0])) % 360:.0f} deg')
             if self.recording:
                 try:
@@ -1349,27 +1480,209 @@ class PipelineMission(MissionBase):
                 self.cur[1] + self.camera_fwd * math.sin(self.cur_yaw))
 
     def on_box(self, b):
+        """The camera thread: a sighting of a colour has just ended."""
         n = len(self.camera.tracker.boxes) if self.camera else 0
-        self.get_logger().info(f'    camera: {"NEW " if b["new"] else "again: "}{led_boxes.describe(b)} '
-                               f'- {n} of {self.boxes_expected} boxes so far')
+        if self.survey:
+            self.get_logger().info(f'    camera: {"NEW " if b["new"] else "again: "}{led_boxes.describe(b)}'
+                                   .replace('box', 'light') + f' - {n} sighting(s) so far')
+            if b['new'] and b['colour'] == 'red' and self.s_red is None and b['n'] is not None:
+                self.s_red = (b['n'], b['e'])
+                self.s_red_new = True                      # the mission thread goes back to it
+        else:
+            self.get_logger().info(f'    camera: {"NEW " if b["new"] else "again: "}{led_boxes.describe(b)} '
+                                   f'- {n} of {self.boxes_expected} boxes so far')
         if self.recording and b['new']:
             try:
-                self.map_post('/mark', f'camera box {b["number"]}: ' + max(b['colours'], key=b['colours'].get))
+                self.map_post('/mark', f'camera {"light" if self.survey else "box"} {b["number"]}: '
+                              + max(b['colours'], key=b['colours'].get))
             except OSError:
                 pass
 
     def start_camera(self):
-        if self.camera_boxes and self.camera is None:
+        if (self.camera_boxes or self.survey) and self.camera is None:
+            tracker = led_boxes.LightTracker(same_m=self.light_same) if self.survey else None
             self.camera = led_boxes.CameraWatcher(self.camera_url, self.camera_at,
-                                                  lambda t: self.get_logger().info('    ' + t), self.on_box).start()
+                                                  lambda t: self.get_logger().info('    ' + t), self.on_box,
+                                                  tracker=tracker).start()
 
-    def stop_camera(self):
+    def stop_camera(self, why='the mission ended early'):
         if self.camera is None:
+            if self.survey and self.s_leg == 'to buoy':
+                self.get_logger().warn(f'survey: no report - it never reached the buoy end ({why})')
+                self.s_leg = None
             return
         boxes = self.camera.close()
+        self.camera = None
+        if self.survey:
+            self.survey_report(boxes, why)
+            return
         self.get_logger().info(f'camera: {len(boxes)} of {self.boxes_expected} light boxes seen'
                                + ''.join(f'\n      {led_boxes.describe(b)}' for b in boxes))
-        self.camera = None
+
+    # ---- the survey (Ruth, Oct 17): to the buoy end, then every light in order ----
+    def survey_begin(self):
+        """Following begins: first along the pipe toward the green buoy, to the end nearest
+        it - the lights are noted from that end on (handbook: the report starts with the
+        part of the pipeline closest to the active buoy)."""
+        self.s_red, self.s_red_new, self.s_repair_mono, self.s_track = None, False, None, []
+        self.s_turn_first = False
+        if self.survey_buoy == 'here':
+            self.s_leg = 'survey'
+            self.get_logger().info('survey: starting at the buoy end - noting the lights from here')
+            return
+        # the origin is the green buoy (Ruth, Oct 17): where the mission started, or where it was marked
+        bn, be = self.marked_buoy if self.survey_buoy == 'marked' else (self.start_x, self.start_y)
+        here = self.cur if self.cur else self.hold
+        h = self.cur_yaw if self.cur_yaw is not None else math.atan2(self.f_dir[1], self.f_dir[0])
+        ahead = sonar_settings.SONAR_FWD_M
+        to_buoy = np.array([bn - here[0] - ahead * math.cos(h), be - here[1] - ahead * math.sin(h)])
+        where = 'where the mission started' if self.survey_buoy == 'start' else 'where it was marked'
+        if np.linalg.norm(to_buoy) < 0.5:
+            # begun over the pipe right at the buoy: the pipe's nearest part to it is here
+            self.s_leg = 'survey'
+            self.get_logger().info(f'survey: the green buoy ({where}) is right here - noting the lights '
+                                   f'from here, along the pipe the way the sub faces')
+            return
+        if float(to_buoy @ self.f_dir) < 0:
+            self.f_dir = -self.f_dir                       # the way along the pipe that gets closer to it
+            self.s_turn_first = True
+        self.s_leg = 'to buoy'
+        self.get_logger().info(f'survey: the green buoy ({where}) is {np.linalg.norm(to_buoy):.1f} m away - '
+                               f'first along the pipe the way that gets closer to it, heading '
+                               f'{math.degrees(math.atan2(self.f_dir[1], self.f_dir[0])) % 360:.0f} deg, to its end')
+
+    def survey_turn(self, now, here):
+        """The end nearest the buoy: turn 180 on the spot and back up (follow turn, follow
+        backup - the way the other part is followed), then survey from here. Turning while
+        following made the pipe come and go under the swinging sonar, which read as 'lost
+        twice at the same spot' and ended the survey after 1 m (sim, Oct 17)."""
+        self.get_logger().info(f'survey: at the buoy end after {self.f_dist:.1f} m - turning round; '
+                               f'noting the lights from here to the far end')
+        if self.recording:
+            try:
+                self.map_post('/mark', 'survey: at the buoy end, turning round')
+            except OSError:
+                pass
+        self.f_start, self.f_dir0 = (here[0], here[1]), self.f_dir.copy()
+        self.s_leg, self.s_track = 'survey', []
+        self.carrot, self.last_t = (here[0], here[1]), now
+        self.to_phase('follow turn')
+
+    def repair_begin(self):
+        """The camera has passed the RED light: go back until the camera is over it, and hold."""
+        h = self.cur_yaw if self.cur_yaw is not None else math.atan2(self.f_dir[1], self.f_dir[0])
+        rn, re = self.s_red
+        self.s_repair_goal = (rn - self.camera_fwd * math.cos(h), re - self.camera_fwd * math.sin(h))
+        self.s_repair_yaw = h
+        here = self.cur if self.cur else self.s_repair_goal
+        self.carrot, self.last_t = (here[0], here[1]), self.now()
+        self.get_logger().info(f'survey: RED light at NED ({rn:.2f}, {re:.2f}) - going back over it')
+        self.to_phase('repair go')
+
+    def repair_go(self):
+        left, _ = self.walk_to(self.s_repair_goal, self.follow_speed, self.s_repair_yaw, 'to the red light')
+        if (left < 0.06 and self.speed() < 0.05) or (self.dry and self.now() - self.state_t0 > 5):
+            self.s_repair_mono = time.monotonic()          # the camera's clock: sightings after this
+            self.get_logger().info(f'survey: over the RED light - holding {self.repair_hold:.0f} s '
+                                   f'(stands in for the magnet repair)')
+            if self.recording:
+                try:
+                    self.map_post('/mark', 'survey: holding over the red light')
+                except OSError:
+                    pass
+            self.to_phase('repair hold')
+
+    def repair_hold_step(self):
+        self.walk_to(self.s_repair_goal, self.follow_speed, self.s_repair_yaw, 'over the red light')
+        if self.now() - self.state_t0 < self.repair_hold:
+            return
+        now = self.now()
+        here = self.cur if self.cur else self.s_repair_goal
+        h = self.cur_yaw if self.cur_yaw is not None else self.s_repair_yaw
+        ahead = sonar_settings.SONAR_FWD_M
+        # on along the pipe from here: count as seen just now, so the hold isn't taken for the end
+        self.f_seen, self.f_leg_t0, self.f_hold_pt, self.f_creep0 = now, now, None, None
+        self.f_lost_now, self.f_prev_loss, self.f_stuck_t = False, None, None
+        self.f_prev = np.array([here[0] + ahead * math.cos(h), here[1] + ahead * math.sin(h)])
+        self.get_logger().info('survey: repair hold done - on along the pipe to the far end')
+        self.to_phase('follow')
+
+    def survey_report(self, boxes, why):
+        """The lights in order from the buoy end: each sighting placed on the way the sub
+        went (s_track), sightings within light_same_m of each other are one light, and its
+        colour is the one it showed most. Anything seen at the RED light after the repair
+        began (it turns GREEN, then flashes) is not a light of the survey."""
+        self.s_leg = None
+        track = np.array(self.s_track) if len(self.s_track) >= 2 else None
+
+        def along(n, e):
+            if track is None:
+                return 0.0
+            p, best, s = np.array([n, e]), None, 0.0
+            for k in range(len(track) - 1):
+                a, b = track[k], track[k + 1]
+                ab = b - a
+                L = float(np.linalg.norm(ab))
+                if L < 1e-6:
+                    continue
+                lo = -math.inf if k == 0 else 0.0          # before the way's start or past its end:
+                hi = math.inf if k == len(track) - 2 else 1.0   # on along the first or last piece
+                t = min(max(float((p - a) @ ab) / (L * L), lo), hi)
+                dist = float(np.linalg.norm(a + t * ab - p))
+                if best is None or dist < best[0]:
+                    best = (dist, s + t * L)
+                s += L
+            return best[1] if best else 0.0
+
+        seen = []
+        for b in boxes:
+            if b['n'] is None:
+                continue
+            if (self.s_red is not None and self.s_repair_mono is not None and b['first_t'] >= self.s_repair_mono
+                    and math.hypot(b['n'] - self.s_red[0], b['e'] - self.s_red[1]) <= 0.4):
+                continue                                   # the repaired light changing colour
+            seen.append({'colour': b['colour'], 'share': max(b['colours'].values()), 'n': b['n'], 'e': b['e'],
+                          'sightings': b['sightings']})
+        lights = []
+        for s in sorted(seen, key=lambda s: -s['share']):
+            near = [L for L in lights if math.hypot(L['n'] - s['n'], L['e'] - s['e']) <= self.light_same]
+            if near:
+                near[0]['sightings'] += s['sightings']
+                near[0]['shares'][s['colour']] = max(near[0]['shares'].get(s['colour'], 0.0), s['share'])
+            else:
+                lights.append({'n': s['n'], 'e': s['e'], 'sightings': s['sightings'], 'shares': {s['colour']: s['share']}})
+        for L in lights:
+            L['colour'] = max(L['shares'], key=L['shares'].get).upper()
+            L['along_m'] = round(along(L['n'], L['e']), 2)
+        lights.sort(key=lambda L: L['along_m'])
+        seq = [L['colour'] for L in lights]
+        # pipe surveyed: the way's length (f_dist counts again what it re-covers after backing up)
+        surveyed = float(np.linalg.norm(np.diff(track, axis=0), axis=1).sum()) if track is not None else 0.0
+        self.get_logger().info(
+            f'SURVEY REPORT, from the buoy end: {", ".join(seq) if seq else "no lights seen"} '
+            f'({len(seq)} light(s), {surveyed:.1f} m of pipe surveyed; ended: {why})'
+            + ''.join(f'\n      {k + 1}. {L["colour"]:5s} {L["along_m"]:.2f} m along, NED ({L["n"]:.2f}, {L["e"]:.2f}), '
+                      f'{L["sightings"]} sighting(s), ' + ', '.join(f'{c} {v:.0%}' for c, v in L['shares'].items())
+                      for k, L in enumerate(lights)))
+        report = {'order_from': 'buoy end', 'sequence': seq, 'ended': why,
+                  'surveyed_m': round(surveyed, 2), 'repair_held': self.s_repair_mono is not None,
+                  'red_light_ned': list(self.s_red) if self.s_red else None,
+                  'lights': [{'colour': L['colour'], 'along_m': L['along_m'], 'ned': [round(L['n'], 3), round(L['e'], 3)],
+                              'sightings': L['sightings'], 'peak_share': {c: round(v, 3) for c, v in L['shares'].items()}}
+                             for L in lights]}
+        try:
+            os.makedirs(self.survey_dir, exist_ok=True)
+            path = os.path.join(self.survey_dir, time.strftime('survey_%Y%m%d_%H%M%S.json'))
+            with open(path, 'w') as f:
+                json.dump(report, f, indent=1)
+            self.get_logger().info(f'    survey report written to {path}')
+        except OSError as ex:
+            self.get_logger().warn(f'    survey report not written: {ex}')
+        if self.recording:
+            try:
+                self.map_post('/mark', 'survey report: ' + (', '.join(seq) if seq else 'no lights'))
+            except OSError:
+                pass
 
     def look_again(self, why):
         """Nothing picked: turn retry_turn_deg more and look again (the map keeps every

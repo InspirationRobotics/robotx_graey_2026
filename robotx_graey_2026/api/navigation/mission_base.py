@@ -140,6 +140,11 @@ class MissionBase(Node):
                               mavutil.mavlink.MAVLINK_MSG_ID_RC_CHANNELS, 100000)
 
     # ---------- subclass hooks ----------
+    def on_pilot_takeover(self):
+        """Called when the pilot switches the mode away from GUIDED, just before the
+        mission exits (without disarming). Nothing is sent to the vehicle here."""
+        pass
+
     def declare_extra_parameters(self):
         pass
 
@@ -330,6 +335,10 @@ class MissionBase(Node):
             elif self.saw_guided:
                 self.get_logger().warn(
                     f'mode changed to {self.mode} - pilot has the vehicle, mission out')
+                try:
+                    self.on_pilot_takeover()    # a subclass's last words (a report), before exiting
+                except Exception as ex:
+                    self.get_logger().warn(f'on_pilot_takeover failed: {ex}')
                 self.auto_pub.publish(Bool(data=False))   # LEDs to yellow at once
                 sys.stdout.flush()
                 sys.stderr.flush()
