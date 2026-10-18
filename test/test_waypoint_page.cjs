@@ -39,6 +39,8 @@ async function render(data,options={}){
   assert(e.posts[0].plan.lon>ready.navigation.cube_estimate.lon);
   assert(Math.abs(e.posts[0].plan.lat-ready.navigation.cube_estimate.lat)<1e-8);
   e=await render(ready,{tilesLoaded:true});e.maptype.value='satellite';e.maptype.onchange();
+  assert.match(e.tileURL(183388,422631,20),/MapServer\/tile\/20\/422631\/183388$/);
+  e.imagery.value='archive2023';e.imagery.onchange();
   assert.match(e.tileURL(183388,422631,20),/tile\/64776\/20\/422631\/183388$/);
   e.findPool.onclick();e.retryTiles.onclick();e.map.onclick({clientX:450,clientY:300});
   assert.match(e.target.textContent,/32\.9236125, -117\.0385235/);assert.equal(e.posts.length,0);
@@ -62,9 +64,13 @@ async function render(data,options={}){
   assert.equal(e.headingOffsets.textContent,'90.0° / 2.0°');assert.equal(e.cubeSpeed.textContent,'0.50');assert.equal(e.gpsSeparation.textContent,'0.00');assert.match(e.estimateAge.textContent,/local: 0.10 s/);
   e=await render({...telemetry,navigation:{...telemetry.navigation,streams:{...telemetry.navigation.streams,bridge:{fresh:false,age:4,data:telemetry.navigation.streams.bridge.data},local:{fresh:false,age:4,data:telemetry.navigation.streams.local.data}}}});
   assert.match(e.alignedHeading.textContent,/Unavailable/);assert.equal(e.headingDifference.textContent,'—');assert.equal(e.cubeSpeed.textContent,'—');assert.match(e.estimateAge.textContent,/4.00 s · stale/);
-  e=await render(ready,{tilesLoaded:true,viewport:{width:1440,height:900}});e.maptype.value='satellite';e.maptype.onchange();
+  e=await render(ready,{tilesLoaded:true,viewport:{width:1440,height:900}});e.maptype.value='satellite';e.imagery.value='archive2023';e.maptype.onchange();
   assert(e.imageSources.some(s=>s.includes('/tile/64776/20/')));assert(!e.imageSources.some(s=>s.includes('/tile/64776/21/')));
   assert.match(e.tileStatus.textContent,/zoom 20/);e.zoomIn.onclick();assert(!e.imageSources.some(s=>s.includes('/tile/64776/21/')));
   e.imagery.value='current';e.imagery.onchange();assert(e.imageSources.some(s=>s.includes('/MapServer/tile/21/')));
+  e.findLake.onclick();e.map.onclick({clientX:720,clientY:450});
+  assert.match(e.target.textContent,/32\.9160000, -117\.0990000/);
+  assert.equal(e.posts.length,0);
+  e.panN.onclick();e.map.onclick({clientX:720,clientY:450});assert(!e.target.textContent.includes('32.9160000'));
   console.log('Waypoint map, desktop archive resolution, readiness, Start retry and estimate stats checks pass');
 })().catch(e=>{console.error(e);process.exit(1)});

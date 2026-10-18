@@ -206,7 +206,10 @@ class WaypointMission(Node):
             self.intent_pub.publish(String(data=json.dumps(dict(run_id=self.logic.run_id,
                 phase=self.logic.phase, sequence=self.sequence, target_gps=self.logic.plan))))
         o = self.observation(now)
-        if self.logic.stage=='WAIT_SURFACE':
+        if self.logic.stage=='CHECK_SURFACE' and getattr(self,'measurement_stage',None)!='CHECK_SURFACE':
+            self.surface_measurement=SurfaceMeasurement(duration=5.,tolerated_gps_gap=4.,tolerated_sensor_gap=1.5)
+        self.measurement_stage=self.logic.stage
+        if self.logic.stage in ('WAIT_SURFACE','CHECK_SURFACE'):
             b=self.bridge if 0<=now-self.bridge_time<.3 else {}
             self.surface_measurement_status=self.surface_measurement.update(now,b)
         o['surface_measurement']=self.surface_measurement_status

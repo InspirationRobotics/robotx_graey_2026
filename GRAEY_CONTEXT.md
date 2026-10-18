@@ -1298,3 +1298,27 @@ final simulated target error 0.1207 m; waypoint-ad3bbb8925 operator Abort passed
 with MANUAL verified. QGC forwarding disabled. See docs/surface-descent-fix-2026-10-18.md
 and docs/evidence/surface-*2026-10-18.json. Physical vertical-response verification
 required before another live surface mission; last verified live release 9c1eab0.
+
+2026-10-18 Miramar preparation, LOCAL ONLY, no deployment/live access. Surface
+mission now enters armed GUIDED CHECK_SURFACE before TRANSIT, holding captured
+start NE via bounded surface velocity while collecting five accepted seconds of
+fresh GPS/DVL/VN measurements; pre-arm measurements cannot satisfy this hold.
+Kill/Abort, 0.08m pressure guard and all navigation limits remain. This is a
+Jetson horizontal hold in GUIDED, not firmware POSHOLD. Separate Capture north
+service/GUI can record an independently known true bearing on stationary level
+land without DVL/GPS/pressure. Does not commission/enable odometry. Session-only
+reference transfers through surface Prepare only with continuous VN; calibration,
+restart, >=0.5s VN gap/invalid attitude or detected orientation discontinuity
+invalidates it. GPS/DVL automatic movement alignment remains a surface alternative.
+Map defaults current Esri world imagery; Miramar overview is approximate browsing
+center32.916,-117.099, NOT a surveyed dock/mission anchor; wider zoom and pan added.
+HTTP200 image/jpeg confirmed for overview tile; operator browser still needs internet.
+253Python tests + both GUI JS suites pass. Native isolated GUI/SITL waypoint-
+9f24f15ce3 passed hold then transit+2sGPSoutage (0.2136m simulated final error);
+waypoint-2533f81f7d passed Abort during armed hold and MANUAL confirmation. Initial
+hold-Abort validator failure preserved and corrected (wrongly required TRANSIT).
+User reports prior descent/MANUAL/radio buzzing; no logs from these new attempts
+inspected, descent NOT expected, warning cause unconfirmed. City Miramar page
+currently warns algae bloom/no swimming/no wading; confirm staff testing permission
+and retrieval without entering water. See docs/miramar-surface-test-2026-10-18.md.
+No new GPS/DVL slow heading-consistency estimator implemented in this session.

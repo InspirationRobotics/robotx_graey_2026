@@ -36,7 +36,7 @@ def validate_plan(value):
 
 
 class WaypointRun:
-    moving = {'DIVE', 'TRANSIT', 'SURFACE'}
+    moving = {'CHECK_SURFACE', 'DIVE', 'TRANSIT', 'SURFACE'}
     terminal = {'COMPLETE', 'ABORTED'}
 
     def __init__(self, plan, run_id, now):
@@ -210,7 +210,7 @@ class WaypointRun:
         self.navigation_wait_limit=.7
         if self.stage == 'WAIT_SURFACE':
             measurement=o.get('surface_measurement') or {}
-            if not measurement.get('ready'):
+            if self.plan['mode']!='surface' and not measurement.get('ready'):
                 self.reason=measurement.get('reason','Waiting for surface GPS/DVL measurements')
                 return []
             if s.get('surfaced') is True and (s.get('fusion_policy') == 'continuous' and s.get('gps_qualified_input') is True) and s.get('navigation_ready'):
@@ -257,8 +257,8 @@ class WaypointRun:
             elif o.get('armed'):
                 self.last_surface_gps = now
                 self.last_surface_gps_position = tuple(o['local'][:2])
-                self.enter('TRANSIT' if self.plan['mode']=='surface' else 'DIVE', now,
-                           'Traveling at surface to waypoint' if self.plan['mode']=='surface' else 'Descending at the surface start')
+                self.enter('CHECK_SURFACE' if self.plan['mode']=='surface' else 'DIVE', now,
+                           'Holding surface start while validating GPS/DVL/VN' if self.plan['mode']=='surface' else 'Descending at the surface start')
             elif o.get('mode') != 4:
                 self.abort(now, 'GUIDED mode lost before arming', pilot=True)
             else:
@@ -286,6 +286,13 @@ class WaypointRun:
                     self.abort(now, 'Cube position discontinuity')
                     return self.command(now, 'manual')
             self.last_position = (now, tuple(local))
+            if self.stage=='CHECK_SURFACE':
+                measurement=o.get('surface_measurement') or {}
+                if measurement.get('ready'):
+                    self.enter('TRANSIT',now,'Surface hold validated; traveling to waypoint')
+                    return []
+                self.reason='Surface position hold: '+measurement.get('reason','Collecting accepted GPS/DVL/VN measurements')
+                return self.command(now,'target',(*self.start,self.heading),interval=.1)
             target = (self.start[0], self.start[1], self.target[2]) if self.stage == 'DIVE' else (
                 (*self.target[:2], self.surface_down) if self.stage == 'SURFACE' else self.target)
             depth = o['depth']

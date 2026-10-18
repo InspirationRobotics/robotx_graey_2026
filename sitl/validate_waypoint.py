@@ -23,6 +23,7 @@ def api(body=None):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--abort', action='store_true')
+    parser.add_argument('--abort-during-hold',action='store_true',help='Abort the armed surface qualification hold through the GUI API')
     parser.add_argument('--dive', action='store_true', help='Explicit legacy underwater regression; default is surface travel')
     parser.add_argument('--gps-dropout-seconds',type=float,default=0.,help='Surface transit GPS dropout injection')
     parser.add_argument('--expect-gps-abort',action='store_true',help='Require bounded GPS outage to yield MANUAL')
@@ -34,6 +35,9 @@ def main():
     parser.add_argument('--target-north',type=float,default=1.5)
     parser.add_argument('--target-east',type=float,default=1.)
     args=parser.parse_args()
+    if args.abort_during_hold:
+        if args.dive:parser.error('Surface hold does not apply to a dive mission')
+        args.abort=True
     from robotx_graey_2026.api.navigation.waypoint_logic import ne_to_geo
     root=Path(__file__).resolve().parents[1]
     folder=root/'sitl/logs'/('waypoint-'+uuid.uuid4().hex[:10]);folder.mkdir(parents=True)
@@ -133,6 +137,10 @@ def main():
                         assert abs(m['plan']['lat']-lat)<1e-9 and abs(m['plan']['lon']-lon)<1e-9,'Mission changed the selected geographic target'
                         if not result['stages'] or result['stages'][-1]!=m['stage']: result['stages'].append(m['stage'])
                         gps=streams.get('gps',{}).get('data',{})
+                        if m['stage']=='CHECK_SURFACE':
+                            result['armed_guided_surface_hold_seen']=bool(m.get('cube_armed') and m.get('cube_mode_id')==4)
+                            if args.abort_during_hold and not abort_sent:
+                                api(dict(action='abort',run_id=run_id));abort_sent=True
                         if m['stage']=='TRANSIT':
                             if not args.dive:
                                 result['surface_cube_seen']=bool(c['valid'] and c['heading_deg'] is not None and abs(s.get('depth_m',999))<.15)
@@ -168,7 +176,7 @@ def main():
                                 result['dvl_dropout_injected']=True
                             result['gps_outage_seen'] |= gps.get('fix',99)<3
                             result['underwater_cube_seen'] |= bool(c['valid'] and c['heading_deg'] is not None and s.get('depth_m',0)>.4)
-                            if args.abort and (result['gps_outage_seen'] or not args.dive) and not abort_sent:
+                            if args.abort and not args.abort_during_hold and (result['gps_outage_seen'] or not args.dive) and not abort_sent:
                                 api(dict(action='abort',run_id=run_id));abort_sent=True
                         if m['stage'] in ('COMPLETE','ABORTED'):
                             if args.abort and m['stage']=='ABORTED' and streams['heartbeat']['data']['mode_id']!=19:
@@ -183,7 +191,8 @@ def main():
                             if args.expect_gps_abort:
                                 outcome=(m['stage']=='ABORTED' and 'Surface GPS unavailable beyond' in m['reason']
                                          and streams['heartbeat']['data']['mode_id']==19)
-                            result['passed']=bool(outcome and (result['gps_outage_seen'] and result['underwater_cube_seen'] if args.dive else result.get('surface_cube_seen') and not any(x in result['stages'] for x in ('DIVE','SURFACE')))
+                            surface_seen=(result.get('armed_guided_surface_hold_seen') if args.abort_during_hold else result.get('surface_cube_seen'))
+                            result['passed']=bool(outcome and (result['gps_outage_seen'] and result['underwater_cube_seen'] if args.dive else surface_seen and not any(x in result['stages'] for x in ('DIVE','SURFACE')))
                                 and (not args.gps_dropout_seconds or result.get('gps_dropout_injected') and result['gps_outage_seen']) and result.get('duplicate_idempotent')
                                 and (not args.abort or streams['heartbeat']['data']['mode_id']==19))
                             if args.auto_north:

@@ -22,6 +22,7 @@ from .bridge_estimator import BridgeEstimator, yaw
 from .odometry_profile import PROFILE
 from .maintenance_safety import require_maintenance
 from .automatic_recovery import AutomaticRecovery
+from .land_north import LandNorth
 
 
 class FusedNavBridge(SteadyNode):
@@ -43,6 +44,7 @@ class FusedNavBridge(SteadyNode):
             raise ValueError('Synthetic depth is restricted to isolated SITL')
         self.est = BridgeEstimator(self.settings['heading_reference_validated'],
                                    self.settings['auto_north_alignment'])
+        self.land_north = LandNorth()
         self.link = Link(self.settings['mavlink'], 197, self.get_logger())
         self.instance = str(uuid.uuid4())
         self.stamps, self.params = {}, {}
@@ -66,6 +68,8 @@ class FusedNavBridge(SteadyNode):
         self.create_service(SetBool, '/graey/navigation/prepare', self.prepare)
         self.create_service(Trigger, '/graey/navigation/recover_dvl', self.recover_dvl)
         self.create_service(SetParametersAtomically, '/graey/navigation/align_heading', self.align_heading)
+        self.create_service(SetParametersAtomically, '/graey/navigation/align_land', self.align_land)
+        self.create_service(Trigger, '/graey/navigation/forget_land', self.forget_land)
         if self.settings['sitl_depth_topic']:
             self.create_subscription(Float32, self.settings['sitl_depth_topic'],
                 self.sitl_depth, 20)
@@ -90,6 +94,8 @@ class FusedNavBridge(SteadyNode):
     def calibration_status(self, msg):
         try:
             self.vn_calibration = (time.monotonic(), json.loads(msg.data))
+            if self.vn_calibration[1].get('phase') not in ('idle','collected'):
+                self.land_north.invalidate()
         except (ValueError, TypeError):
             self.vn_calibration = None
 
@@ -100,6 +106,38 @@ class FusedNavBridge(SteadyNode):
                 self.control_state,self.control_received=data,time.monotonic()
         except (ValueError,TypeError):
             pass
+
+    def forget_land(self, request, response):
+        try:
+            require_maintenance()
+            if self.output_permitted:
+                raise ValueError('Pause navigation before changing north reference')
+            self.land_north.invalidate()
+            response.success,response.message=True,'Land reference cleared; use selected surface alignment'
+        except (ValueError,OSError) as error:
+            response.success,response.message=False,str(error)
+        return response
+
+    def align_land(self, request, response):
+        try:
+            require_maintenance()
+            if self.output_permitted:
+                raise ValueError('Pause navigation before capturing land north')
+            now=time.monotonic()
+            if (not self.vn_calibration or not 0<=now-self.vn_calibration[0]<1.5
+                    or self.vn_calibration[1].get('phase') not in ('idle','collected')):
+                raise ValueError('Fresh completed VN calibration state required')
+            if (len(request.parameters)!=1 or request.parameters[0].name!='true_heading_deg'
+                    or request.parameters[0].value.type!=3):
+                raise ValueError('Expected one double true_heading_deg')
+            reference=self.land_north.capture(now,request.parameters[0].value.double_value)
+            self.get_logger().info('LAND_NORTH_REFERENCE '+json.dumps(reference))
+            response.result.successful=True
+            response.result.reason='Land north captured; keep VN powered. Prepare at water surface before use.'
+        except (ValueError,OSError) as error:
+            response.result.successful=False
+            response.result.reason=str(error)
+        return response
 
     def align_heading(self, request, response):
         try:
@@ -163,6 +201,14 @@ class FusedNavBridge(SteadyNode):
             clock, origin = self.est.gps.clock, self.est.origin
             self.output_permitted = False
             self.est = BridgeEstimator(auto_north_alignment=True)
+            reference=self.land_north.current(now) if hasattr(self,'land_north') else None
+            if reference:
+                self.est.north_offset=reference['offset_deg']
+                self.est.heading_validated=True
+                self.est.north_alignment.offset=reference['offset_deg']
+                self.est.north_alignment.method=reference['method']
+                self.est.north_alignment.reference=dict(reference)
+                self.est.north_alignment.reason='Land north retained with continuous VN; awaiting surface navigation'
             self.auto_recovery=AutomaticRecovery()
             self.est.gps.clock = clock
             if origin is not None:
@@ -172,7 +218,7 @@ class FusedNavBridge(SteadyNode):
             self.last_sent = None
             self.start_checked = True
             self.output_permitted = True  # Health/north/profile gates still withhold output.
-            response.success, response.message = True, f'Surface baseline {base:.3f} hPa; waiting for GPS/DVL north alignment'
+            response.success, response.message = True, f'Surface baseline {base:.3f} hPa; '+('land north retained' if reference else 'waiting for GPS/DVL north alignment')
         except (ValueError, OSError) as error:
             response.success, response.message = False, str(error)
         return response
@@ -188,10 +234,14 @@ class FusedNavBridge(SteadyNode):
         clock = self.steady_clock if self.settings.get('sitl_depth_topic') else self.get_clock()
         if not 0 <= clock.now().nanoseconds-stamp < 500000000:
             self.est.imu_at = None
+            if hasattr(self,'land_north'):self.land_north.invalidate()
             return
         if self.advancing('imu', stamp):
             q, r = m.orientation, m.angular_velocity
             self.est.imu(time.monotonic(), (q.w, q.x, q.y, q.z), (r.x, r.y, r.z))
+            if hasattr(self,'land_north'):
+                if self.est.imu_at is None:self.land_north.invalidate()
+                else:self.land_north.observe(time.monotonic(),self.est.raw_q,self.est.rates)
 
     def dvl(self, m):
         try:
@@ -292,6 +342,7 @@ class FusedNavBridge(SteadyNode):
                                quality=40 if status.get('dvl_continuity',{}).get('prediction_active') else 80)
             self.last_sent = now
         status.update(instance=self.instance, fusion_policy='bridge_odometry',
+                      land_north_reference=self.land_north.current(now) if hasattr(self,'land_north') else None,
                       automatic_recovery=self.auto_recovery.status(now,self.control_state,self.control_received),
                       clock_mapping=dict(offset=self.est.gps.clock.offset,
                           uncertainty=self.est.gps.clock.uncertainty, updated=self.est.gps.clock.updated),

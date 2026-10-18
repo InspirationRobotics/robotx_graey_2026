@@ -13,6 +13,8 @@ class SurfaceWaypointTests(unittest.TestCase):
         fixture.step();fixture.step();fixture.step()
         fixture.o['mode']=4;fixture.step();fixture.step()
         fixture.o['armed']=True;fixture.step()
+        self.assertEqual(fixture.run.stage,'CHECK_SURFACE')
+        fixture.step()
         self.assertEqual(fixture.run.stage,'TRANSIT')
         self.assertEqual(fixture.run.phase,'SURFACE_NAV')
         self.assertEqual(fixture.run.target[2],0.)
@@ -29,6 +31,24 @@ class SurfaceWaypointTests(unittest.TestCase):
         self.assertEqual(f.run.stage,'DISARM')
         f.o['armed']=False;f.step();f.step()
         self.assertEqual(f.run.stage,'COMPLETE')
+
+    def test_surface_check_commands_start_hold_before_transit(self):
+        f=self.setup_surface()
+        f.run.enter('CHECK_SURFACE',f.now,'Checking')
+        f.o['surface_measurement']=dict(ready=False,reason='GPS qualifying')
+        for _ in range(20):
+            actions=f.step()
+            if actions:self.assertEqual(actions[0][1][:3],f.run.start)
+            self.assertEqual(f.run.stage,'CHECK_SURFACE')
+        f.o['surface_measurement']['ready']=True;f.step()
+        self.assertEqual(f.run.stage,'TRANSIT')
+
+    def test_depth_and_operator_abort_apply_during_surface_hold(self):
+        for field,value in (('depth',.081),('abort',True)):
+            f=self.setup_surface();f.run.enter('CHECK_SURFACE',f.now,'Checking')
+            f.o[field]=value
+            self.assertEqual(f.step()[0][0],'manual')
+            self.assertEqual(f.run.stage,'ABORTED')
 
     def test_short_gps_outage_preserves_target_and_recovery(self):
         f=self.setup_surface();target=f.run.target
