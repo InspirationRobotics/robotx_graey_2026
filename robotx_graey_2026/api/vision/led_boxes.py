@@ -1,8 +1,8 @@
 """Light boxes in the bottom camera, by the colour of their LEDs (Ruth, Oct 16).
 
-The boxes light themselves, so the test is plain colour, not a trained model: a
-pixel counts when it is bright AND strongly coloured, and its colour is the
-channel that clearly wins. On the Oct 15 pool footage (dark, pool lights off)
+The boxes light themselves, so the test is plain colour, not a trained model: HSV
+ranges (Ruth, Oct 18) - a pixel counts when it is bright (V) AND strongly coloured
+(S), and its colour is the hue range (H) it falls in. On the Oct 15 pool footage (dark, pool lights off)
 the LED boxes filled up to 36% (red) and 24% (green) of the down camera's
 picture; with no box in view, 0-0.6%. A trained model (YOLO) would be the next
 step if daylight washes the colours out, or to see a box with its LED off.
@@ -28,35 +28,57 @@ import numpy as np
 
 SMALL = (160, 90)              # frames are judged at this size: plenty for a lit LED box
 
+# HSV ranges, on OpenCV's scale: H 0-179 (half degrees: 0 red, 30 yellow, 60 green,
+# 120 blue), S and V 0-255. Measured on the pool footage (down camera, Oct 15-17): the
+# LEDs' hue is red 175-179 and 0-4, green 70-89 (a blue-ish green on this camera), blue
+# 105-109; between green and blue (90-104) is the glow at a light's edge. LED pixels
+# have S 130-255; the washed-out white middle and pale halo S < 65. Red sits at both
+# ends of the hue circle, so it needs two ranges; orange (to 20) counts as red.
+V_MIN = 140                    # bright: the LED, not the water. 140 found exactly the lights the old RGB
+                               # rule did on all the pool footage; 100 also caught a dim red flash the old
+                               # rule missed and lights at the picture's edge, and makes every light bigger
+                               # (shares x1.4, so pair it with light_min_share ~0.14) (Oct 18)
+S_MIN = 100                    # strongly coloured: not the white-hot middle or grey water
+HUES = {
+    'red': ((0, 20), (160, 180)),
+    'yellow': ((20, 35),),
+    'green': ((35, 97),),
+    'blue': ((97, 140),),
+}
+# The survey's colours (Ruth, Oct 17): while the pipeline is surveyed its lights are only
+# GREEN or RED, so every coloured pixel counts as whichever of the two its hue is nearer:
+# the splits are halfway between the LEDs' hues (red ~178, green ~77). A green LED's
+# blue-ish edge is green, not a third colour (Oct 16 footage).
+SURVEY_HUES = {
+    'red': ((0, 38), (128, 180)),
+    'green': ((38, 128),),
+}
+
+
+def hsv_masks(rgb, hues=None):
+    """{colour: HxW bool} - the pixels that are bright, strongly coloured and in that
+    colour's hue ranges (HUES unless hues is given). rgb: HxWx3 uint8."""
+    import cv2
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    h, s, v = hsv[..., 0], hsv[..., 1], hsv[..., 2]
+    ok = (v >= V_MIN) & (s >= S_MIN)
+    out = {}
+    for colour, ranges in (hues or HUES).items():
+        m = np.zeros(h.shape, bool)
+        for a, b in ranges:
+            m |= (h >= a) & (h < b)
+        out[colour] = ok & m
+    return out
+
 
 def colour_fractions(rgb):
-    """Share of the picture (0-1) that is bright and red, green, blue or yellow.
-    rgb: HxWx3 uint8."""
-    d = rgb.astype(np.int16)
-    r, g, b = d[..., 0], d[..., 1], d[..., 2]
-    mx, mn = d.max(-1), d.min(-1)
-    bright = (mx > 140) & (mx - mn > 70)
-    n = float(r.size)
-    return {
-        'red': float((bright & (r >= g + 40) & (r >= b + 40)).sum()) / n,
-        'green': float((bright & (g >= r + 30) & (g >= b + 10)).sum()) / n,
-        'blue': float((bright & (b >= r + 30) & (b >= g + 10)).sum()) / n,
-        'yellow': float((bright & (r >= b + 60) & (g >= b + 60) & (abs(r - g) < 40)).sum()) / n,
-    }
+    """Share of the picture (0-1) that is bright and red, green, blue or yellow."""
+    return {c: float(m.mean()) for c, m in hsv_masks(rgb).items()}
 
 
 def red_green_fractions(rgb):
-    """The survey's colours (Ruth, Oct 17): while the pipeline is surveyed its lights are
-    only GREEN or RED, so every bright, strongly coloured pixel counts as whichever of
-    the two its hue is nearer. On the hue circle that is simply g > r: yellow (r = g)
-    and blue (r = g, b high) are the boundaries. A green LED's cyan fringe is green,
-    not a third colour (Oct 16 footage: 'blue' 4% at a green light's edge)."""
-    d = rgb.astype(np.int16)
-    r, g = d[..., 0], d[..., 1]
-    mx, mn = d.max(-1), d.min(-1)
-    bright = (mx > 140) & (mx - mn > 70)
-    n = float(r.size)
-    return {'red': float((bright & (r > g)).sum()) / n, 'green': float((bright & (g > r)).sum()) / n}
+    """Share of the picture that is a survey colour (SURVEY_HUES): red or green."""
+    return {c: float(m.mean()) for c, m in hsv_masks(rgb, SURVEY_HUES).items()}
 
 
 class BoxTracker:
@@ -115,7 +137,7 @@ class BoxTracker:
 
 class LightTracker:
     """The survey's lights (Ruth, Oct 17): each lit LED is a BLOB of red or green (the
-    hue it is nearer, as red_green_fractions), followed from frame to frame, so two
+    hue it is nearer, SURVEY_HUES), followed from frame to frame, so two
     GREEN lights in view one after the other stay two lights. BoxTracker's share of the
     whole picture ran them together when the next came into view before the last had
     gone (sim, Oct 17: lights 0.8 m apart, 4 of 5 found). A light is placed where the
@@ -136,12 +158,8 @@ class LightTracker:
         """(colour, x, y, share): x, y from -1 to 1 across the picture, share of its area."""
         import cv2
         h, w = rgb.shape[:2]
-        d = rgb.astype(np.int16)
-        r, g = d[..., 0], d[..., 1]
-        mx, mn = d.max(-1), d.min(-1)
-        bright = (mx > 140) & (mx - mn > 70)
         out = []
-        for colour, mask in (('red', bright & (r > g)), ('green', bright & (g > r))):
+        for colour, mask in hsv_masks(rgb, SURVEY_HUES).items():
             n, _, stats, cents = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
             for k in range(1, n):
                 share = stats[k, cv2.CC_STAT_AREA] / float(h * w)
