@@ -8,6 +8,16 @@ from robotx_graey_2026.api.navigation.vn_calibration import VNCalibration
 
 
 class CalibrationJobsTests(unittest.TestCase):
+    def test_compass_actions_never_prepare_depth_or_commission(self):
+        self.job.job=dict(busy=True,cancel=False)
+        self.job.run('compass_start')
+        self.assertEqual(self.calls,[('suspend',None),('pause',None),('compass_start',None)])
+        self.assertFalse(self.job.waypoint_permission)
+
+    def test_calibration_cannot_interrupt_active_compass_learning(self):
+        self.put('bridge',dict(compass_north=dict(phase='learning')))
+        with self.assertRaisesRegex(ValueError,'Capture or cancel'):
+            self.job.request(dict(action='calibrate',confirmed=True))
     def test_land_alignment_job_never_prepares_pressure_or_commissions(self):
         self.job.job=dict(busy=True,cancel=False,true_heading_deg=90.)
         self.job.run('align_land')

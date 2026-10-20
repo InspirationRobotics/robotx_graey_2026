@@ -1343,3 +1343,24 @@ GPS/DVL/Cube commissioning. Not a land pressure calibration.254Python tests and
 both GUIJSsuitesPASS. WiFi deployment attempted only:graey.local unresolved,
 192.168.8.105 timedout. No live stateverified/no deployment/restart/parameters in
 this restoration session. Last verified Jetson2effc53. AwaitcurrentWiFiIP if needed.
+
+2026-10-19 user requests VNcalibration -> CubeCompassLearn/manualdrive -> sensor
+health GUI; clarifies Cube supplies independent north once, then offsetappliedtoVN.
+LOCAL implementation only; deploymenthold remains. New CubeNorth maintenance
+services require identifiedenabledhealthyprimarycompass/GPS,pausedodometry,killed/
+disarmedESCoff; selectcompassyaw1temporarily+LEARN3,neverarm/drive. Requiresactive
+learningreadback,firmwareFinished+learn0,independentconfiguredcompassyaw,freshpaired
+Cube/VNoffset2s/20pairs/spread<=5deg beforecapture. RestoresallExternalNavyaw6 and
+waitsreadbacks beforewaterPrepare/commission. LegacyheadingGUIhidden;3stepsclear.
+DoesNOTenableunknowncompass/reboot;previousM9Ndisabled/mountinguncertain andfirmware
+GSFsupportrequireliveverification. Unit/adaptertestsPASS but NO native/vehicle
+CompassLearnconvergenceclaimed. Cancellationrecoversinterruptedknownprofileunder
+maintenance;VNlossinvalidatesreference. Supervisorruntimehealthchecksretained.
+Removedconstantupwardvelocity:zeroverticalspeedatpressuredepth<=.03m;boundedupward
+correctionbeyonddeadband,capped.05m/s;depth>.08mabortretained. Zero-speedstilluses
+CubeZcontroller/notneutralmotors.265Python+bothJSsuitespass. NativeGUI/SITL
+waypoint-637a1d879bpassedupfix+GPSoutage;expandedbridgefirst5cc75b0fa4failedprofile
+permissionbeforetransit(preserved);restrictcompasspollingtomaintenance,rereun
+68b7289639passedwith2sGPSoutageand.0782msimulatederror. See docs/navigation-revision-
+2026-10-19.md. Straight-lineleg/slowGPS-DVLheadingestimationareproposalsnotimplemented
+here;currentmotioncorrectionthreshold.5m/sstillabove.2m/smissioncap.

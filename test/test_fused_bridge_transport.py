@@ -13,9 +13,49 @@ from robotx_graey_2026.api.navigation.bridge_estimator import BridgeEstimator, y
 from robotx_graey_2026.api.navigation.odometry_profile import PROFILE
 from robotx_graey_2026.api.navigation.automatic_recovery import AutomaticRecovery
 from robotx_graey_2026.api.navigation.land_north import LandNorth
+from robotx_graey_2026.api.navigation.cube_north import CubeNorth,COMPASS_PARAMS,YAW_PARAMS
 
 
 class TransportTests(unittest.TestCase):
+    def test_compass_parameter_polling_does_not_add_load_to_normal_navigation(self):
+        self.b.sync_clock=Mock();self.b.request()
+        names=[c.args[3].decode() for c in self.b.link.send.call_args_list if c.args[0]=='param_request_read_send']
+        self.assertEqual(names,list(PROFILE))
+        self.b.link.send.reset_mock();self.b.output_permitted=False;self.b.request()
+        names=[c.args[3].decode() for c in self.b.link.send.call_args_list if c.args[0]=='param_request_read_send']
+        self.assertTrue(set(COMPASS_PARAMS).issubset(names))
+
+    def test_compass_workflow_is_maintenance_only_and_restores_external_yaw(self):
+        self.b.cube_north=CubeNorth();self.b.land_north=LandNorth()
+        self.b.output_permitted=False;self.b.get_logger=Mock(return_value=Mock())
+        self.b.compass_health=(10.,True);self.b.raw_gps_health=(10.,True)
+        self.b.params={k:(10.,v) for k,v in PROFILE.items()}
+        self.b.params.update({k:(10.,v) for k,v in dict(COMPASS_ENABLE=1,COMPASS_USE=1,COMPASS_DEV_ID=123,COMPASS_LEARN=0).items()})
+        result=self.b.compass_action('compass_start',NS())
+        self.assertTrue(result.success,result.message)
+        calls=self.b.link.send.call_args_list
+        self.assertEqual({c.args[3] for c in calls},{k.encode() for k in (*YAW_PARAMS,'COMPASS_LEARN')})
+        self.b.link.command.assert_not_called();self.b.link.set_mode.assert_not_called()
+        self.b.params.update({k:(10.,1) for k in YAW_PARAMS})
+        self.b.params['COMPASS_LEARN']=(10.,3)
+        self.b.cube_north.observe(10.,self.b.params,90.,30.,True)
+        self.b.cube_north.message(10.,'CompassLearn: Finished')
+        self.b.params['COMPASS_LEARN']=(10.,0)
+        for i in range(31):
+            t=10+i*.1
+            self.b.params={k:(t,v[1]) for k,v in self.b.params.items()}
+            self.b.cube_north.observe(t,self.b.params,90.,30.,True)
+        self.clock.now=13.
+        result=self.b.compass_action('compass_capture',NS())
+        self.assertTrue(result.success,result.message)
+        self.assertAlmostEqual(self.b.land_north.reference['offset_deg'],60.)
+        self.assertEqual(self.b.cube_north.phase,'restoring')
+        self.assertFalse(self.b.output_permitted)
+        self.b.compass_action.__func__.__globals__['require_maintenance'].side_effect=ValueError('Keep killed')
+        self.b.link.send.reset_mock()
+        self.assertFalse(self.b.compass_action('compass_cancel',NS()).success)
+        self.b.link.send.assert_not_called()
+
     def test_land_capture_then_prepare_retains_north_without_land_depth_or_dvl(self):
         self.b.land_north=LandNorth()
         for i in range(51):self.b.land_north.observe(7.5+i*.05,(1.,0.,0.,0.),(0.,0.,0.))
@@ -65,7 +105,7 @@ class TransportTests(unittest.TestCase):
         self.clock = NS(now=10.)
         ns = dict(SteadyNode=object, math=math, json=json, String=NS, PROFILE=PROFILE,
                   yaw=yaw, time=NS(monotonic=lambda: self.clock.now),
-                  statistics=statistics, BridgeEstimator=BridgeEstimator, require_maintenance=Mock(), AutomaticRecovery=AutomaticRecovery)
+                  statistics=statistics, BridgeEstimator=BridgeEstimator, require_maintenance=Mock(), AutomaticRecovery=AutomaticRecovery, COMPASS_PARAMS=COMPASS_PARAMS)
         exec(compile(tree, str(path), 'exec'), ns)
         self.b = ns['FusedNavBridge'].__new__(ns['FusedNavBridge'])
         self.b.est = BridgeEstimator()

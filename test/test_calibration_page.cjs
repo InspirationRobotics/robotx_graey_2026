@@ -29,6 +29,12 @@ async function render(state){
  e.trueHeading.value='90';e.headingConfirm.checked=true;e.headingConfirm.onchange();assert(!e.prepare.disabled);
  await e.prepare.onclick();assert.equal(page.posts[0].alignment_mode,'known');assert.equal(page.posts[0].true_heading_deg,90);assert(page.posts[0].heading_confirmed);
  assert(html.includes('not an independent compass reference'));assert(html.includes('not save flash'));
+ page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'idle'}}}}}});
+ e=page.elements;assert(e.compassStart.disabled);e.compassConfirm.checked=true;e.compassConfirm.onchange();assert(!e.compassStart.disabled);
+ await e.compassStart.onclick();assert.equal(page.posts[0].action,'compass_start');assert(page.posts[0].confirmed);assert(!page.posts[0].surface_confirmed);
+ page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'ready'},land_north_reference:{offset_deg:10}}}}}});
+ e=page.elements;e.healthConfirm.checked=true;e.healthConfirm.onchange();assert(!e.healthPrepare.disabled);
+ await e.healthPrepare.onclick();assert.equal(page.posts[0].action,'prepare');assert.equal(page.posts[0].alignment_mode,'retained');assert(page.posts[0].surface_confirmed);
  page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{}}});
  e=page.elements;e.trueHeading.value='90';e.headingConfirm.checked=true;e.headingConfirm.onchange();
  assert(!e.alignLand.disabled);assert(!e.surfaceConfirm.checked);

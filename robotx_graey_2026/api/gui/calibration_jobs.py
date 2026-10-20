@@ -24,6 +24,9 @@ class ServiceQueue:
             ('align_heading','/graey/navigation/align_heading',SetParametersAtomically),
             ('align_land','/graey/navigation/align_land',SetParametersAtomically),
             ('forget_land','/graey/navigation/forget_land',Trigger),
+            ('compass_start','/graey/navigation/compass_start',Trigger),
+            ('compass_capture','/graey/navigation/compass_capture',Trigger),
+            ('compass_cancel','/graey/navigation/compass_cancel',Trigger),
             ('calibrate','/graey/vn100/calibrate_start',Trigger),
             ('cancel','/graey/vn100/calibrate_cancel',Trigger),
             ('commission','/graey/navigation/commission',Trigger)):
@@ -109,7 +112,7 @@ class CalibrationJobs:
                 self.maneuver('start',body.get('max_distance_m'))
                 self.job.update(auto_started=True,auto_started_at=self.clock(),phase='aligning',message='Automatic surface alignment started; keep clear and supervise Abort')
                 return self.snapshot()
-        if action not in ('calibrate','align_land','prepare','recover_dvl','cancel'):
+        if action not in ('calibrate','align_land','prepare','recover_dvl','cancel','compass_start','compass_capture','compass_cancel'):
             raise ValueError('Unknown calibration action')
         if action == 'cancel':
             with self.lock:
@@ -125,6 +128,9 @@ class CalibrationJobs:
             raise ValueError(reason or 'Stop the mission before calibration or preparation')
         if body.get('confirmed') is not True:
             raise ValueError('Confirm that you read the instructions and maintained kill/disarm')
+        learning=(self.sample('bridge').get('compass_north') or {}).get('phase')
+        if learning in ('learning','restoring') and action not in ('compass_capture','compass_cancel'):
+            raise ValueError('Capture or cancel active compass learning before calibration or preparation')
         if action in ('prepare','recover_dvl') and body.get('surface_confirmed') is not True:
             raise ValueError('Confirm floating stationary at the water surface before pressure calibration')
         mode=body.get('alignment_mode','gps')
@@ -159,6 +165,10 @@ class CalibrationJobs:
                 self.service('pause')
             if self.snapshot().get('cancel'):
                 raise ValueError('Preparation cancelled; navigation remains suspended')
+            if action in ('compass_start','compass_capture','compass_cancel'):
+                message=self.service(action)
+                self.update(phase='compass',busy=False,message=message)
+                return
             if action=='align_land':
                 self.update(phase='aligning',message='Keep level, stationary and killed; capturing known true bearing')
                 self.sleep(2.2)
