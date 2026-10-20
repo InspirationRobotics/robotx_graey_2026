@@ -140,7 +140,10 @@ class FusedNavBridge(SteadyNode):
                 self.land_north.reference=dict(reference)
             else:
                 changes=self.cube_north.cancel(now,self.params)
-                self.land_north.invalidate()
+                if self.cube_north.reference:
+                    self.land_north.reference=dict(self.cube_north.reference)
+                else:
+                    self.land_north.invalidate()
             self.get_logger().warning('COMPASS_REFERENCE_ACTION '+json.dumps(dict(action=name,changes=changes)))
             for key,value in changes.items():
                 self.link.send('param_set_send',1,1,key.encode(),float(value),9)
@@ -385,7 +388,10 @@ class FusedNavBridge(SteadyNode):
                       and max(abs(math.degrees(r)) for r in self.est.rates)<=10
                       and 1-2*(q[1]*q[1]+q[2]*q[2])>=math.cos(math.radians(30))
                       and abs(m.roll)<=math.radians(30) and abs(m.pitch)<=math.radians(30))
+            previous_phase=self.cube_north.phase
             self.cube_north.observe(now,self.params,math.degrees(m.yaw),yaw(q),good)
+            if self.cube_north.phase!=previous_phase:
+                self.get_logger().info('COMPASS_NORTH_STATE '+json.dumps(self.cube_north.status()))
         elif kind=='STATUSTEXT' and hasattr(self,'cube_north'):
             self.cube_north.message(now,str(m.text))
         elif kind == 'GPS_GLOBAL_ORIGIN':

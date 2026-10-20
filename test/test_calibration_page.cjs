@@ -49,6 +49,15 @@ async function render(state){
  page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'ready'},land_north_reference:{offset_deg:10}}}}}});
  e=page.elements;e.healthConfirm.checked=true;e.healthConfirm.onchange();assert(!e.healthPrepare.disabled);
  await e.healthPrepare.onclick();assert.equal(page.posts[0].action,'prepare');assert.equal(page.posts[0].alignment_mode,'retained');assert(page.posts[0].surface_confirmed);
+ for(const [north,reference,reason] of [
+  [{phase:'learning',finished_seen:false},null,'not confirmed'],
+  [{phase:'learning',finished_seen:true},null,'hold level'],
+  [{phase:'restoring'}, {offset_deg:10},'readbacks'],
+  [{phase:'cancelled'},null,'No validated north']]){
+  page=await render({controller:safe,job:{busy:false},navigation:{streams:{bridge:{fresh:true,data:{compass_north:north,land_north_reference:reference}}}}});
+  page.elements.healthConfirm.checked=true;page.elements.healthConfirm.onchange();
+  assert(page.elements.healthPrepare.disabled);assert(page.elements.healthPrepareReason.textContent.includes(reason));
+ }
  page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{}}});
  e=page.elements;e.trueHeading.value='90';e.headingConfirm.checked=true;e.headingConfirm.onchange();
  assert(!e.alignLand.disabled);assert(!e.surfaceConfirm.checked);

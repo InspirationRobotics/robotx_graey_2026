@@ -3,6 +3,19 @@ from robotx_graey_2026.api.navigation.cube_north import CubeNorth,COMPASS_PARAMS
 
 
 class CubeNorthTests(unittest.TestCase):
+    def test_cancel_after_valid_capture_preserves_north_through_restoration(self):
+        for already_restoring in (False,True):
+            n=CubeNorth();n.start(0,self.params());self.completed(n)
+            for i in range(31):
+                t=1+i*.1;n.observe(t,self.params(t,1),90,30,True)
+            self.assertEqual(n.phase,'captured')
+            if already_restoring:n.capture(4,self.params(4,1))
+            changes=n.cancel(4,self.params(4,1))
+            self.assertAlmostEqual(n.reference['offset_deg'],60)
+            self.assertEqual(changes['COMPASS_LEARN'],0)
+            n.observe(4.1,self.params(4.1),0,0,False)
+            self.assertEqual(n.phase,'ready')
+
     def completed(self,n):
         n.observe(.5,self.params(.5,1,3),90,30,True)
         n.message(1,'CompassLearn: Finished')

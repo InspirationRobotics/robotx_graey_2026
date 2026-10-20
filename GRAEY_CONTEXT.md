@@ -1412,3 +1412,11 @@ vehicleandexplicitarmstate,no mission/autonomy;armed/disarmedbothallowed,noESCof
 orkillgateforcompassactions. Stillnopropulsion/arm/disarm/modecommands;waypoints
 suspendeduntilPrepare. Compassinstructionsupdated;othermaintenanceunchanged.
 268Python+bothGUIsuitespass;actualarmedlearningconvergencenotverified.
+268Python+bothGUIsuitespass;actualarmedlearningconvergencenotverified.
+
+2026-10-19 Preparegrey investigation: livelearning3/yaw1/finishedfalse,noreference;
+thenoperatorCancelobserved,learn0/yaw6/cancelled,noreference. UserreportsGUIhadsaid
+completed;historicalcapturenotverified. FixeddemonstratedCancelrace: preserveverified
+referenceincaptured/restoring;neverinventonefromincompletelearning. GUIexplicit
+Prepareblocker+firmwarecompletion/capture/restorationstates,auditlogsadded.
+269Python+bothGUIsuitespass. Currentnorthnotready;VNcalibrationnotrequiredtorepeat.

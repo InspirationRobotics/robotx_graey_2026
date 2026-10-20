@@ -106,7 +106,14 @@ class CubeNorth:
             if not (p and p['COMPASS_LEARN'] in (0,3) and all(p[k] in (1,6) for k in YAW_PARAMS)
                     and (p['COMPASS_LEARN']==3 or any(p[k]==1 for k in YAW_PARAMS))):
                 raise ValueError('No active or interrupted compass learning profile to restore')
-        self.reference=None;self.phase='restoring';self.reason='Cancelling learning and restoring ExternalNav yaw'
+        # A completed, verified north capture is valuable even if the operator
+        # clicks Cancel while its yaw-restoration readbacks are still arriving.
+        # Never erase it merely to stop learning or finish restoration.
+        keep_reference=self.phase in ('captured','restoring') and self.reference is not None and not self.vn_invalidated
+        if not keep_reference:self.reference=None
+        self.phase='restoring'
+        self.reason=('North reference retained; restoring ExternalNav yaw' if keep_reference
+                     else 'Learning stopped without a north reference; restoring ExternalNav yaw')
         return dict({k:6 for k in YAW_PARAMS},COMPASS_LEARN=0)
 
     def status(self):

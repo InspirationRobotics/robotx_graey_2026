@@ -87,6 +87,8 @@ class TransportTests(unittest.TestCase):
         self.assertAlmostEqual(self.b.land_north.reference['offset_deg'],60.)
         self.assertEqual(self.b.cube_north.phase,'restoring')
         self.assertFalse(self.b.output_permitted)
+        self.assertTrue(self.b.compass_action('compass_cancel',NS()).success)
+        self.assertAlmostEqual(self.b.land_north.reference['offset_deg'],60.)
         self.b.compass_action.__func__.__globals__['require_compass_setup'].side_effect=ValueError('Select MANUAL')
         self.b.link.send.reset_mock()
         self.assertFalse(self.b.compass_action('compass_cancel',NS()).success)

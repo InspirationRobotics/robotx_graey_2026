@@ -17,3 +17,11 @@ User clarified that setup itself must work while already armed MANUAL. The previ
 Validation: 268 Python tests and both GUI suites pass; includes armed-MANUAL setup/cancel, auto restoration in armed MANUAL, and rejection in GUIDED or stale/mission states. No actual armed learning convergence claimed. Deployment pending this revision.
 
 Integration check found watchdog ROS status has no GUI-added online field. Automatic restoration uses the fresh ROS receipt plus vehicle freshness and independently checks the HTTP controller's online state immediately before writing. Regression fixture now mirrors the real message. First armed-MANUAL revision b6316e0 deployed with 268 onboard tests passed; this schema correction is the final follow-up.
+
+## Prepare disabled after Compass Learn
+
+Live diagnosis: initially COMPASS_LEARN=3, yaw1/1/1, active_seen true, finished_seen false and no capture. Later operator compass_cancel action appeared; learn0/yaw6 restored, phase cancelled with no reference. User reported GUI had said learning completed. Historical reference capture/completion cannot be reconstructed from current status; no valid heading was invented. Read-only telemetry log reported ArduSub4.5.7(30257f01); GSF_RUN/USE_MASK3. Generic upstream learn3 depends on converged GSF, but installed firmware convergence was not established.
+
+Demonstrated code bug fixed: Cancel during captured/restoring discarded the already verified north reference and invalidated bridge land reference. It now preserves that verified reference through restoration; incomplete/invalidated learning never gains a reference. Added audit logging for compass state transitions. Prepare now displays exact connection, safety, learning, capture, restoration, reference and surface-confirmation blockers beside the button and in its title. Live compass display separates firmware completion, north capture and navigation-yaw readiness.
+
+269 Python tests and both GUI suites pass, including Cancel in both captured/restoring states and all displayed Prepare stages. Current session still requires a valid north capture; VN calibration need not be repeated. Code deployment pending; no claim that current compass north is accepted.
