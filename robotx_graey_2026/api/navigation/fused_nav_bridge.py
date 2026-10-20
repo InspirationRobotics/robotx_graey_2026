@@ -116,7 +116,7 @@ class FusedNavBridge(SteadyNode):
 
     def compass_action(self,name,response):
         try:
-            (require_compass_setup if name=='compass_start' else require_maintenance)()
+            require_compass_setup()
             if name=='compass_start':
                 self.output_permitted=False
                 self.est.fault='Navigation maintenance; Prepare required before reuse'
@@ -150,18 +150,18 @@ class FusedNavBridge(SteadyNode):
         return response
 
     def finish_compass_reference(self,now):
-        """Capture is passive while armed; source writes wait for maintenance."""
+        """Return yaw to ExternalNav only in fresh pilot-controlled MANUAL."""
         if (not hasattr(self,'cube_north') or self.output_permitted
                 or self.cube_north.phase not in ('captured','restoring')
                 or now-getattr(self,'compass_restore_attempt',-math.inf)<1.):return
         c=self.control_state
         if not (self.control_received is not None and 0<=now-self.control_received<.7
-                and c.get('vehicle_fresh') is True and c.get('armed') is False
-                and c.get('sa_active') is True and c.get('esc_commanded_on') is False
-                and not c.get('mission_claimed') and not c.get('autonomous')):return
+                and c.get('online') is True and c.get('vehicle_fresh') is True
+                and isinstance(c.get('armed'),bool) and c.get('mode')=='MANUAL'
+                and c.get('mission_claimed') is False and c.get('autonomous') is False):return
         self.compass_restore_attempt=now
         try:
-            require_maintenance()
+            require_compass_setup()
             if self.cube_north.phase=='captured':
                 if not self.est.fresh(self.est.imu_at,now):
                     self.cube_north.invalidate_vn()

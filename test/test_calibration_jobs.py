@@ -14,11 +14,11 @@ class CalibrationJobsTests(unittest.TestCase):
         self.assertEqual(self.calls,[('compass_suspend',None),('compass_start',None)])
         self.assertFalse(self.job.waypoint_permission)
 
-    def test_compass_setup_accepts_esc_on_but_rejects_armed_stale_modes_and_missions(self):
-        c=dict(self.c,mode='MANUAL',sa_active=False,esc_commanded_on=True)
+    def test_compass_setup_accepts_armed_manual_but_rejects_stale_modes_and_missions(self):
+        c=dict(self.c,armed=True,mode='MANUAL',sa_active=False,esc_commanded_on=True)
         self.assertEqual(compass_setup_reason(c),'')
         self.assertTrue(maintenance_reason(c))
-        for change in ({'armed':True},{'mode':'GUIDED'},{'vehicle_fresh':False},
+        for change in ({'armed':None},{'mode':'GUIDED'},{'vehicle_fresh':False},
                        {'online':False},{'mission_claimed':True},{'autonomous':True}):
             self.assertTrue(compass_setup_reason(dict(c,**change)),change)
         self.assertTrue(compass_setup_reason({}))

@@ -24,7 +24,7 @@ class TransportTests(unittest.TestCase):
         self.assertTrue(self.b.output_permitted)
         self.b.link.send.assert_not_called()
 
-    def test_passive_capture_while_armed_then_automatic_safe_restoration(self):
+    def test_passive_capture_and_restoration_while_armed_manual_not_guided(self):
         from test_cube_north import CubeNorthTests
         fixture=CubeNorthTests();n=CubeNorth();n.start(0,fixture.params());fixture.completed(n)
         for i in range(31):
@@ -32,11 +32,11 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(n.phase,'captured')
         self.b.cube_north=n;self.b.land_north=LandNorth();self.b.output_permitted=False
         self.b.params=fixture.params(4.,1)
-        self.b.control_state=dict(vehicle_fresh=True,armed=True,sa_active=False,esc_commanded_on=True)
+        self.b.control_state=dict(online=True,vehicle_fresh=True,armed=True,sa_active=False,esc_commanded_on=True,mode='GUIDED',mission_claimed=False,autonomous=False)
         self.b.control_received=4.
         self.b.finish_compass_reference(4.)
         self.assertEqual(n.phase,'captured');self.b.link.send.assert_not_called()
-        self.b.control_state.update(armed=False,sa_active=True,esc_commanded_on=False)
+        self.b.control_state.update(mode='MANUAL')
         self.b.control_received=4.1
         self.b.est.imu_at=4.1
         self.b.finish_compass_reference(4.1)
@@ -86,7 +86,7 @@ class TransportTests(unittest.TestCase):
         self.assertAlmostEqual(self.b.land_north.reference['offset_deg'],60.)
         self.assertEqual(self.b.cube_north.phase,'restoring')
         self.assertFalse(self.b.output_permitted)
-        self.b.compass_action.__func__.__globals__['require_maintenance'].side_effect=ValueError('Keep killed')
+        self.b.compass_action.__func__.__globals__['require_compass_setup'].side_effect=ValueError('Select MANUAL')
         self.b.link.send.reset_mock()
         self.assertFalse(self.b.compass_action('compass_cancel',NS()).success)
         self.b.link.send.assert_not_called()

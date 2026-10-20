@@ -34,9 +34,15 @@ async function render(state){
  page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'idle'}}}}}});
  e=page.elements;assert(!e.compassStart.disabled);assert(!html.includes('id="compassConfirm"'));
  await e.compassStart.onclick();assert.equal(page.posts[0].action,'compass_start');assert(page.posts[0].confirmed);assert(!page.posts[0].surface_confirmed);
- const compassState={controller:{...safe,sa_active:false,esc_commanded_on:true},job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'idle'}}}}}};
+ const compassState={controller:{...safe,armed:true,sa_active:false,esc_commanded_on:true},job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'idle'}}}}}};
  page=await render(compassState);assert(!page.elements.compassStart.disabled);assert(page.elements.calibrate.disabled);
- for(const change of [{armed:true},{mode:'GUIDED'},{vehicle_fresh:false},{mission_claimed:true}]){
+ await page.elements.compassStart.onclick();assert.equal(page.posts[0].action,'compass_start');
+ page=await render({...compassState,navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'learning'}}}}}});
+ assert(!page.elements.compassCancel.disabled);assert(page.elements.compassStart.disabled);
+ await page.elements.compassCancel.onclick();assert.equal(page.posts[0].action,'compass_cancel');
+ const compassInstructions=html.split('<h2>2 · Compass Learn')[1].split('</section>')[0];
+ assert(!compassInstructions.includes('switch ESC power off'));assert(!compassInstructions.includes('Select disarmed'));
+ for(const change of [{armed:null},{mode:'GUIDED'},{vehicle_fresh:false},{mission_claimed:true}]){
   page=await render({...compassState,controller:{...compassState.controller,...change}});
   assert(page.elements.compassStart.disabled);assert(page.elements.compassStart.title.length>0);
  }

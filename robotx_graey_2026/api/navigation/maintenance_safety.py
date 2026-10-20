@@ -13,11 +13,11 @@ def maintenance_reason(c):
 
 
 def compass_setup_reason(c):
-    """Selecting compass yaw needs disarmed MANUAL, not an ESC-off checkbox."""
+    """Compass learning is a pilot-controlled MANUAL operation, armed or not."""
     if not (c.get('online') is True and c.get('vehicle_fresh') is True):
         return 'Fresh controller and vehicle telemetry required'
-    if c.get('armed') is not False:
-        return 'Disarm before setting up Compass Learn; learning itself runs armed'
+    if not isinstance(c.get('armed'), bool):
+        return 'Fresh arm-state telemetry required'
     if c.get('mode') != 'MANUAL':
         return 'Select MANUAL before setting up Compass Learn'
     if c.get('mission_claimed') is not False or c.get('autonomous') is not False:

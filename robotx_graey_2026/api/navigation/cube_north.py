@@ -77,7 +77,7 @@ class CubeNorth:
         except ValueError:
             return
         self.phase='captured'
-        self.reason='North captured automatically. Continue MANUAL driving if needed; kill/disarm/ESC-off when ready for automatic ExternalNav restoration.'
+        self.reason='North captured automatically; restoring ExternalNav yaw in MANUAL. No arm or propulsion command is sent.'
 
     def candidate(self,now,params):
         p=self.values(now,params)

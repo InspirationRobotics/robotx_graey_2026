@@ -124,7 +124,7 @@ class CalibrationJobs:
                 if self.maneuver and self.job.get('auto_started'):
                     self.maneuver('abort',None)
             return self.snapshot()
-        reason = (compass_setup_reason if action == 'compass_start' else maintenance_reason)(self.controller())
+        reason = (compass_setup_reason if action.startswith('compass_') else maintenance_reason)(self.controller())
         if reason or self.mission_running():
             raise ValueError(reason or 'Stop the mission before calibration or preparation')
         if body.get('confirmed') is not True:
@@ -161,8 +161,8 @@ class CalibrationJobs:
 
     def run(self, action):
         try:
-            self.service('compass_suspend' if action == 'compass_start' else 'suspend')
-            if action not in ('recover_dvl','compass_start'):
+            self.service('compass_suspend' if action.startswith('compass_') else 'suspend')
+            if action != 'recover_dvl' and not action.startswith('compass_'):
                 self.service('pause')
             if self.snapshot().get('cancel'):
                 raise ValueError('Preparation cancelled; navigation remains suspended')

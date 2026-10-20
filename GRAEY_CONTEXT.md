@@ -1404,3 +1404,11 @@ robotx_graey_2026/docs/compass-setup-button-2026-10-19.md.
 yaw6/6/6,profileverified;VNrelativefresh. Killed/disarmedESCoffMANUAL. Learningnot
 started,northnotcaptured,Preparestillrequired. Earlierdeploymentstoppedbeforecode
 changeswhenkillreleased/ESCon;resumedonlyafterfreshsafestate. Noaccuracyclaim.
+changeswhenkillreleased/ESCon;resumedonlyafterfreshsafestate. Noaccuracyclaim.
+
+2026-10-19 usercorrectscompassworkflow: setupmustalsoacceptalreadyarmedMANUAL.
+Compassstart/cancel/passivecapture/automaticyawrestorationnowMANUALwithfreshonline,
+vehicleandexplicitarmstate,no mission/autonomy;armed/disarmedbothallowed,noESCoff
+orkillgateforcompassactions. Stillnopropulsion/arm/disarm/modecommands;waypoints
+suspendeduntilPrepare. Compassinstructionsupdated;othermaintenanceunchanged.
+268Python+bothGUIsuitespass;actualarmedlearningconvergencenotverified.
