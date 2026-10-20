@@ -32,7 +32,7 @@ async function render(state){
  assert(html.includes('armed MANUAL'));assert(html.includes('COMPASS_LEARN=3'));
  assert(html.includes('No button or disarm is required for this passive capture'));
  page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'idle'}}}}}});
- e=page.elements;assert(e.compassStart.disabled);e.compassConfirm.checked=true;e.compassConfirm.onchange();assert(!e.compassStart.disabled);
+ e=page.elements;assert(!e.compassStart.disabled);assert(!html.includes('id="compassConfirm"'));
  await e.compassStart.onclick();assert.equal(page.posts[0].action,'compass_start');assert(page.posts[0].confirmed);assert(!page.posts[0].surface_confirmed);
  page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'ready'},land_north_reference:{offset_deg:10}}}}}});
  e=page.elements;e.healthConfirm.checked=true;e.healthConfirm.onchange();assert(!e.healthPrepare.disabled);

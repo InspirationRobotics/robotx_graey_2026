@@ -1377,3 +1377,10 @@ notdeprecatedLEARN1. Requiredrealcompass/GPS/freshness/completionchecksretained.
 266Python+bothGUItestsPASS. NoSSH/deployment/liveparamchangesinthisrevision.
 See docs/automatic-cube-north-2026-10-19.md. LastverifiedJetson1d60ae1;compassdisabled
 atthatcheck,requiresverifiedacquisitionsetupbeforelearningcanrun.
+
+2026-10-19 removed redundant compass ESC-off confirmation checkbox. GUI uses live
+controller safety state for initial setup/restoration; no tick required. Deliberate
+button click sends confirmation; backend independently verifies maintenance state.
+Manual learning and passive north capture remain allowed armed. Both JS suitespass.
+StaticHTMLonly(no navigation/backendbehaviorchanges); canupdatewithoutservice
+restart/reference loss. Existingrealcompass/readbackprerequisitesunchanged.
