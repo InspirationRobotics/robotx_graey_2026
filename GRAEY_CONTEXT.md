@@ -1396,3 +1396,11 @@ MANUAL/no-mission setup gate now replaces kill/ESCoff gate across GUI/job/superv
 bridge; restoration and other maintenance unchanged. Deployment pending; firmware
 learning convergence and absolute heading accuracy not yet verified. See
 robotx_graey_2026/docs/compass-setup-button-2026-10-19.md.
+robotx_graey_2026/docs/compass-setup-button-2026-10-19.md.
+
+2026-10-19 compasssetup05b009c deploymentVERIFIEDtether:backup
+/home/graey/deployment-backups/20261019-compass-setup-203251,build/runtimeverified,
+268onboardtestsPASS,graey-rosactive,newHTMLserved. FreshcompassENABLE/USE1,LEARN0,
+yaw6/6/6,profileverified;VNrelativefresh. Killed/disarmedESCoffMANUAL. Learningnot
+started,northnotcaptured,Preparestillrequired. Earlierdeploymentstoppedbeforecode
+changeswhenkillreleased/ESCon;resumedonlyafterfreshsafestate. Noaccuracyclaim.
