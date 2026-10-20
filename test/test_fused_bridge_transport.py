@@ -17,6 +17,31 @@ from robotx_graey_2026.api.navigation.cube_north import CubeNorth,COMPASS_PARAMS
 
 
 class TransportTests(unittest.TestCase):
+    def test_passive_capture_while_armed_then_automatic_safe_restoration(self):
+        from test_cube_north import CubeNorthTests
+        fixture=CubeNorthTests();n=CubeNorth();n.start(0,fixture.params());fixture.completed(n)
+        for i in range(31):
+            t=1+i*.1;n.observe(t,fixture.params(t,1),90.,30.,True)
+        self.assertEqual(n.phase,'captured')
+        self.b.cube_north=n;self.b.land_north=LandNorth();self.b.output_permitted=False
+        self.b.params=fixture.params(4.,1)
+        self.b.control_state=dict(vehicle_fresh=True,armed=True,sa_active=False,esc_commanded_on=True)
+        self.b.control_received=4.
+        self.b.finish_compass_reference(4.)
+        self.assertEqual(n.phase,'captured');self.b.link.send.assert_not_called()
+        self.b.control_state.update(armed=False,sa_active=True,esc_commanded_on=False)
+        self.b.control_received=4.1
+        self.b.est.imu_at=4.1
+        self.b.finish_compass_reference(4.1)
+        self.assertEqual(n.phase,'restoring')
+        self.assertAlmostEqual(self.b.land_north.reference['offset_deg'],60.)
+        self.b.link.command.assert_not_called();self.b.link.set_mode.assert_not_called()
+        self.b.control_received=5.2
+        self.b.finish_compass_reference(5.2)
+        self.assertEqual(self.b.link.send.call_count,8)  # four params retried pending ACK
+        n.observe(5.3,fixture.params(5.3),0.,0.,False)
+        self.assertEqual(n.phase,'ready')
+
     def test_compass_parameter_polling_does_not_add_load_to_normal_navigation(self):
         self.b.sync_clock=Mock();self.b.request()
         names=[c.args[3].decode() for c in self.b.link.send.call_args_list if c.args[0]=='param_request_read_send']
@@ -46,6 +71,7 @@ class TransportTests(unittest.TestCase):
             self.b.params={k:(t,v[1]) for k,v in self.b.params.items()}
             self.b.cube_north.observe(t,self.b.params,90.,30.,True)
         self.clock.now=13.
+        self.b.est.imu_at=13.
         result=self.b.compass_action('compass_capture',NS())
         self.assertTrue(result.success,result.message)
         self.assertAlmostEqual(self.b.land_north.reference['offset_deg'],60.)

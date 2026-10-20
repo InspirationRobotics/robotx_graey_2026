@@ -1364,3 +1364,16 @@ permissionbeforetransit(preserved);restrictcompasspollingtomaintenance,rereun
 68b7289639passedwith2sGPSoutageand.0782msimulatederror. See docs/navigation-revision-
 2026-10-19.md. Straight-lineleg/slowGPS-DVLheadingestimationareproposalsnotimplemented
 here;currentmotioncorrectionthreshold.5m/sstillabove.2m/smissioncap.
+
+2026-10-19 userclarifies disarmcomplaintwas compassnorthCAPTURE,notMANUALdriving.
+LOCAL fix: CubeNorth automatically captures pairednorth offset after confirmed
+learn3active/Finished/learn0 and2svalidindependentCubeVNagreement,evenwhilearmed
+MANUAL. Passivecapturewritesnoparameters/controlcommands. GUI manualcapturebutton
+hidden;showscapturedreferenceandVNheadingpreview. Onceoperatorstops/disarms/kills/
+ESCoff,freshcontrolstatus+maintenancecheckautomaticallyrestoreExternalNavyaw6and
+learn0,rate-limitedretryuntilreadbacks;noautoarm/disarm/modechange. Initialsource
+setupstillmaintenanceonly. COMPASS_LEARN=3alreadycorrect;EK3_SRCx_YAW=1meanscompass,
+notdeprecatedLEARN1. Requiredrealcompass/GPS/freshness/completionchecksretained.
+266Python+bothGUItestsPASS. NoSSH/deployment/liveparamchangesinthisrevision.
+See docs/automatic-cube-north-2026-10-19.md. LastverifiedJetson1d60ae1;compassdisabled
+atthatcheck,requiresverifiedacquisitionsetupbeforelearningcanrun.

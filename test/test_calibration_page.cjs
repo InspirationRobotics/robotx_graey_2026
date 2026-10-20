@@ -29,6 +29,8 @@ async function render(state){
  e.trueHeading.value='90';e.headingConfirm.checked=true;e.headingConfirm.onchange();assert(!e.prepare.disabled);
  await e.prepare.onclick();assert.equal(page.posts[0].alignment_mode,'known');assert.equal(page.posts[0].true_heading_deg,90);assert(page.posts[0].heading_confirmed);
  assert(html.includes('not an independent compass reference'));assert(html.includes('not save flash'));
+ assert(html.includes('armed MANUAL'));assert(html.includes('COMPASS_LEARN=3'));
+ assert(html.includes('No button or disarm is required for this passive capture'));
  page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'idle'}}}}}});
  e=page.elements;assert(e.compassStart.disabled);e.compassConfirm.checked=true;e.compassConfirm.onchange();assert(!e.compassStart.disabled);
  await e.compassStart.onclick();assert.equal(page.posts[0].action,'compass_start');assert(page.posts[0].confirmed);assert(!page.posts[0].surface_confirmed);

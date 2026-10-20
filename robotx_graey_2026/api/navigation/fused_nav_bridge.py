@@ -130,6 +130,9 @@ class FusedNavBridge(SteadyNode):
                 changes=self.cube_north.start(now,self.params)
                 self.land_north.invalidate()
             elif name=='compass_capture':
+                if not self.est.fresh(self.est.imu_at,now):
+                    self.cube_north.invalidate_vn()
+                    raise ValueError('VN continuity required to retain captured north')
                 reference,changes=self.cube_north.capture(now,self.params)
                 self.land_north.reference=dict(reference)
             else:
@@ -142,6 +145,34 @@ class FusedNavBridge(SteadyNode):
         except (ValueError,OSError) as error:
             response.success,response.message=False,str(error)
         return response
+
+    def finish_compass_reference(self,now):
+        """Capture is passive while armed; source writes wait for maintenance."""
+        if (not hasattr(self,'cube_north') or self.output_permitted
+                or self.cube_north.phase not in ('captured','restoring')
+                or now-getattr(self,'compass_restore_attempt',-math.inf)<1.):return
+        c=self.control_state
+        if not (self.control_received is not None and 0<=now-self.control_received<.7
+                and c.get('vehicle_fresh') is True and c.get('armed') is False
+                and c.get('sa_active') is True and c.get('esc_commanded_on') is False
+                and not c.get('mission_claimed') and not c.get('autonomous')):return
+        self.compass_restore_attempt=now
+        try:
+            require_maintenance()
+            if self.cube_north.phase=='captured':
+                if not self.est.fresh(self.est.imu_at,now):
+                    self.cube_north.invalidate_vn()
+                    self.land_north.invalidate()
+                    return
+                reference,changes=self.cube_north.capture(now,self.params)
+                self.land_north.reference=dict(reference)
+            else:
+                changes={**{f'EK3_SRC{i}_YAW':6 for i in (1,2,3)},'COMPASS_LEARN':0}
+            for key,value in changes.items():
+                self.link.send('param_set_send',1,1,key.encode(),float(value),9)
+        except (ValueError,OSError):
+            # No write, no disarm, no propulsion action. Preserve passive capture.
+            return
 
     def forget_land(self, request, response):
         try:
@@ -220,7 +251,7 @@ class FusedNavBridge(SteadyNode):
         try:
             require_maintenance()
             now = time.monotonic()
-            if hasattr(self,'cube_north') and self.cube_north.phase in ('learning','restoring'):
+            if hasattr(self,'cube_north') and self.cube_north.phase in ('learning','captured','restoring'):
                 raise ValueError('Finish or cancel compass learning and verify ExternalNav restoration before Prepare')
             if request.data is not True:
                 raise ValueError('Operator must confirm floating at the water surface')
@@ -313,7 +344,7 @@ class FusedNavBridge(SteadyNode):
             self.link.command(511, mid, 100000)
         for name in PROFILE:
             self.link.send('param_request_read_send', 1, 1, name.encode(), -1)
-        if (not self.output_permitted or (hasattr(self,'cube_north') and self.cube_north.phase in ('learning','restoring'))):
+        if (not self.output_permitted or (hasattr(self,'cube_north') and self.cube_north.phase in ('learning','captured','restoring'))):
             for mid in (1,30):self.link.command(511,mid,100000)
             for name in COMPASS_PARAMS:
                 if name not in PROFILE:self.link.send('param_request_read_send',1,1,name.encode(),-1)
@@ -392,6 +423,7 @@ class FusedNavBridge(SteadyNode):
     def tick(self):
         self.link.drain(self.consume)
         now = time.monotonic()
+        self.finish_compass_reference(now)
         if self.output_permitted and self.configured(now):
             if self.auto_recovery.step(now,self.est,self.control_state,self.control_received):
                 self.reset_counter=(self.reset_counter+1)%256

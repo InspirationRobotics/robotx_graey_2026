@@ -22,7 +22,7 @@ class CubeNorth:
         if self.phase=='ready':
             self.phase='expired';self.reference=None
             self.reason='VN reference expired; establish an independent north reference again'
-        if self.phase in ('learning','restoring'):
+        if self.phase in ('learning','captured','restoring'):
             self.vn_invalidated=True;self.rows.clear();self.finished=None;self.reference=None
             self.reason='VN continuity/calibration changed; Cancel and repeat compass reference workflow'
 
@@ -71,9 +71,15 @@ class CubeNorth:
         if self.rows and now-self.rows[-1][0]>.25:self.rows.clear()
         self.rows.append((now,wrap(cube_heading-vn_heading)))
         while len(self.rows)>1 and now-self.rows[0][0]>3:self.rows.popleft()
-        self.reason='Learning finished. Hold gently steady; kill/disarm/ESC-off, then Capture Cube north.'
+        self.reason='Learning finished; automatically checking Cube/VN north agreement'
+        try:
+            self.reference=self.candidate(now,params)
+        except ValueError:
+            return
+        self.phase='captured'
+        self.reason='North captured automatically. Continue MANUAL driving if needed; kill/disarm/ESC-off when ready for automatic ExternalNav restoration.'
 
-    def capture(self,now,params):
+    def candidate(self,now,params):
         p=self.values(now,params)
         if (self.phase!='learning' or self.finished is None or p['COMPASS_LEARN']!=0
                 or any(p[k]!=1 for k in YAW_PARAMS) or len(self.rows)<20
@@ -82,12 +88,20 @@ class CubeNorth:
         mean=math.degrees(math.atan2(sum(math.sin(math.radians(r[1])) for r in self.rows),sum(math.cos(math.radians(r[1])) for r in self.rows)))
         if any(abs(wrap(r[1]-mean))>5 for r in self.rows):
             raise ValueError('Cube/VN reference disagreement changes by more than 5 degrees; no north transferred')
-        self.reference=dict(offset_deg=wrap(mean),captured_monotonic=now,method='Cube compass north after confirmed Compass Learn')
+        return dict(offset_deg=wrap(mean),captured_monotonic=now,method='Cube compass north after confirmed Compass Learn')
+
+    def capture(self,now,params):
+        p=self.values(now,params)
+        if self.phase=='captured':
+            if self.reference is None or p['COMPASS_LEARN']!=0 or any(p[k]!=1 for k in YAW_PARAMS):
+                raise ValueError('Captured north source changed; inspect compass reference before restoration')
+        else:
+            self.reference=self.candidate(now,params)
         self.phase='restoring';self.reason='Restoring ExternalNav yaw; no mission permission until readback'
         return self.reference,dict({k:6 for k in YAW_PARAMS},COMPASS_LEARN=0)
 
     def cancel(self,now=None,params=None):
-        if self.phase not in ('learning','restoring'):
+        if self.phase not in ('learning','captured','restoring'):
             p=self.values(now,params) if now is not None and params is not None else {}
             if not (p and p['COMPASS_LEARN'] in (0,3) and all(p[k] in (1,6) for k in YAW_PARAMS)
                     and (p['COMPASS_LEARN']==3 or any(p[k]==1 for k in YAW_PARAMS))):

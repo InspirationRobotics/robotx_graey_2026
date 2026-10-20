@@ -129,7 +129,7 @@ class CalibrationJobs:
         if body.get('confirmed') is not True:
             raise ValueError('Confirm that you read the instructions and maintained kill/disarm')
         learning=(self.sample('bridge').get('compass_north') or {}).get('phase')
-        if learning in ('learning','restoring') and action not in ('compass_capture','compass_cancel'):
+        if learning in ('learning','captured','restoring') and action not in ('compass_capture','compass_cancel'):
             raise ValueError('Capture or cancel active compass learning before calibration or preparation')
         if action in ('prepare','recover_dvl') and body.get('surface_confirmed') is not True:
             raise ValueError('Confirm floating stationary at the water surface before pressure calibration')

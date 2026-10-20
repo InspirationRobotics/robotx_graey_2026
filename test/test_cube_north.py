@@ -28,6 +28,8 @@ class CubeNorthTests(unittest.TestCase):
         n=CubeNorth();n.start(0,self.params());self.completed(n)
         for i in range(31):
             t=1+i*.1;n.observe(t,self.params(t,yaw=1),359+i*.1,29+i*.1,True)
+        self.assertEqual(n.phase,'captured')
+        self.assertAlmostEqual(n.reference['offset_deg'],-30)
         reference,changes=n.capture(4,self.params(4,yaw=1))
         self.assertAlmostEqual(reference['offset_deg'],-30)
         self.assertEqual(n.phase,'restoring')
