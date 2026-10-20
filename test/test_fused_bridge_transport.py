@@ -17,6 +17,13 @@ from robotx_graey_2026.api.navigation.cube_north import CubeNorth,COMPASS_PARAMS
 
 
 class TransportTests(unittest.TestCase):
+    def test_compass_setup_rechecks_disarmed_manual_before_pausing_or_writing(self):
+        self.b.compass_action.__func__.__globals__['require_compass_setup'].side_effect=ValueError('Disarm first')
+        result=self.b.compass_action('compass_start',NS())
+        self.assertFalse(result.success)
+        self.assertTrue(self.b.output_permitted)
+        self.b.link.send.assert_not_called()
+
     def test_passive_capture_while_armed_then_automatic_safe_restoration(self):
         from test_cube_north import CubeNorthTests
         fixture=CubeNorthTests();n=CubeNorth();n.start(0,fixture.params());fixture.completed(n)
@@ -50,14 +57,16 @@ class TransportTests(unittest.TestCase):
         names=[c.args[3].decode() for c in self.b.link.send.call_args_list if c.args[0]=='param_request_read_send']
         self.assertTrue(set(COMPASS_PARAMS).issubset(names))
 
-    def test_compass_workflow_is_maintenance_only_and_restores_external_yaw(self):
+    def test_compass_setup_pauses_output_without_full_maintenance_and_restoration_requires_it(self):
         self.b.cube_north=CubeNorth();self.b.land_north=LandNorth()
-        self.b.output_permitted=False;self.b.get_logger=Mock(return_value=Mock())
+        self.b.output_permitted=True;self.b.get_logger=Mock(return_value=Mock())
         self.b.compass_health=(10.,True);self.b.raw_gps_health=(10.,True)
         self.b.params={k:(10.,v) for k,v in PROFILE.items()}
         self.b.params.update({k:(10.,v) for k,v in dict(COMPASS_ENABLE=1,COMPASS_USE=1,COMPASS_DEV_ID=123,COMPASS_LEARN=0).items()})
         result=self.b.compass_action('compass_start',NS())
         self.assertTrue(result.success,result.message)
+        self.b.compass_action.__func__.__globals__['require_maintenance'].assert_not_called()
+        self.assertFalse(self.b.output_permitted)
         calls=self.b.link.send.call_args_list
         self.assertEqual({c.args[3] for c in calls},{k.encode() for k in (*YAW_PARAMS,'COMPASS_LEARN')})
         self.b.link.command.assert_not_called();self.b.link.set_mode.assert_not_called()
@@ -131,7 +140,7 @@ class TransportTests(unittest.TestCase):
         self.clock = NS(now=10.)
         ns = dict(SteadyNode=object, math=math, json=json, String=NS, PROFILE=PROFILE,
                   yaw=yaw, time=NS(monotonic=lambda: self.clock.now),
-                  statistics=statistics, BridgeEstimator=BridgeEstimator, require_maintenance=Mock(), AutomaticRecovery=AutomaticRecovery, COMPASS_PARAMS=COMPASS_PARAMS)
+                  statistics=statistics, BridgeEstimator=BridgeEstimator, require_maintenance=Mock(), require_compass_setup=Mock(), AutomaticRecovery=AutomaticRecovery, COMPASS_PARAMS=COMPASS_PARAMS)
         exec(compile(tree, str(path), 'exec'), ns)
         self.b = ns['FusedNavBridge'].__new__(ns['FusedNavBridge'])
         self.b.est = BridgeEstimator()

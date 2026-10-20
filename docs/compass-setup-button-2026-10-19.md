@@ -1,0 +1,9 @@
+# Compass Learn setup repair — 2026-10-19
+
+The missing checkbox was only a visual fix. The setup button and GUI job, supervisor suspend service, and bridge still required full maintenance (kill/ESC-off), so setup remained unavailable.
+
+Compass setup now has a dedicated path: fresh online controller and vehicle, explicitly disarmed, MANUAL, no autonomous ownership or claimed mission. ESC-on and kill-released do not block this setup action. Supervisor permission is suspended and bridge output paused before compass-source writes; the bridge independently checks the state again. All unrelated calibration, pressure preparation, reboot and source-restoration maintenance gates remain. Passive north capture remains possible during armed MANUAL learning. The page shows the actual setup blocker beside the button.
+
+Live work through authorized tether: fresh killed/disarmed/ESC-off verified. First acquisition-enable attempt aborted on incomplete parameter readbacks with no write. Smaller read set plus fresh full-profile API verification succeeded: COMPASS_ENABLE 0 -> 1, then approved Cube reboot. Cube recovered in disarmed MANUAL, profile intact. Identified existing primary internal compass DEV_ID=PRIO1_ID=590114, EXTERNAL=0. Enabled COMPASS_USE 0 -> 1 for requested learning; USE2/USE3 remain 0 (M9N unused), all three yaw sources remain ExternalNav 6. Mounting orientations unchanged. Historical external compass orientation uncertainty was not resolved or accepted.
+
+Tests cover setup with ESC-on/kill-released, rejection when armed/wrong mode/stale/mission, unchanged full maintenance for calibration/restoration, pause before writes, GUI payload and explicit blocker text. Actual firmware learning convergence, magnetic accuracy and physical movement are not verified by these tests. Do not treat enabled compass or a clickable button as proof of accurate north.

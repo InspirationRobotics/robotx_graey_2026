@@ -1384,3 +1384,15 @@ button click sends confirmation; backend independently verifies maintenance stat
 Manual learning and passive north capture remain allowed armed. Both JS suitespass.
 StaticHTMLonly(no navigation/backendbehaviorchanges); canupdatewithoutservice
 restart/reference loss. Existingrealcompass/readbackprerequisitesunchanged.
+
+2026-10-19 checkbox GUI-only hotfix24fdbc1 deployed via tether,Jetson/GitHubmatch. Verified servedcalibrationHTML no compassConfirm checkbox; no service restart, parameters or propulsion changes. Backup /home/graey/deployment-backups/20261019-checkbox-201620. Actual initialsetupmaintenance and realcompassrequirements remain; passivelearning/capturearmedunchanged.
+
+2026-10-19 live compass setup repair: killed/disarmed/ESCoff verified over tether;
+COMPASS_ENABLE0->1 and approved Cube reboot, recovered fresh with ExternalNav profile
+intact. Existing internal primary DEV_ID=PRIO1_ID590114/EXTERNAL0 identified;
+COMPASS_USE0->1, USE2/USE3 remain0, yaw slots all6, no mounting changes. M9N unused.
+First enable attempt aborted incomplete readbacks before writes. Dedicated disarmed
+MANUAL/no-mission setup gate now replaces kill/ESCoff gate across GUI/job/supervisor/
+bridge; restoration and other maintenance unchanged. Deployment pending; firmware
+learning convergence and absolute heading accuracy not yet verified. See
+robotx_graey_2026/docs/compass-setup-button-2026-10-19.md.

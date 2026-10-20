@@ -5,7 +5,7 @@ import queue
 import threading
 import time
 import uuid
-from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason
+from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason, compass_setup_reason
 
 
 class ServiceQueue:
@@ -18,6 +18,7 @@ class ServiceQueue:
         self.clients = {}
         for name, path, kind in (
             ('suspend','/graey/navigation/suspend',Trigger),
+            ('compass_suspend','/graey/navigation/compass_suspend',Trigger),
             ('pause','/graey/navigation/pause_odometry',Trigger),
             ('prepare','/graey/navigation/prepare',SetBool),
             ('recover_dvl','/graey/navigation/recover_dvl',Trigger),
@@ -123,7 +124,7 @@ class CalibrationJobs:
                 if self.maneuver and self.job.get('auto_started'):
                     self.maneuver('abort',None)
             return self.snapshot()
-        reason = maintenance_reason(self.controller())
+        reason = (compass_setup_reason if action == 'compass_start' else maintenance_reason)(self.controller())
         if reason or self.mission_running():
             raise ValueError(reason or 'Stop the mission before calibration or preparation')
         if body.get('confirmed') is not True:
@@ -160,8 +161,8 @@ class CalibrationJobs:
 
     def run(self, action):
         try:
-            self.service('suspend')
-            if action != 'recover_dvl':
+            self.service('compass_suspend' if action == 'compass_start' else 'suspend')
+            if action not in ('recover_dvl','compass_start'):
                 self.service('pause')
             if self.snapshot().get('cancel'):
                 raise ValueError('Preparation cancelled; navigation remains suspended')

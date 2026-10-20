@@ -10,7 +10,7 @@ async function render(state){
  return {elements,posts,expire:()=>{now=5000;el('calConfirm').onchange()}};
 }
 (async()=>{
- const safe={online:true,vehicle_fresh:true,armed:false,sa_active:true,esc_commanded_on:false,mission_claimed:false,autonomous:false};
+ const safe={online:true,vehicle_fresh:true,armed:false,mode:'MANUAL',sa_active:true,esc_commanded_on:false,mission_claimed:false,autonomous:false};
  let page=await render({controller:safe,job:{phase:'idle',busy:false},navigation:{streams:{vn_calibration:{fresh:true,data:{phase:'idle',faces:[0,0,0,0,0,0]}}}}});
  let e=page.elements;assert(e.calibrate.disabled);assert(e.prepare.disabled);
  e.calConfirm.checked=true;e.calConfirm.onchange();assert(!e.calibrate.disabled);
@@ -34,6 +34,12 @@ async function render(state){
  page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'idle'}}}}}});
  e=page.elements;assert(!e.compassStart.disabled);assert(!html.includes('id="compassConfirm"'));
  await e.compassStart.onclick();assert.equal(page.posts[0].action,'compass_start');assert(page.posts[0].confirmed);assert(!page.posts[0].surface_confirmed);
+ const compassState={controller:{...safe,sa_active:false,esc_commanded_on:true},job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'idle'}}}}}};
+ page=await render(compassState);assert(!page.elements.compassStart.disabled);assert(page.elements.calibrate.disabled);
+ for(const change of [{armed:true},{mode:'GUIDED'},{vehicle_fresh:false},{mission_claimed:true}]){
+  page=await render({...compassState,controller:{...compassState.controller,...change}});
+  assert(page.elements.compassStart.disabled);assert(page.elements.compassStart.title.length>0);
+ }
  page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'ready'},land_north_reference:{offset_deg:10}}}}}});
  e=page.elements;e.healthConfirm.checked=true;e.healthConfirm.onchange();assert(!e.healthPrepare.disabled);
  await e.healthPrepare.onclick();assert.equal(page.posts[0].action,'prepare');assert.equal(page.posts[0].alignment_mode,'retained');assert(page.posts[0].surface_confirmed);

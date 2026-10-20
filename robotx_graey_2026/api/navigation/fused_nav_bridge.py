@@ -20,7 +20,7 @@ from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.pixhawk.mavlink import Link
 from .bridge_estimator import BridgeEstimator, yaw
 from .odometry_profile import PROFILE
-from .maintenance_safety import require_maintenance
+from .maintenance_safety import require_maintenance, require_compass_setup
 from .automatic_recovery import AutomaticRecovery
 from .land_north import LandNorth
 from .cube_north import CubeNorth, COMPASS_PARAMS
@@ -116,7 +116,10 @@ class FusedNavBridge(SteadyNode):
 
     def compass_action(self,name,response):
         try:
-            require_maintenance()
+            (require_compass_setup if name=='compass_start' else require_maintenance)()
+            if name=='compass_start':
+                self.output_permitted=False
+                self.est.fault='Navigation maintenance; Prepare required before reuse'
             if self.output_permitted:
                 raise ValueError('Pause navigation before compass reference maintenance')
             now=time.monotonic()

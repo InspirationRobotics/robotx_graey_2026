@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from robotx_graey_2026.api.gui.calibration_jobs import CalibrationJobs
-from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason
+from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason, compass_setup_reason
 from robotx_graey_2026.api.navigation.vn_calibration import VNCalibration
 
 
@@ -11,8 +11,24 @@ class CalibrationJobsTests(unittest.TestCase):
     def test_compass_actions_never_prepare_depth_or_commission(self):
         self.job.job=dict(busy=True,cancel=False)
         self.job.run('compass_start')
-        self.assertEqual(self.calls,[('suspend',None),('pause',None),('compass_start',None)])
+        self.assertEqual(self.calls,[('compass_suspend',None),('compass_start',None)])
         self.assertFalse(self.job.waypoint_permission)
+
+    def test_compass_setup_accepts_esc_on_but_rejects_armed_stale_modes_and_missions(self):
+        c=dict(self.c,mode='MANUAL',sa_active=False,esc_commanded_on=True)
+        self.assertEqual(compass_setup_reason(c),'')
+        self.assertTrue(maintenance_reason(c))
+        for change in ({'armed':True},{'mode':'GUIDED'},{'vehicle_fresh':False},
+                       {'online':False},{'mission_claimed':True},{'autonomous':True}):
+            self.assertTrue(compass_setup_reason(dict(c,**change)),change)
+        self.assertTrue(compass_setup_reason({}))
+        self.c.update(c)
+        with patch('robotx_graey_2026.api.gui.calibration_jobs.threading.Thread') as thread:
+            self.job.request(dict(action='compass_start',confirmed=True))
+            thread.assert_called_once()
+        self.job.job['busy']=False
+        with self.assertRaisesRegex(ValueError,'kill engaged'):
+            self.job.request(dict(action='calibrate',confirmed=True))
 
     def test_calibration_cannot_interrupt_active_compass_learning(self):
         self.put('bridge',dict(compass_north=dict(phase='learning')))
