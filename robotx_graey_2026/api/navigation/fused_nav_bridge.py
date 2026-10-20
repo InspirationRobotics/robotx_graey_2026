@@ -377,6 +377,8 @@ class FusedNavBridge(SteadyNode):
             self.est.gps.clock.reply(m.ts1, m.tc1, time.monotonic_ns())
         elif kind == 'PARAM_VALUE':
             self.params[m.param_id.rstrip('\x00')] = (now, m.param_value)
+            if hasattr(self,'cube_north'):
+                self.cube_north.parameter(now,m.param_id.rstrip('\x00'),m.param_value)
         elif kind=='SYS_STATUS':
             self.compass_health=(now,bool(m.onboard_control_sensors_present&4 and m.onboard_control_sensors_enabled&4 and m.onboard_control_sensors_health&4))
         elif kind=='ATTITUDE' and hasattr(self,'cube_north'):
@@ -447,7 +449,7 @@ class FusedNavBridge(SteadyNode):
             self.last_sent = now
         status.update(instance=self.instance, fusion_policy='bridge_odometry',
                       land_north_reference=self.land_north.current(now) if hasattr(self,'land_north') else None,
-                      compass_north=self.cube_north.status() if hasattr(self,'cube_north') else None,
+                      compass_north=self.cube_north.status(now) if hasattr(self,'cube_north') else None,
                       compass_parameters={k:dict(value=self.params[k][1],fresh=0<=now-self.params[k][0]<3) for k in COMPASS_PARAMS if k in self.params},
                       automatic_recovery=self.auto_recovery.status(now,self.control_state,self.control_received),
                       clock_mapping=dict(offset=self.est.gps.clock.offset,

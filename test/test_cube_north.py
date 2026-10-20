@@ -3,6 +3,48 @@ from robotx_graey_2026.api.navigation.cube_north import CubeNorth,COMPASS_PARAMS
 
 
 class CubeNorthTests(unittest.TestCase):
+    def test_immediate_completion_event_before_active_ack_is_retained_not_accepted_early(self):
+        n=CubeNorth();n.start(0,self.params())
+        n.message(.01,'CompassLearn: Finished')
+        self.assertIsNone(n.finished)
+        self.assertFalse(n.status()['learning_complete'])
+        n.parameter(.02,'COMPASS_LEARN',3)
+        self.assertEqual(n.finished,.01)
+        n.observe(.03,self.params(.03,1,3),90,30,True)
+        self.assertFalse(n.status()['learning_complete'])
+        self.assertEqual(n.stage,'confirming_completion')
+        for i in range(31):
+            t=.1+i*.1;n.observe(t,self.params(t,1,0),90,30,True)
+        self.assertTrue(n.status()['learning_complete'])
+        self.assertEqual(n.phase,'captured')
+
+    def test_fast_mode3_ack_needs_no_attitude_frame_during_learning(self):
+        n=CubeNorth();n.start(0,self.params())
+        n.parameter(.01,'COMPASS_LEARN',3)
+        n.message(.02,'CompassLearn: Finished')
+        n.observe(.1,self.params(.1,1,0),90,30,True)
+        self.assertTrue(n.status()['learning_complete'])
+        self.assertEqual(n.stage,'capturing_north')
+
+    def test_pending_message_and_old_modezero_without_active_ack_never_complete(self):
+        n=CubeNorth();n.start(0,self.params());n.message(.1,'CompassLearn: Finished')
+        for i in range(31):
+            t=.2+i*.1;n.observe(t,self.params(t,1,0),90,30,True)
+        self.assertIsNone(n.reference);self.assertIsNone(n.finished)
+        self.assertFalse(n.status()['learning_complete'])
+        n.parameter(4,'COMPASS_LEARN',3)
+        p=self.params(4,1,0);p['COMPASS_LEARN']=(0.,0)
+        n.observe(4,p,90,30,True)
+        self.assertIsNone(n.reference)
+
+    def test_running_reason_never_contains_a_fake_completion_event(self):
+        n=CubeNorth();n.start(0,self.params())
+        n.observe(.1,self.params(.1,1,3),90,30,True)
+        self.assertEqual(n.stage,'learning')
+        self.assertNotIn('CompassLearn: Finished',n.reason)
+        self.assertFalse(n.status()['finished_seen'])
+        self.assertAlmostEqual(n.status(5)['elapsed_s'],5.)
+
     def test_cancel_after_valid_capture_preserves_north_through_restoration(self):
         for already_restoring in (False,True):
             n=CubeNorth();n.start(0,self.params());self.completed(n)

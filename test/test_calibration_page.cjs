@@ -51,12 +51,23 @@ async function render(state){
  await e.healthPrepare.onclick();assert.equal(page.posts[0].action,'prepare');assert.equal(page.posts[0].alignment_mode,'retained');assert(page.posts[0].surface_confirmed);
  for(const [north,reference,reason] of [
   [{phase:'learning',finished_seen:false},null,'not confirmed'],
-  [{phase:'learning',finished_seen:true},null,'hold level'],
+  [{phase:'learning',finished_seen:true,learning_complete:true},null,'hold level'],
   [{phase:'restoring'}, {offset_deg:10},'readbacks'],
   [{phase:'cancelled'},null,'No validated north']]){
   page=await render({controller:safe,job:{busy:false},navigation:{streams:{bridge:{fresh:true,data:{compass_north:north,land_north_reference:reference}}}}});
   page.elements.healthConfirm.checked=true;page.elements.healthConfirm.onchange();
   assert(page.elements.healthPrepare.disabled);assert(page.elements.healthPrepareReason.textContent.includes(reason));
+ }
+ for(const [north,expected] of [
+  [{phase:'learning',active_readback_seen:true,finished_seen:false,learning_complete:false},'RUNNING — not complete'],
+  [{phase:'learning',active_readback_seen:true,finished_seen:true,learning_complete:false},'Completion reported; waiting for mode-0 readback'],
+  [{phase:'learning',active_readback_seen:true,finished_seen:true,learning_complete:true,paired_span_s:1},'1.0/2.0 s'],
+  [{phase:'ready',finished_seen:true,learning_complete:true,reference:{offset_deg:10}},'RESTORED — ready']]){
+  page=await render({controller:safe,job:{action:'compass_start',busy:false,message:'OLD SETUP MESSAGE'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{...north,reason:'LIVE REASON'}}}}}});
+  assert(page.elements.compassStatus.textContent.includes(expected),expected);
+  assert(!page.elements.compassStatus.textContent.includes('CompassLearn: Finished'));
+  assert(page.elements.status.textContent.includes('LIVE REASON'));
+  assert(!page.elements.status.textContent.includes('OLD SETUP MESSAGE'));
  }
  page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{}}});
  e=page.elements;e.trueHeading.value='90';e.headingConfirm.checked=true;e.headingConfirm.onchange();
