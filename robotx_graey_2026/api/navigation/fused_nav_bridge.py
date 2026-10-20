@@ -156,7 +156,7 @@ class FusedNavBridge(SteadyNode):
                 or now-getattr(self,'compass_restore_attempt',-math.inf)<1.):return
         c=self.control_state
         if not (self.control_received is not None and 0<=now-self.control_received<.7
-                and c.get('online') is True and c.get('vehicle_fresh') is True
+                and c.get('vehicle_fresh') is True
                 and isinstance(c.get('armed'),bool) and c.get('mode')=='MANUAL'
                 and c.get('mission_claimed') is False and c.get('autonomous') is False):return
         self.compass_restore_attempt=now

@@ -32,7 +32,8 @@ class TransportTests(unittest.TestCase):
         self.assertEqual(n.phase,'captured')
         self.b.cube_north=n;self.b.land_north=LandNorth();self.b.output_permitted=False
         self.b.params=fixture.params(4.,1)
-        self.b.control_state=dict(online=True,vehicle_fresh=True,armed=True,sa_active=False,esc_commanded_on=True,mode='GUIDED',mission_claimed=False,autonomous=False)
+        # Raw watchdog topic has no GUI-added `online` field; receipt age proves it.
+        self.b.control_state=dict(vehicle_fresh=True,armed=True,sa_active=False,esc_commanded_on=True,mode='GUIDED',mission_claimed=False,autonomous=False)
         self.b.control_received=4.
         self.b.finish_compass_reference(4.)
         self.assertEqual(n.phase,'captured');self.b.link.send.assert_not_called()
