@@ -24,6 +24,7 @@ class CubeNorth:
     def invalidate_vn(self):
         if self.phase=='ready':
             self.phase='expired';self.reference=None
+            self.stage='expired'
             self.reason='VN reference expired; establish an independent north reference again'
         if self.phase in ('learning','captured','restoring'):
             self.vn_invalidated=True;self.rows.clear();self.finished=None;self.reference=None;self.completion_message_at=None
@@ -65,6 +66,7 @@ class CubeNorth:
             if self.completion_message_at is not None:self.finished=self.completion_message_at
 
     def observe(self,now,params,cube_heading,vn_heading,good):
+        if self.phase not in ('learning','restoring'):return
         try:p=self.values(now,params)
         except ValueError:
             self.rows.clear();self.stage='waiting_readbacks'

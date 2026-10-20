@@ -3,6 +3,11 @@ from robotx_graey_2026.api.navigation.cube_north import CubeNorth,COMPASS_PARAMS
 
 
 class CubeNorthTests(unittest.TestCase):
+    def test_idle_status_does_not_latch_startup_readback_wait(self):
+        n=CubeNorth();n.observe(0,{},0,0,False)
+        self.assertEqual(n.stage,'idle')
+        self.assertEqual(n.reason,'Compass learning not started')
+
     def test_immediate_completion_event_before_active_ack_is_retained_not_accepted_early(self):
         n=CubeNorth();n.start(0,self.params())
         n.message(.01,'CompassLearn: Finished')
