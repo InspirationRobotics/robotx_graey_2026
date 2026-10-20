@@ -1437,3 +1437,13 @@ requiresmode0readbackaftereventbeforecapture.No fabricatedcompletion/minimumtime
 2026-10-19 statuslogicdeploya61692eVERIFIED:273onboardtestsPASS,servicesactive,
 newfields/HTMLverified,profileintact,backupcompass-status-210326.Currentnorthidle,
 noarm/learningstarted.Followupfixidleinitialreadbackstatuslatch,274testspass.
+noarm/learningstarted.Followupfixidleinitialreadbackstatuslatch,274testspass.
+
+2026-10-19 CONFIRMED compasslearnermismatch: exactfirmware30257f01
+AP_NavEKF3_Control runYawEstimatorPrediction/Correction return unless GPS POSXY
+and GPS VELXY enabled. Our ExternalNav6 horizontal sources prevent GSF updates;
+CompassLearn3 requires convergedGSF. GSF masks3 do not bypass. ArduSubdoesupdate
+likelyflyingwhenarmed. Waiting/drivingcannotfixconfiguration.Unit/syntheticmessage
+passeswerenotnativelearningconvergence. UseraskedtotemporarilypermitnativeGPSfor
+MANUALcalibrationonly vs preservebridge-onlypolicy;decisionpending.Noliveparams
+changed. See robotx_graey_2026/docs/compass-learning-profile-conflict-2026-10-19.md.
