@@ -230,6 +230,12 @@ class PipelineMission(MissionBase):
                                             # (Ruth, Oct 15: look everywhere); face still puts it there
         p('pool_band', '-0.3 0.4')          # m from the sonar; the pipe is about level with it.
                                             # 'off' = every height
+        p('floor_filter', '0.75 2.25')      # m ABOVE THE FLOOR LINE the sonar finds each sweep (floorline.py):
+                                            # only echoes standing out from their beam in this band make
+                                            # dots, in the scan and while following. Ruth: the comp pipe is
+                                            # ~1-2 m off the floor; the pool pipe needs '0.15 0.6'. 'off' =
+                                            # the old threshold + band + little dots. Its floor needs
+                                            # downward beams (> 12 deg down) in the sector
         p('pool_compact', True)             # little dots only: drops the pool wall (Ruth, Oct 14:
                                             # the tall columns 1.2-1.8 m left were the wall)
         p('pool_near_m', 0.0)               # no crumbs closer than this, m (0 = the blind zone
@@ -412,6 +418,10 @@ class PipelineMission(MissionBase):
         self.s_leg = None                   # survey: 'to buoy', then 'survey'
         self.side = 1.0 if g('pool_side').strip().lower() == 'right' else -1.0
         self.pool_pick_any = bool(g('pool_pick_any'))
+        ff = g('floor_filter').strip().lower()
+        self.floor_filter = None if ff in ('', 'off', 'none') else tuple(float(v) for v in ff.split()[:2])
+        if self.floor_filter is not None and not 0 <= self.floor_filter[0] < self.floor_filter[1] <= 10:
+            raise ValueError(f"floor_filter must be 'lo hi' m above the floor (0-10) or off, not {ff!r}")
         band = g('pool_band').strip().lower()
         self.pool_band = 'off' if band in ('', 'off', 'none') else band
         self.pool_compact = bool(g('pool_compact'))
@@ -562,6 +572,7 @@ class PipelineMission(MissionBase):
             if pool:        # keep every crumb of the turn: with fade on the turn wiped 97% of them (sim)
                 self.map_post('/fade', 'off')
             self.map_post('/band', self.pool_band if pool else 'off')
+            self.post_floor_filter()
             for cmd in ('reset', 'start', 'resume'):    # whatever state it was in
                 self.map_post('/mapcmd', cmd)
             if self.record_scan:
@@ -1121,6 +1132,10 @@ class PipelineMission(MissionBase):
             self.look_view('follow start')
             self.to_phase('follow start')
 
+    def post_floor_filter(self):
+        ff = self.floor_filter
+        self.map_post('/floorband', f'{ff[0]} {ff[1]}' if ff else 'off')
+
     def look_view(self, what):
         """The map's follow settings (straight down, the band from the floor), then a reset
         so the map holds only what this look sees; f_hold = where to hold meanwhile."""
@@ -1135,13 +1150,16 @@ class PipelineMission(MissionBase):
         band = self.follow_band_now()
         self.map_post('/band', f'{band[0]} {band[1]}' if band else 'off')
         self.f_band, self.f_band_t = band, self.now()
+        self.post_floor_filter()
         for cmd in ('reset', 'start', 'resume'):
             self.map_post('/mapcmd', cmd)
         if self.recording:
             try:
                 where = 'from the sonar' if self.follow_band_from == 'sonar' else 'above the floor'
-                self.map_post('/mark', f'{what}: sonar straight down, band '
-                              + (f'{self.follow_band[0]} to {self.follow_band[1]} m {where}' if band else 'off (no DVL)'))
+                ff = self.floor_filter
+                self.map_post('/mark', f'{what}: sonar straight down, ' + (
+                    f'floor filter {ff[0]} to {ff[1]} m above the floor line' if ff else 'band '
+                    + (f'{self.follow_band[0]} to {self.follow_band[1]} m {where}' if band else 'off (no DVL)')))
             except OSError:
                 pass
         if band is None:

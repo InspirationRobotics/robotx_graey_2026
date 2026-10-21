@@ -104,6 +104,8 @@ def main():
     webview.set_compact(bool(first.get("compact", False)))            # not saved before Oct 11
     webview.set_near(float(first.get("near_m", 0.0)))                  # not saved before Oct 14
     webview.set_far(float(first.get("far_m", 0.0)))                    # not saved before Oct 15
+    saved = first.get("floor_band_m")                                   # not saved before Oct 20
+    webview.set_floor_band(tuple(saved) if saved is not None and np.isfinite(saved).all() else None)
     print(f"[INFO] replay: http://localhost:{args.port}/map")
 
     play = {"state": "running", "done": False}
@@ -122,7 +124,8 @@ def main():
         return (webview.threshold() != cmap.threshold or webview.floor_cut() != cmap.floor_cut_m
                 or webview.fade() != cmap.fade
                 or webview.band() != cmap.band or webview.compact() != cmap.compact
-                or webview.near() != cmap.near_m or webview.far() != cmap.far_m)
+                or webview.near() != cmap.near_m or webview.far() != cmap.far_m
+                or webview.floor_band() != cmap.floor_band)
 
     outliner = Outliner()
     radar, last_radar = Radar(), [-1e9]
@@ -171,6 +174,7 @@ def main():
         cmap = CrumbMap(threshold=webview.threshold(), max_turn_dps=args.max_turn,
                         floor_cut_m=webview.floor_cut(), fade=webview.fade(),
                         band=webview.band(), compact=webview.compact(), near_m=webview.near(), far_m=webview.far(),
+                        floor_band=webview.floor_band(),
                         sonar_fwd_m=float(first["sonar_fwd_m"]),
                         sonar_right_m=float(first["sonar_right_m"]))
         track, recent, here = [], [], None
