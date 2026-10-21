@@ -11,7 +11,7 @@ from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.gui.navigation_view import NavigationView
 from robotx_graey_2026.api.navigation.waypoint_logic import WaypointRun
 from robotx_graey_2026.api.navigation.surface_measurement import SurfaceMeasurement
-from robotx_graey_2026.api.navigation.surface_control import surface_velocity
+from robotx_graey_2026.api.navigation.surface_control import surface_velocity,SurfaceLeg
 from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL
 
 
@@ -50,6 +50,7 @@ class WaypointMission(Node):
         self.last_pause = False
         self.last_trace = -math.inf
         self.sent_target = None
+        self.surface_leg=SurfaceLeg()
         self.surface_measurement=(SurfaceMeasurement(duration=5.,tolerated_gps_gap=4.,tolerated_sensor_gap=1.5)
                                   if self.logic.plan['mode']=='surface' else SurfaceMeasurement())
         self.surface_measurement_status={}
@@ -219,9 +220,15 @@ class WaypointMission(Node):
             if action == 'target':
                 self.sent_target=payload
                 if self.logic.plan['mode']=='surface':
-                    v=surface_velocity(payload,o['local'],o['velocity_ned'],o['depth'])
-                    self.link.surface_velocity(*v,payload[3])
+                    if self.logic.stage=='TRANSIT' and self.logic.navigation_wait_since is None:
+                        v,heading=self.surface_leg.step(now,self.logic.start,self.logic.target,
+                            o['local'],o['velocity_ned'],o['depth'],o['yaw'])
+                    else:
+                        v=surface_velocity(payload,o['local'],o['velocity_ned'],o['depth'])
+                        heading=payload[3]
+                    self.link.surface_velocity(*v,heading)
                     self.sent_surface_velocity=v
+                    self.sent_surface_heading=heading
                 else:
                     self.link.goto_ned(*payload)
             elif action in ('guided', 'manual'):
@@ -255,6 +262,9 @@ class WaypointMission(Node):
             self.get_logger().warning('MISSION_NAVIGATION_PAUSE '+json.dumps(dict(
                 run_id=self.logic.run_id,published_monotonic=now,**status['navigation_pause'])))
         status.update(simulation=self.sim, published_monotonic=now,
+                      surface_leg=self.surface_leg.state,
+                      last_sent_surface_heading_rad=getattr(self,'sent_surface_heading',None),
+                      bridge_course_heading=self.bridge.get('course_heading'),
                       surface_measurement=self.surface_measurement_status,
                       vertical_limits_verified=o['vertical_limits_verified'],
                       telemetry_fresh=bool(o['fresh']), confirmed_source=self.supervisor.get('confirmed_source'))
@@ -272,6 +282,9 @@ class WaypointMission(Node):
                 plan=self.logic.plan,target_ned=self.logic.target,
                 last_sent_target_ned_yaw=self.sent_target,
                 last_sent_surface_velocity_ned=getattr(self,'sent_surface_velocity',None),
+                surface_leg=self.surface_leg.state,
+                last_sent_surface_heading_rad=getattr(self,'sent_surface_heading',None),
+                bridge_course_heading=self.bridge.get('course_heading'),
                 start_ned=self.logic.start,cube_ned=o.get('local'),
                 cube_yaw_rad=o.get('yaw'),pressure_depth_m=o.get('depth'),
                 bridge_ned=self.bridge.get('position_ned'),

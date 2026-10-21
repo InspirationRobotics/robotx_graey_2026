@@ -108,7 +108,26 @@ sleep 2
 cd "$ROOT"
 colcon build --symlink-install --packages-select robotx_graey_2026
 source install/setup.bash
-ros2 launch robotx_graey_2026 sitl.launch.py \
+# Windows-mounted colcon build trees can retain old copied modules even with
+# --symlink-install. Test the exact working source, not that stale build cache.
+export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPYCACHEPREFIX="$RUN_DIR/pycache"
+python3 - "$ROOT" <<'PY'
+from pathlib import Path
+import inspect,sys,shutil
+from ament_index_python.packages import get_package_share_directory
+from robotx_graey_2026.api.navigation import waypoint_mission,fused_nav_bridge
+root=Path(sys.argv[1]).resolve()
+for module in (waypoint_mission,fused_nav_bridge):
+    assert Path(inspect.getsourcefile(module)).resolve().is_relative_to(root/'robotx_graey_2026')
+share=Path(get_package_share_directory('robotx_graey_2026'))/'tools'
+for source in (root/'tools').glob('*.html'):
+    target=share/source.name
+    if source.resolve()!=target.resolve() and (not target.exists() or source.read_bytes()!=target.read_bytes()):
+        shutil.copyfile(source,target)
+print('SITL runtime source and GUI assets verified',flush=True)
+PY
+ros2 launch "$ROOT/launch/sitl.launch.py" \
   interactive_waypoint:="${WAYPOINT_INTERACTIVE:-false}" \
   continuous_fusion:="true" \
   auto_north_alignment:="${AUTO_NORTH_ALIGNMENT:-false}" \

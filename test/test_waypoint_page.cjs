@@ -56,6 +56,11 @@ async function render(data,options={}){
     gps:{fresh:true,age:.2,data:{valid:true,lat:32.9,lon:-117}}
   }}};
   e=await render(telemetry);assert.equal(e.headingDifference.textContent,'-2.0°');assert.match(e.alignedHeading.textContent,/1.0° · transmitting/);
+  e=await render({...telemetry,navigation:{...telemetry.navigation,streams:{...telemetry.navigation.streams,
+    bridge:{fresh:true,age:.1,data:{...telemetry.navigation.streams.bridge.data,course_heading:{reason:'Collecting trusted motion',method:null}}},
+    waypoint:{fresh:true,data:{stage:'TRANSIT',surface_leg:{stage:'aligning',reason:'Turning toward waypoint',cross_track_m:.12}}}}}});
+  assert.match(e.surfaceGuidance.textContent,/aligning.*Turning toward waypoint.*0.12 m/);
+  assert.match(e.courseHeading.textContent,/Collecting trusted motion.*2.0°/);
   assert.match(e.depthSource.textContent,/SCALED_PRESSURE3 · 0.40 m/);
   assert.match(e.rawGPSStatus.textContent,/NOT AIDING/);
   e=await render({...telemetry,navigation:{...telemetry.navigation,streams:{...telemetry.navigation.streams,

@@ -1,11 +1,30 @@
 import math
 import unittest
 from unittest.mock import Mock
-from robotx_graey_2026.api.navigation.surface_control import surface_velocity
+from robotx_graey_2026.api.navigation.surface_control import surface_velocity,SurfaceLeg
 from robotx_graey_2026.api.pixhawk.mavlink import Link
 
 
 class SurfaceControlTests(unittest.TestCase):
+    def test_turn_before_travel_and_heading_setpoint_rate_limited(self):
+        c=SurfaceLeg();last=0.
+        for i in range(20):
+            v,heading=c.step(i*.1,(0,0),(0,5),(0,0),(0,0),0.,0.)
+            self.assertEqual(v,(0.,0.,0.))
+            self.assertLessEqual(abs(heading-last),math.radians(1.50001));last=heading
+        self.assertEqual(c.state['stage'],'aligning')
+        for i in range(20,32):
+            v,heading=c.step(i*.1,(0,0),(0,5),(0,0),(0,0),0.,math.pi/2)
+        self.assertGreater(v[1],0);self.assertAlmostEqual(v[0],0.)
+
+    def test_cross_track_feedback_returns_to_original_line(self):
+        c=SurfaceLeg()
+        for i in range(12):v,h=c.step(i*.1,(0,0),(5,0),(1,.2),(0,0),0.,0.)
+        self.assertGreater(v[0],0);self.assertLess(v[1],0)
+        self.assertLessEqual(math.hypot(*v[:2]),.200001)
+        self.assertEqual(v[2],0.)
+        v,h=c.step(1.2,(0,0),(5,0),(1,.2),(0,0),0.,math.pi)
+        self.assertEqual(c.state['stage'],'aligning');self.assertEqual(v[:2],(0.,0.))
     def test_surface_deadband_never_requests_continuous_ascent_or_descent(self):
         for depth in (-.1,0.,.03,.08,.2,1.):
             n,e,d=surface_velocity((10.,-10.,0.),(0.,0.,0.),(0.,0.,0.),depth)
@@ -13,6 +32,31 @@ class SurfaceControlTests(unittest.TestCase):
             self.assertTrue(-.05<=d<=0.)
             if depth<=.03:self.assertEqual(d,0.)
             else:self.assertLess(d,0.)
+
+    def test_overshoot_returns_to_endpoint_instead_of_stalling_beyond_it(self):
+        c=SurfaceLeg()
+        for i in range(12):
+            v,h=c.step(i*.1,(0,0),(5,0),(6,0),(0,0),0.,math.pi)
+        self.assertLess(v[0],0.)
+        self.assertAlmostEqual(v[1],0.)
+
+    def test_closed_loop_legs_converge_with_turns_cross_current_and_overshoot(self):
+        for target,position,yaw in (((4,2),[0.,0.],math.pi),
+                                    ((-3,1),[0.,0.],0.),((4,0),[5.,0.],math.pi)):
+            c=SurfaceLeg();velocity=[0.,0.];aligned=False
+            for i in range(1600):
+                v,heading=c.step(i*.1,(0,0),target,position,velocity,0.,yaw)
+                error=(heading-yaw+math.pi)%(2*math.pi)-math.pi
+                yaw+=max(-.03,min(.03,error))
+                for axis in (0,1):
+                    velocity[axis]+=.25*(v[axis]-velocity[axis])
+                    position[axis]+=.1*velocity[axis]+(0. if axis==0 else .001)
+                if c.state['stage']=='tracking':aligned=True
+                self.assertLessEqual(math.hypot(*v[:2]),.200001)
+                self.assertLessEqual(v[2],0.)
+                if math.dist(position,target)<.1:break
+            self.assertTrue(aligned)
+            self.assertLess(math.dist(position,target),.1)
 
     def test_depth_correction_is_continuous_bounded_and_independent_of_horizontal_target(self):
         previous=0.

@@ -1447,3 +1447,24 @@ likelyflyingwhenarmed. Waiting/drivingcannotfixconfiguration.Unit/syntheticmessa
 passeswerenotnativelearningconvergence. UseraskedtotemporarilypermitnativeGPSfor
 MANUALcalibrationonly vs preservebridge-onlypolicy;decisionpending.Noliveparams
 changed. See robotx_graey_2026/docs/compass-learning-profile-conflict-2026-10-19.md.
+
+2026-10-20 LOCAL waypoint implementation authorized after polling-only scope.
+Parameter readback starvation fixed with deduplicated <=16-name rotating batches;
+native unarmed isolated SITL refreshed all24 navigation/all28 combined fields,
+maxage2.001s. No vehicle access/writes. See docs/parameter-polling-2026-10-20.md.
+Surface waypoint now turns toward target then tracks frozen start-to-target NE
+line with position/velocity feedback; speedcap0.20m/s, yaw slew15deg/s, 0.7s
+alignment dwell, endpoint overshoot return. Bridge CourseHeading uses only
+admitted time-aligned surface GPS versus measured DVL/VN motion, including
+lateral/reverse; bounded0.5deg corrections>=3s apart, uncertainty/turn/gap gates.
+No commanded bearing used as sensor evidence; initial validated north still
+required. Existing 10s/3m GPS-loss bound, pressure-depth abort, hardware/control
+failsafes retained. GUI/trace expose guidance and heading correction reasons.
+289 Python tests+both GUI suites pass. Current-source ROS/GUI/native SITL mission
+waypoint-2cd1f939ca completed with2s GPS outage, error0.104m; no heading learning
+on that short leg. waypoint-f2879e1a3a confirms MANUAL after12s GPS outage.
+Earlier waypoint-d6007e830d aborted on surface depth0.09m; guard NOT relaxed.
+SITL source/cache verification added after discovering stale build imports.
+Temporary native-GPS compass calibration was approved by user historically but
+implementation remains checkpointed separately, not included in waypoint work.
+No deployment or main changes. See docs/waypoint-heading-loop-2026-10-20.md.

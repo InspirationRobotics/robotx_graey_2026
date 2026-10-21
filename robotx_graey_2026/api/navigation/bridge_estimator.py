@@ -8,6 +8,7 @@ from collections import deque
 import math
 from .gps_admission import GPSAdmission
 from .north_alignment import NorthAlignment
+from .course_heading import CourseHeading
 
 
 def wrap(deg):
@@ -52,6 +53,7 @@ class BridgeEstimator:
         self.raw_velocity = (0., 0., 0.)
         self.velocity_bias = [0., 0., 0.]
         self.heading_bias = 0.
+        self.course_heading=CourseHeading()
         self.heading_continuity_lost = False
         self.stationary_since = None
         self.stationary_anchor = None
@@ -154,6 +156,7 @@ class BridgeEstimator:
         self.motion_valid = bool(valid)
         self.motion_at = now
         if not valid:
+            self.course_heading.motion(now,(0.,0.,0.),self.rates,False)
             self.pending_gps = None
             self.history.clear()
             self.dvl_recovery_count = 0
@@ -198,9 +201,14 @@ class BridgeEstimator:
         self.propagated_at = now
         if self.dvl_gap_start is None or self.fault:
             self.coast_world = rotate(self.orientation(), self.velocity())
+            self.course_heading.motion(now,self.coast_world,self.rates,
+                self.fresh(self.imu_at,now) and self.dvl_gap_start is None and not self.fault)
             self.history.append(dict(t=now, position=tuple(self.position), q=self.orientation(),
-                                     raw_velocity=self.raw_velocity, rates=self.rates))
+                                     raw_velocity=self.raw_velocity, rates=self.rates,
+                                     course_motion_ne=tuple(self.course_heading.motion_ne),
+                                     course_distance_m=self.course_heading.distance))
         else:
+            self.course_heading.reset_window('DVL prediction cannot correct north alignment')
             self.history.clear()  # Predicted velocity cannot validate GPS/north.
         if self.pending_gps is not None:
             received, fix = self.pending_gps
@@ -214,6 +222,7 @@ class BridgeEstimator:
 
     def start_dvl_gap(self):
         if self.initialized and self.dvl_gap_start is None:
+            self.course_heading.reset_window('DVL continuity interrupted; retain last trusted north offset')
             self.dvl_gap_start = self.dvl_good_at
             self.dvl_dropouts += 1
             self.dvl_recovery_count = 0
@@ -288,6 +297,7 @@ class BridgeEstimator:
         self.velocity_bias = [0., 0., 0.]
         self.history.clear()
         self.pending_gps = self.last_fix = self.last_correction = None
+        self.course_heading.reset_window('DVL position revalidation; retain north correction, collect new motion evidence')
         self.heading_since, self.heading_count = None, 0
         self.dvl_gap_start, self.dvl_recovery_count = None, 0
         self.propagated_at = now
@@ -364,6 +374,7 @@ class BridgeEstimator:
                           age_upper_s=self.gps.age_bound, depth_m=self.depth)
         if not good:
             if not duplicate:
+                self.course_heading.reset_window('GPS rejected or unqualified; retain last trusted north offset')
                 self.pending_gps = None
             if self.north_alignment and not self.heading_validated and not duplicate:
                 self.north_alignment.reject(self.gps.reason)
@@ -422,6 +433,7 @@ class BridgeEstimator:
             if magnitude > limit:
                 return self.reject('GPS disagrees with propagated position; no reset applied')
             if self.stationary_anchor is not None:
+                self.course_heading.reset_window('Stationary DVL hold; GPS cannot change heading')
                 self.last_fix = dict(fix)
                 self.last_stationary_fix_at = now
                 self.event.update(decision='withheld', reason='DVL stationary hold; GPS position correction withheld')
@@ -446,6 +458,7 @@ class BridgeEstimator:
         return True
 
     def reject(self, reason):
+        self.course_heading.reset_window(reason)
         self.gps.quality.anchors = self._previous_anchors
         self.gps.invalidate(reason)
         self.heading_since, self.heading_count = None, 0
@@ -453,36 +466,13 @@ class BridgeEstimator:
         return False
 
     def correct_motion(self, now, fix, sample):
-        speed, course, accuracy = (fix.get(k) for k in ('speed_mps', 'course_deg', 'speed_accuracy_mps'))
-        if (not self.heading_validated or any(v is None or not math.isfinite(v) for v in (speed, course, accuracy))
-                or not 0 <= course < 360 or speed < .5 or not 0 < accuracy <= .2
-                or math.degrees(math.atan2(accuracy, speed)) > 10):
-            self.heading_since, self.heading_count = None, 0
+        if not self.heading_validated or not self.gps_eligible(now) or self.fault or self.dvl_gap_start is not None:
+            self.course_heading.reset_window('Surface GPS and continuous measured DVL/VN required')
             return
-        body = sample['raw_velocity']
-        if (body[0] < .5 or abs(body[1]) > body[0]*math.tan(math.radians(10))
-                or abs(body[2]) > .15 or abs(math.degrees(sample['rates'][2])) > 5
-                or abs(math.hypot(*body[:2])-speed) > max(.2, 3*accuracy)):
-            self.heading_since, self.heading_count = None, 0
-            return
-        error = wrap(course-yaw(sample['q']))
-        if abs(error) > 15:
-            self.heading_since, self.heading_count = None, 0
-            return
-        self.heading_since = now if self.heading_since is None else self.heading_since
-        self.heading_count += 1
-        if now-self.heading_since < 3 or self.heading_count < 5:
-            return
-        self.heading_bias = max(-15., min(15., self.heading_bias+max(-.5, min(.5, .1*error))))
-        gps_world = (speed*math.cos(math.radians(course)), speed*math.sin(math.radians(course)), 0.)
-        expected = rotate(sample['q'], gps_world, inverse=True)
-        # Do not learn a lateral DVL bias from yaw error while correcting yaw.
-        if abs(error) > 3:
-            return
-        for i in (0,):
-            innovation = expected[i]-body[i]-self.velocity_bias[i]
-            if abs(innovation) <= .5:
-                self.velocity_bias[i] = max(-.15, min(.15, self.velocity_bias[i]+.05*innovation))
+        step=self.course_heading.observe(now,fix,sample,rotate(sample['q'],sample['raw_velocity']))
+        self.heading_bias=max(-30.,min(30.,self.heading_bias+step))
+        # Do not simultaneously fit DVL velocity bias from the same evidence:
+        # yaw error and lateral velocity bias are otherwise confounded.
 
     def status(self, now):
         if self.initialized and self.dvl_good_at is not None and now-self.dvl_good_at > .25:
@@ -492,6 +482,7 @@ class BridgeEstimator:
                 or not self.fresh(self.imu_at,now) or not self.fresh(self.depth_at,now) or self.fault):
             self.stationary_since = self.stationary_anchor = None
         if not self.gps_eligible(now):
+            self.course_heading.reset_window('Submerged or pressure eligibility lost; retain north offset')
             self.gps.invalidate('Pressure surface eligibility unavailable')
             self.heading_since, self.heading_count = None, 0
         if self.initialized and not self.fresh(self.imu_at, now):
@@ -529,6 +520,7 @@ class BridgeEstimator:
                     position_ned=list(self.position), distance_travelled_m=self.distance_travelled,
                     position_sigma_m=math.sqrt(self.horizontal_variance),
                     heading_bias_deg=self.heading_bias, velocity_bias_mps=list(self.velocity_bias),
+                    course_heading=self.course_heading.status(),
                     heading_reference_validated=self.heading_validated,
                     heading_continuity_lost=self.heading_continuity_lost,
                     stationary_hold=dict(active=self.stationary_anchor is not None,

@@ -226,22 +226,24 @@ class EstimatorTests(unittest.TestCase):
         self.assertTrue(self.e.initialized)
         self.assertAlmostEqual(self.e.position[0],3.,places=2)
 
-    def test_heading_and_velocity_updates_need_sustained_forward_motion(self):
+    def test_heading_updates_need_qualified_surface_motion_and_do_not_fit_velocity_bias(self):
         # Exercise the motion update independently of the geographic trajectory.
         e = self.e
         sample = dict(q=yaw_rotate((1., 0., 0., 0.), 10.),
                       raw_velocity=(1., 0., 0.), rates=(0., 0., 0.))
         fix = dict(speed_mps=1.1, course_deg=0., speed_accuracy_mps=.05)
         for i in range(14):
+            e.pressure_depth(i*.2,0.)
             e.correct_motion(i*.2, fix, sample)
         self.assertEqual(e.heading_bias, 0.)
         for i in range(14, 30):
+            e.pressure_depth(i*.2,0.)
             e.correct_motion(i*.2, fix, sample)
         self.assertLess(e.heading_bias, 0.)
         self.assertEqual(e.velocity_bias[1], 0.)
         sample['q'] = (1., 0., 0., 0.)
         e.correct_motion(6., fix, sample)
-        self.assertGreater(e.velocity_bias[0], 0.)
+        self.assertEqual(e.velocity_bias[0], 0.)
 
     def test_reference_accepts_explicit_cube_timestamp(self):
         self.acquire()
