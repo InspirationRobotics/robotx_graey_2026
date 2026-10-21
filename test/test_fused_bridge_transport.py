@@ -52,9 +52,11 @@ class TransportTests(unittest.TestCase):
 
     def test_compass_parameter_polling_does_not_add_load_to_normal_navigation(self):
         self.b.sync_clock=Mock();self.b.request()
+        self.assertLessEqual(sum(c.args[0]=='param_request_read_send' for c in self.b.link.send.call_args_list),16)
+        self.b.request()
         names=[c.args[3].decode() for c in self.b.link.send.call_args_list if c.args[0]=='param_request_read_send']
         self.assertEqual(names,list(PROFILE))
-        self.b.link.send.reset_mock();self.b.output_permitted=False;self.b.request()
+        self.b.link.send.reset_mock();self.b.output_permitted=False;self.b.request();self.b.request()
         names=[c.args[3].decode() for c in self.b.link.send.call_args_list if c.args[0]=='param_request_read_send']
         self.assertTrue(set(COMPASS_PARAMS).issubset(names))
 

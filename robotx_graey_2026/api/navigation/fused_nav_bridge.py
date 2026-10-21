@@ -348,12 +348,19 @@ class FusedNavBridge(SteadyNode):
         pressure_id={'SCALED_PRESSURE':29,'SCALED_PRESSURE2':137,'SCALED_PRESSURE3':143}[self.settings.get('pressure_message','SCALED_PRESSURE3')]
         for mid in (24,pressure_id,49):
             self.link.command(511, mid, 100000)
-        for name in PROFILE:
-            self.link.send('param_request_read_send', 1, 1, name.encode(), -1)
+        names=list(PROFILE)
         if (not self.output_permitted or (hasattr(self,'cube_north') and self.cube_north.phase in ('learning','captured','restoring'))):
             for mid in (1,30):self.link.command(511,mid,100000)
-            for name in COMPASS_PARAMS:
-                if name not in PROFILE:self.link.send('param_request_read_send',1,1,name.encode(),-1)
+            names=list(dict.fromkeys((*names,*COMPASS_PARAMS)))
+        # Cube's bounded reply queue can starve the tail of a repeated burst.
+        # Both current schemas fit into two one-second batches, within the
+        # existing three-second readback gate. Keep navigation fields in both.
+        if getattr(self,'parameter_schema',None)!=tuple(names):
+            self.parameter_schema=tuple(names);self.parameter_cursor=0
+        first=self.parameter_cursor;last=min(first+16,len(names))
+        for name in names[first:last]:
+            self.link.send('param_request_read_send',1,1,name.encode(),-1)
+        self.parameter_cursor=0 if last==len(names) else last
 
     def sync_clock(self):
         now=time.monotonic_ns()
