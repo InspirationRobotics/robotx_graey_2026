@@ -1481,3 +1481,18 @@ No vehicle parameter writes or arm/mission commands. Postrestart source RF,
 kill engaged, disarmed, ESCoff. NOT mission ready: EK3_SRC1_POSZ actual1 vs expected6,
 output disabled, depth baseline absent and north unaligned. Do not transfer August
 -60 offset blindly. Restore/verify intended profile and prepare before water test.
+
+2026-10-21 Compass Learn idle/flicker repair b9757e0 DEPLOYED over tether.
+Actual failure COMPASS_USE0; GUI overwrote failed job with idle bridge status.
+Failure now persists in operation+compass panels. Completed approved temporary
+native GPS/barometer/compass calibration profile; full ExternalNav restoration
+and readback required before Prepare. No arm/disarm/mode/propulsion commands.
+293 local/onboard tests+both GUI suites pass; native compass-learning-20261021-213810
+actual Finished/capture/fullrestore pass,13.83 wallsec (not physical duration claim).
+Backup /home/graey/deployment-backups/20261021-compass-repair-212419.
+Safely repaired verified primary590114 COMPASS_USE0->1 and EK3_SRC1_POSZ1->6;
+other compasses remain off,yaw6/6/6,GSF_RUN_MASK3. Before-state saved onboard
+/root/robotx_ws/logs/compass-repair-before-20261021.json. Postdeployment profile
+verified, fresh GPS25sat/fix4/accuracy1.121m; pure learner start preconditions pass.
+No live learning started; operator start required. Killed/disarmed/ESCoff MANUAL
+at verification, odometry withheld pending north/depth Prepare. See docs/compass-learn-repair-2026-10-21.md.
