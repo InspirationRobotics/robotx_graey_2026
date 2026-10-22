@@ -3,6 +3,7 @@ import math
 from collections import deque
 from .bridge_estimator import wrap
 from .odometry_profile import PROFILE
+from .compass_gps_quality import CompassGPSQuality
 
 YAW_PARAMS=tuple(f'EK3_SRC{i}_YAW' for i in (1,2,3))
 CALIBRATION_PROFILE=dict(PROFILE)
@@ -11,7 +12,7 @@ for slot in (1,2,3):
                                 f'EK3_SRC{slot}_POSZ':1,f'EK3_SRC{slot}_YAW':1})
 CALIBRATION_CHANGES={k:v for k,v in CALIBRATION_PROFILE.items() if PROFILE[k]!=v}
 RESTORE_PROFILE=dict(PROFILE,COMPASS_LEARN=0)
-COMPASS_PARAMS=tuple(dict.fromkeys((*PROFILE,'COMPASS_ENABLE','COMPASS_USE','COMPASS_DEV_ID','COMPASS_LEARN','EK3_GSF_RUN_MASK')))
+COMPASS_PARAMS=tuple(dict.fromkeys((*PROFILE,'COMPASS_ENABLE','COMPASS_USE','COMPASS_DEV_ID','COMPASS_LEARN','EK3_GSF_RUN_MASK','EK3_GSF_USE_MASK','EK3_IMU_MASK')))
 
 
 class CubeNorth:
@@ -30,6 +31,21 @@ class CubeNorth:
         self.profile_mismatches={}
         self.original_profile=None
         self.fault=''
+        self.gps_quality=CompassGPSQuality()
+        self.lane=None
+
+    def gps(self,now,fix):
+        if self.phase not in ('learning','captured'):return
+        self.gps_quality.observe(now,fix)
+        self.check_gps(now)
+
+    def check_gps(self,now):
+        if self.phase not in ('learning','captured'):return
+        self.gps_quality.check(now)
+        if self.gps_quality.fault:
+            self.fault=self.fault or 'Learning rejected: '+self.gps_quality.fault
+            self.reference=None;self.rows.clear();self.finished=None
+            self.learning_complete=False;self.stage='gps_rejected';self.reason=self.fault
 
     def invalidate_vn(self):
         if self.phase=='ready':
@@ -44,7 +60,9 @@ class CubeNorth:
 
     @staticmethod
     def values(now,params):
-        if not all(k in params and 0<=now-params[k][0]<3 for k in COMPASS_PARAMS):
+        if not all(k in params and 0<=now-params[k][0]<3
+                   and isinstance(params[k][1],(int,float)) and math.isfinite(params[k][1])
+                   for k in COMPASS_PARAMS):
             raise ValueError('Fresh Cube compass and yaw parameter readbacks required')
         return {k:params[k][1] for k in COMPASS_PARAMS}
 
@@ -56,17 +74,25 @@ class CubeNorth:
             raise ValueError('First identify, enable and verify the selected Cube compass and mounting; acquisition may require a reboot. No compass enabled automatically.')
         if p['COMPASS_LEARN']!=0 or any(p[k]!=v for k,v in PROFILE.items()):
             raise ValueError('Start requires learning off and the complete verified bridge-only profile')
-        if int(p['EK3_GSF_RUN_MASK']) & 1 == 0:
-            raise ValueError('Cube GSF yaw estimator must be enabled before compass learning')
+        imu_mask=int(p['EK3_IMU_MASK'])
+        if not 0<imu_mask<=7 or p['EK3_IMU_MASK']!=imu_mask:
+            raise ValueError('Verified Cube IMU lane configuration required before learning')
+        required=(1 << imu_mask.bit_count())-1
+        if int(p['EK3_GSF_RUN_MASK']) & required != required:
+            raise ValueError(f'GSF learning must cover all active lanes: EK3_GSF_RUN_MASK needs {required}; configure and reboot Cube before learning')
         self.original_profile={k:p[k] for k in PROFILE}
         self.fault='';self.profile_mismatches={}
+        self.gps_quality.begin(now)
         self.started=now;self.finished=None;self.rows.clear();self.reference=None;self.vn_invalidated=False;self.active_seen=False
         self.completion_message_at=None;self.stage='confirming_commands';self.learning_complete=False
         self.phase='learning';self.reason='Configuring temporary native GPS/barometer/compass profile for MANUAL learning; wait for readbacks. No propulsion command.'
         return dict(CALIBRATION_CHANGES,COMPASS_LEARN=3)
 
     def message(self,now,text):
-        if (self.phase=='learning' and not self.vn_invalidated and self.started is not None
+        if 'ekf3 lane switch ' in text.lower():
+            try:self.lane=int(text.lower().split('ekf3 lane switch ',1)[1].split()[0])
+            except (ValueError,IndexError):pass
+        if (self.phase=='learning' and not self.fault and not self.vn_invalidated and self.started is not None
                 and now>=self.started and 'compasslearn: finished' in text.lower()):
             # STATUSTEXT and PARAM_VALUE can arrive in either order. Retain the
             # event, but do not accept completion without this session's mode-3 ACK.
@@ -74,7 +100,7 @@ class CubeNorth:
             if self.active_seen:self.finished=self.completion_message_at
 
     def parameter(self,now,key,value):
-        if (self.phase=='learning' and not self.vn_invalidated and self.started is not None
+        if (self.phase=='learning' and not self.fault and not self.vn_invalidated and self.started is not None
                 and now>=self.started and key=='COMPASS_LEARN' and value==3):
             self.active_seen=True
             if self.completion_message_at is not None:self.finished=self.completion_message_at
@@ -94,6 +120,13 @@ class CubeNorth:
                 self.reason='Cube north transferred to VN; ExternalNav yaw restored. Run floating-surface Prepare and health check.' if self.reference else 'Learning cancelled; ExternalNav yaw restored. North capture still required.'
             return
         if self.phase!='learning':return
+        if self.fault:return
+        imu_mask=int(p['EK3_IMU_MASK'])
+        required=(1 << imu_mask.bit_count())-1 if 0<imu_mask<=7 else 0
+        if not required or int(p['EK3_GSF_RUN_MASK']) & required != required:
+            self.fault='GSF learning coverage lost for an active IMU lane'
+            self.reference=None;self.rows.clear();self.stage='lane_coverage_lost';self.reason=self.fault
+            return
         if self.vn_invalidated:return
         if now-self.started>600:
             self.rows.clear();self.stage='timed_out';self.reason='Learning has not completed within ten minutes. Cancel in MANUAL; no north accepted.';return
@@ -135,6 +168,7 @@ class CubeNorth:
         self.reason='North captured automatically; restoring ExternalNav yaw in MANUAL. No arm or propulsion command is sent.'
 
     def candidate(self,now,params):
+        if self.fault:raise ValueError(self.fault)
         p=self.values(now,params)
         if (self.phase!='learning' or self.finished is None or p['COMPASS_LEARN']!=0
                 or params['COMPASS_LEARN'][0]<self.finished
@@ -147,6 +181,7 @@ class CubeNorth:
         return dict(offset_deg=wrap(mean),captured_monotonic=now,method='Cube compass north after confirmed Compass Learn')
 
     def capture(self,now,params):
+        if self.fault:raise ValueError(self.fault)
         p=self.values(now,params)
         if self.phase=='captured':
             if self.reference is None or p['COMPASS_LEARN']!=0 or any(p[k]!=v for k,v in CALIBRATION_PROFILE.items()):
@@ -177,6 +212,7 @@ class CubeNorth:
         return dict(phase=self.phase,stage=self.stage,reason=self.reason,finished_seen=self.finished is not None,
                     temporary_gps_profile=self.phase in ('learning','captured'),
                     profile_mismatches=self.profile_mismatches,original_profile=self.original_profile,fault=self.fault,
+                    gps_quality=self.gps_quality.status(now),active_lane=self.lane,
                     completion_message_received=self.completion_message_at is not None,
                     learning_complete=self.learning_complete,
                     elapsed_s=max(0.,now-self.started) if now is not None and self.started is not None else 0.,

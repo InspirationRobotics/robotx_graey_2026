@@ -17,6 +17,25 @@ from robotx_graey_2026.api.navigation.cube_north import CubeNorth,COMPASS_PARAMS
 
 
 class TransportTests(unittest.TestCase):
+    def test_tainted_capture_restores_profile_only_in_manual_without_actuation(self):
+        from test_cube_north import CubeNorthTests
+        from test_compass_gps_quality import fix
+        n=CubeNorth();f=CubeNorthTests();n.start(0.,f.params())
+        n.phase='captured';n.reference=dict(offset_deg=10.)
+        n.gps(1.,fix(1.,speed_mps=32.))
+        self.b.cube_north=n;self.b.land_north=LandNorth();self.b.output_permitted=False
+        self.b.get_logger=Mock(return_value=Mock())
+        self.b.params=f.params(1.,1,0)
+        self.b.control_state=dict(vehicle_fresh=True,armed=True,mode='GUIDED',mission_claimed=False,autonomous=False)
+        self.b.control_received=1.
+        self.b.finish_compass_reference(1.)
+        self.b.link.send.assert_not_called()
+        self.b.control_state['mode']='MANUAL'
+        self.b.finish_compass_reference(1.)
+        self.assertEqual(n.phase,'restoring');self.assertIsNone(n.reference)
+        self.assertEqual({c.args[3].decode() for c in self.b.link.send.call_args_list},set(RESTORE_PROFILE))
+        self.b.link.command.assert_not_called();self.b.link.set_mode.assert_not_called()
+
     def test_missing_calibration_source_writes_retry_then_restore_without_restarting_learn(self):
         from test_cube_north import CubeNorthTests
         f=CubeNorthTests();n=CubeNorth();n.start(0,f.params())
@@ -81,7 +100,7 @@ class TransportTests(unittest.TestCase):
         self.b.output_permitted=True;self.b.get_logger=Mock(return_value=Mock())
         self.b.compass_health=(10.,True);self.b.raw_gps_health=(10.,True)
         self.b.params={k:(10.,v) for k,v in PROFILE.items()}
-        self.b.params.update({k:(10.,v) for k,v in dict(COMPASS_ENABLE=1,COMPASS_USE=1,COMPASS_DEV_ID=123,COMPASS_LEARN=0,EK3_GSF_RUN_MASK=3).items()})
+        self.b.params.update({k:(10.,v) for k,v in dict(COMPASS_ENABLE=1,COMPASS_USE=1,COMPASS_DEV_ID=123,COMPASS_LEARN=0,EK3_GSF_RUN_MASK=7,EK3_GSF_USE_MASK=3,EK3_IMU_MASK=7).items()})
         result=self.b.compass_action('compass_start',NS())
         self.assertTrue(result.success,result.message)
         self.b.compass_action.__func__.__globals__['require_maintenance'].assert_not_called()

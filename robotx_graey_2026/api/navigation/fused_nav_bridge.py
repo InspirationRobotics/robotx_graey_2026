@@ -162,7 +162,7 @@ class FusedNavBridge(SteadyNode):
             pending={k:v for k,v in CALIBRATION_CHANGES.items()
                      if k not in self.params or now-self.params[k][0]>=3 or self.params[k][1]!=v}
             elapsed=now-n.started
-            if not pending and n.active_seen and elapsed<=600:return
+            if not pending and n.active_seen and elapsed<=600 and not n.fault:return
         c=self.control_state
         if not (self.control_received is not None and 0<=now-self.control_received<.7
                 and c.get('vehicle_fresh') is True
@@ -171,10 +171,15 @@ class FusedNavBridge(SteadyNode):
         self.compass_restore_attempt=now
         try:
             require_compass_setup()
-            if n.phase=='learning':
-                if (elapsed>10 and (pending or not n.active_seen)) or elapsed>600:
+            if n.fault and n.phase in ('learning','captured'):
+                changes=n.cancel(now,self.params)
+                n.reason=n.fault+'; restoring complete bridge-only profile in MANUAL'
+                self.land_north.invalidate()
+                self.get_logger().warning('COMPASS_LEARNING_REJECTED '+json.dumps(n.status(now)))
+            elif n.phase=='learning':
+                if n.fault or (elapsed>10 and (pending or not n.active_seen)) or elapsed>600:
                     changes=n.cancel(now,self.params)
-                    n.fault=('Calibration profile or learning acknowledgement failed' if elapsed<=600
+                    n.fault=n.fault or ('Calibration profile or learning acknowledgement failed' if elapsed<=600
                              else 'Firmware learning timed out without a validated north reference')
                     n.reason=n.fault+'; restoring complete bridge-only profile in MANUAL'
                     self.land_north.invalidate()
@@ -408,7 +413,8 @@ class FusedNavBridge(SteadyNode):
             if not self.advancing('compass_attitude',m.time_boot_ms):return
             health=getattr(self,'compass_health',None);gps=getattr(self,'raw_gps_health',None)
             q=self.est.raw_q
-            good=bool(health and now-health[0]<.5 and health[1] and gps and now-gps[0]<.5 and gps[1]
+            good=bool(self.cube_north.phase=='learning' and self.cube_north.gps_quality.capture_allowed(now)
+                      and health and now-health[0]<.5 and health[1] and gps and now-gps[0]<.5 and gps[1]
                       and self.est.imu_at is not None and 0<=now-self.est.imu_at<.15
                       and max(abs(math.degrees(r)) for r in self.est.rates)<=10
                       and 1-2*(q[1]*q[1]+q[2]*q[2])>=math.cos(math.radians(30))
@@ -449,6 +455,7 @@ class FusedNavBridge(SteadyNode):
                        speed_mps=m.vel/100 if m.vel < 65535 else None,
                        course_deg=m.cog/100 if m.cog < 36000 else None,
                        speed_accuracy_mps=getattr(m, 'vel_acc', 0)/1000 or None)
+            if hasattr(self,'cube_north'):self.cube_north.gps(now,fix)
             previous = self.est.gps.last_fix
             self.est.observe_gps(now, fix)
             if previous != m.time_usec:
@@ -457,6 +464,7 @@ class FusedNavBridge(SteadyNode):
     def tick(self):
         self.link.drain(self.consume)
         now = time.monotonic()
+        if hasattr(self,'cube_north'):self.cube_north.check_gps(now)
         self.finish_compass_reference(now)
         if self.output_permitted and self.configured(now):
             if self.auto_recovery.step(now,self.est,self.control_state,self.control_received):

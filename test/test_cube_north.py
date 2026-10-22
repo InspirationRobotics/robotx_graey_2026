@@ -4,6 +4,44 @@ from robotx_graey_2026.api.navigation.odometry_profile import PROFILE
 
 
 class CubeNorthTests(unittest.TestCase):
+    def test_all_active_lanes_need_gsf_and_no_yaw_reset_mask_is_written(self):
+        p=self.params();p['EK3_GSF_RUN_MASK']=(0,3)
+        with self.assertRaisesRegex(ValueError,'all active lanes'):CubeNorth().start(0,p)
+        p['EK3_GSF_RUN_MASK']=(0,7)
+        changes=CubeNorth().start(0,p)
+        self.assertNotIn('EK3_GSF_USE_MASK',changes)
+        self.assertNotIn('EK3_GSF_RUN_MASK',changes)
+        # GSF bits refer to cores; nonconsecutive physical IMUs still yield two cores.
+        p['EK3_IMU_MASK']=(0,5);p['EK3_GSF_RUN_MASK']=(0,3)
+        CubeNorth().start(0,p)
+
+    def test_gps_fault_prevents_completion_and_capture_until_new_explicit_attempt(self):
+        from test_compass_gps_quality import fix
+        n=CubeNorth();n.start(0,self.params());n.parameter(.1,'COMPASS_LEARN',3)
+        n.gps(.2,fix(.2,speed_mps=32.))
+        n.message(.3,'CompassLearn: Finished')
+        self.assertIsNone(n.finished)
+        for i in range(31):
+            t=1+i*.1;n.observe(t,self.params(t,1,0),90,30,True)
+        self.assertIsNone(n.reference)
+        with self.assertRaises(ValueError):n.capture(4.,self.params(4.,1))
+        n.cancel(4.,self.params(4.,1));n.observe(4.1,self.params(4.1),0,0,False)
+        n.start(4.2,self.params(4.2))
+        self.assertFalse(n.fault);self.assertFalse(n.gps_quality.fault)
+
+    def test_later_gps_does_not_retroactively_contaminate_completed_reference(self):
+        from test_compass_gps_quality import fix
+        n=CubeNorth();n.phase='ready';n.reference=dict(offset_deg=10.)
+        n.gps(100.,fix(100.,speed_mps=32.));n.check_gps(101.)
+        self.assertFalse(n.fault);self.assertFalse(n.gps_quality.fault)
+        self.assertEqual(n.reference['offset_deg'],10.)
+
+    def test_lane_coverage_change_during_attempt_rejects_north(self):
+        n=CubeNorth();n.start(0,self.params());self.completed(n)
+        p=self.params(1.,1,0);p['EK3_GSF_RUN_MASK']=(1.,3)
+        n.observe(1.,p,90,30,True)
+        self.assertIsNone(n.reference);self.assertIn('coverage lost',n.fault)
+
     def test_learning_profile_has_native_gps_and_restores_every_bridge_source(self):
         n=CubeNorth();changes=n.start(0,self.params())
         self.assertEqual(n.original_profile,PROFILE)
@@ -98,7 +136,7 @@ class CubeNorthTests(unittest.TestCase):
         n.message(1,'CompassLearn: Finished')
 
     def params(self,now=0.,yaw=6,learn=0):
-        values=dict(CALIBRATION_PROFILE if yaw==1 else PROFILE,COMPASS_ENABLE=1,COMPASS_USE=1,COMPASS_DEV_ID=123,COMPASS_LEARN=learn,EK3_GSF_RUN_MASK=3)
+        values=dict(CALIBRATION_PROFILE if yaw==1 else PROFILE,COMPASS_ENABLE=1,COMPASS_USE=1,COMPASS_DEV_ID=123,COMPASS_LEARN=learn,EK3_GSF_RUN_MASK=7,EK3_GSF_USE_MASK=3,EK3_IMU_MASK=7)
         values.update({k:yaw for k in YAW_PARAMS})
         return {k:(now,v) for k,v in values.items()}
 

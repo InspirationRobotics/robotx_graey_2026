@@ -72,6 +72,12 @@ async function render(state){
  page=await render({controller:safe,job:{action:'compass_start',phase:'failed',busy:false,message:'Primary compass disabled'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'idle',reason:'Compass learning not started'}}}}}});
  assert(page.elements.status.textContent.includes('Compass request failed · Primary compass disabled'));
  assert(page.elements.compassStatus.textContent.includes('REQUEST FAILED · Primary compass disabled'));
+ page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_parameters:{EK3_IMU_MASK:{value:7},EK3_GSF_RUN_MASK:{value:3},EK3_GSF_USE_MASK:{value:3}},compass_north:{phase:'idle'}}}}}});
+ assert(page.elements.compassStart.disabled);assert(page.elements.compassSetupState.textContent.includes('required 7'));
+ page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_parameters:{EK3_IMU_MASK:{value:7},EK3_GSF_RUN_MASK:{value:7},EK3_GSF_USE_MASK:{value:3}},compass_north:{phase:'learning',active_lane:2,gps_quality:{fault:'GPS jump',reason:'GPS position jumped',speed_mps:32,speed_accuracy_mps:8,accuracy:3,interruptions:1}}}}}}});
+ assert(page.elements.compassGpsQuality.textContent.includes('REJECTED'));
+ assert(page.elements.compassLaneCoverage.textContent.includes('active lane 2'));
+ assert(page.elements.compassGpsQuality.textContent.includes('confidence: unavailable'));
  page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{}}});
  e=page.elements;e.trueHeading.value='90';e.headingConfirm.checked=true;e.headingConfirm.onchange();
  assert(!e.alignLand.disabled);assert(!e.surfaceConfirm.checked);
