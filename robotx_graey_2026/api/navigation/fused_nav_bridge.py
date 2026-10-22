@@ -238,9 +238,18 @@ class FusedNavBridge(SteadyNode):
             if max(r[1] for r in rows)-min(r[1] for r in rows) > 8.:
                 raise ValueError('Pressure changing too much; hold stationary at the surface and retry')
             clock, origin = self.est.gps.clock, self.est.origin
+            retained_north = (self.est.north_alignment if self.est.heading_validated
+                and not self.est.heading_continuity_lost and self.est.fresh(self.est.imu_at,now) else None)
+            retained_offset = self.est.north_offset
+            retained_bias = self.est.heading_bias
             self.output_permitted = False
             self.est = BridgeEstimator(auto_north_alignment=True)
             self.est.north_alignment = TrackNorth()
+            if retained_north is not None:
+                self.est.north_alignment = retained_north
+                self.est.north_offset = retained_offset
+                self.est.heading_bias = retained_bias
+                self.est.heading_validated = True
             reference=self.land_north.current(now) if hasattr(self,'land_north') else None
             if reference:
                 self.est.north_offset=reference['offset_deg']

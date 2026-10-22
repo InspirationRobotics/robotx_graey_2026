@@ -246,3 +246,21 @@ class TransportTests(unittest.TestCase):
         self.clock.now = 10.06
         self.b.tick()
         self.assertEqual(self.b.link.odometry.call_count, 2)
+
+    def test_prepare_preserves_valid_north_but_not_lost_continuity(self):
+        for lost in (False,True):
+            self.b.params={k:(10.,v) for k,v in dict(PROFILE,COMPASS_LEARN=0).items()}
+            self.b.pressures=deque((8.+i*.1,1000.) for i in range(21))
+            self.b.est.heading_validated=True
+            self.b.est.heading_continuity_lost=lost
+            self.b.est.imu_at=10.
+            self.b.est.north_offset=42.
+            self.b.est.heading_bias=3.
+            self.b.est.north_alignment=TrackNorth()
+            self.b.est.north_alignment.offset=42.
+            response=self.b.prepare(NS(data=True),NS())
+            self.assertTrue(response.success,response.message)
+            self.assertEqual(self.b.est.heading_validated,not lost)
+            if not lost:
+                self.assertEqual(self.b.est.north_offset,42.)
+                self.assertEqual(self.b.est.heading_bias,3.)

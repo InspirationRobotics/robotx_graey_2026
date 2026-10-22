@@ -24,32 +24,19 @@ class CalibrationJobsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'Capture land north first'):
             self.job.request(dict(action='prepare',confirmed=True,surface_confirmed=True,alignment_mode='retained'))
 
-    def test_missing_automatic_maneuver_status_fails_without_commission(self):
-        self.job.job=dict(busy=True,cancel=False,auto_started=True,auto_started_at=0.)
-        self.put('supervisor',dict(north_alignment=dict(aligned=True)))
-        self.job.run('prepare')
-        self.assertEqual(self.job.snapshot()['phase'],'failed')
-        self.assertIn('status missing',self.job.snapshot()['message'])
-        self.assertNotIn(('commission',None),self.calls)
-
-    def test_verified_maneuver_completion_survives_child_status_expiry(self):
-        self.job.job=dict(busy=True,cancel=False,auto_started=True,auto_started_at=0.,auto_verified=True)
-        self.put('supervisor',dict(north_alignment=dict(aligned=True)))
-        self.job.run('prepare')
-        self.assertTrue(self.job.waypoint_permission)
-
     def test_automatic_alignment_requires_prepare_clearance_and_qualified_inputs(self):
         from unittest.mock import Mock
         self.job.maneuver=Mock()
-        with self.assertRaisesRegex(ValueError,'Run GPS/DVL Prepare'):
+        with self.assertRaisesRegex(ValueError,'Wait for qualified'):
             self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=5.))
-        self.job.job=dict(busy=True,action='prepare',alignment_mode='gps')
+        self.job.job=dict(busy=False,action='prepare',phase='prepared')
         with self.assertRaisesRegex(ValueError,'Confirm clear'):
             self.job.request(dict(action='align_auto',max_distance_m=5.))
         with self.assertRaisesRegex(ValueError,'Wait for qualified'):
             self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=5.))
         self.put('bridge',dict(gps_eligible=True,inputs=dict(vn=True,dvl=True),gps_admission=dict(qualified=True)))
-        self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=5.))
+        with patch('threading.Thread'):
+            self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=5.))
         self.job.maneuver.assert_called_once_with('start',5.)
         self.assertTrue(self.job.snapshot()['auto_started'])
         self.assertFalse(self.job.waypoint_permission)
@@ -205,21 +192,26 @@ class CalibrationJobsTests(unittest.TestCase):
             self.job.request(dict(action='prepare',confirmed=True,surface_confirmed=False))
         self.assertEqual(self.calls,[])
 
-    def test_prepare_suspends_then_waits_for_alignment_and_kill(self):
+    def test_prepare_finishes_without_alignment_and_without_waypoint_permission(self):
         self.put('supervisor',dict(north_alignment=dict(aligned=False,reason='Need motion')))
-        self.job.job = dict(busy=True,cancel=False,action='prepare')
-        def sleep(seconds):
-            self.now += seconds
-            if 1 <= self.now < 2:
-                self.c.update(armed=True,sa_active=False,esc_commanded_on=True)
-                self.put('supervisor',dict(north_alignment=dict(aligned=True,reason='Aligned')))
-            if self.now >= 2:
-                self.c.update(armed=False,sa_active=True,esc_commanded_on=False)
-        self.job.sleep = sleep
+        self.job.job=dict(busy=True,cancel=False,action='prepare')
         self.job.run('prepare')
-        self.assertEqual(self.calls,[('suspend',None),('pause',None),('prepare',True),('suspend',None),('commission',None)])
-        self.assertTrue(self.job.waypoint_permission)
-        self.assertEqual(self.job.snapshot()['phase'],'ready')
+        self.assertEqual(self.calls,[('suspend',None),('pause',None),('prepare',True),('suspend',None)])
+        self.assertFalse(self.job.waypoint_permission)
+        self.assertEqual(self.job.snapshot()['phase'],'prepared')
+        self.assertFalse(self.job.snapshot()['busy'])
+
+    def test_alignment_finishes_without_commissioning(self):
+        from unittest.mock import Mock
+        self.job.maneuver=Mock()
+        self.job.job=dict(busy=True,cancel=False,auto_started_at=0.)
+        self.put('north_maneuver',dict(stage='COMPLETE',published_monotonic=0.))
+        self.put('bridge',dict(north_alignment=dict(aligned=True)))
+        self.job.monitor_alignment()
+        self.assertEqual(self.job.snapshot()['phase'],'aligned')
+        self.assertFalse(self.job.snapshot()['busy'])
+        self.assertFalse(self.job.waypoint_permission)
+        self.assertEqual(self.calls,[])
 
     def test_prepare_timeout_and_cancellation_do_not_grant_permission(self):
         for cancel in (True,False):

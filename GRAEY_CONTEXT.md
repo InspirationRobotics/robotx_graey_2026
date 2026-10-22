@@ -1530,3 +1530,5 @@ VN+40deg recovered offset-40deg, Prepare commissioned after simulated stop.
 Earlier failed attempts preserved; fixed startup discovery grace and test
 fixture clock/arm-state races. See docs/gps-track-north-2026-10-21.md. This is
 not deployment or physical heading accuracy evidence; wet verification needed.
+
+2026-10-22: Prepare separated from automatic 5 m alignment; retains continuous valid north and heading bias. Alignment no longer needs a busy preparation job and never commissions automatically. GPS track disagreement tolerances relaxed, DVL scale unchanged. See docs/independent-prepare-2026-10-22.md. Local tests passed; deployment verification recorded separately.

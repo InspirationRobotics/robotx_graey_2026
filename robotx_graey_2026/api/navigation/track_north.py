@@ -86,11 +86,14 @@ class TrackNorth:
         # Reported accuracy is not reduced by sqrt(N): correlated GPS bias is
         # common. A 5 m run may legitimately be insufficient in poor reception.
         uncertainty = math.degrees(math.atan2(2*max(r[5] for r in self.rows),travel))
-        if not .75 <= scale <= 1.25 or residual > .75 or uncertainty > 12:
+        # DVL sets metric distance; GPS contributes direction, never a scale
+        # correction. Tolerate ordinary metre-level GNSS disagreement over 5 m,
+        # while retaining explicit gross-fit and angular-quality limits.
+        if not .5 <= scale <= 1.5 or residual > 2. or uncertainty > 25:
             self.candidate = None
             return self.reject(f'Track rejected: scale {scale:.2f}, residual {residual:.2f} m, heading uncertainty {uncertainty:.1f} deg')
         self.candidate = dict(offset_deg=wrap(math.degrees(angle)), baseline_m=travel,
-            residual_m=residual, heading_uncertainty_deg=uncertainty,
+            residual_m=residual, heading_uncertainty_deg=uncertainty, gps_dvl_scale=scale,
             samples=len(d), method=self.method, gps_track=[list(r) for r in self.rows])
         self.reason = 'Coordinate track candidate ready; waiting for maneuver stop verification'
         return False
