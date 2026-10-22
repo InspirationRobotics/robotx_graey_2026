@@ -69,6 +69,9 @@ async function render(state){
   assert(page.elements.status.textContent.includes('LIVE REASON'));
   assert(!page.elements.status.textContent.includes('OLD SETUP MESSAGE'));
  }
+ page=await render({controller:safe,job:{action:'compass_start',phase:'failed',busy:false,message:'Primary compass disabled'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'idle',reason:'Compass learning not started'}}}}}});
+ assert(page.elements.status.textContent.includes('Compass request failed · Primary compass disabled'));
+ assert(page.elements.compassStatus.textContent.includes('REQUEST FAILED · Primary compass disabled'));
  page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{}}});
  e=page.elements;e.trueHeading.value='90';e.headingConfirm.checked=true;e.headingConfirm.onchange();
  assert(!e.alignLand.disabled);assert(!e.surfaceConfirm.checked);

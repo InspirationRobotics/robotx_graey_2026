@@ -1,8 +1,38 @@
 import unittest
-from robotx_graey_2026.api.navigation.cube_north import CubeNorth,COMPASS_PARAMS,YAW_PARAMS
+from robotx_graey_2026.api.navigation.cube_north import CubeNorth,COMPASS_PARAMS,YAW_PARAMS,CALIBRATION_PROFILE,RESTORE_PROFILE
+from robotx_graey_2026.api.navigation.odometry_profile import PROFILE
 
 
 class CubeNorthTests(unittest.TestCase):
+    def test_learning_profile_has_native_gps_and_restores_every_bridge_source(self):
+        n=CubeNorth();changes=n.start(0,self.params())
+        self.assertEqual(n.original_profile,PROFILE)
+        for i in (1,2,3):
+            self.assertEqual(changes[f'EK3_SRC{i}_POSXY'],3)
+            self.assertEqual(changes[f'EK3_SRC{i}_VELXY'],3)
+            self.assertEqual(changes[f'EK3_SRC{i}_POSZ'],1)
+        restore=n.cancel(.1,self.params(.1,1,3))
+        self.assertEqual(restore,RESTORE_PROFILE)
+        partial=self.params(.2);partial['EK3_SRC1_POSXY']=(.2,3)
+        n.observe(.2,partial,0,0,False)
+        self.assertEqual(n.phase,'restoring')
+        n.observe(.3,self.params(.3),0,0,False)
+        self.assertEqual(n.phase,'cancelled')
+
+    def test_start_rejects_disabled_gsf_and_preexisting_profile_mismatch(self):
+        for key,value in (('EK3_GSF_RUN_MASK',0),('EK3_SRC2_POSZ',1)):
+            p=self.params();p[key]=(0,value)
+            with self.assertRaises(ValueError):CubeNorth().start(0,p)
+
+    def test_yaw_only_profile_cannot_generate_north(self):
+        n=CubeNorth();n.start(0,self.params());self.completed(n)
+        for i in range(31):
+            t=1+i*.1;p=self.params(t,1)
+            p['EK3_SRC1_POSXY']=(t,6)
+            n.observe(t,p,90,30,True)
+        self.assertIsNone(n.reference)
+        self.assertIn('EK3_SRC1_POSXY',n.reason)
+
     def test_idle_status_does_not_latch_startup_readback_wait(self):
         n=CubeNorth();n.observe(0,{},0,0,False)
         self.assertEqual(n.stage,'idle')
@@ -68,7 +98,7 @@ class CubeNorthTests(unittest.TestCase):
         n.message(1,'CompassLearn: Finished')
 
     def params(self,now=0.,yaw=6,learn=0):
-        values=dict(COMPASS_ENABLE=1,COMPASS_USE=1,COMPASS_DEV_ID=123,COMPASS_LEARN=learn)
+        values=dict(CALIBRATION_PROFILE if yaw==1 else PROFILE,COMPASS_ENABLE=1,COMPASS_USE=1,COMPASS_DEV_ID=123,COMPASS_LEARN=learn,EK3_GSF_RUN_MASK=3)
         values.update({k:yaw for k in YAW_PARAMS})
         return {k:(now,v) for k,v in values.items()}
 
@@ -97,7 +127,7 @@ class CubeNorthTests(unittest.TestCase):
         self.assertEqual(n.phase,'restoring')
         n.observe(4.2,self.params(4.2),0,0,False)
         self.assertEqual(n.phase,'ready')
-        self.assertEqual(changes,{**{k:6 for k in YAW_PARAMS},'COMPASS_LEARN':0})
+        self.assertEqual(changes,RESTORE_PROFILE)
 
     def test_unidentified_disabled_stale_and_bad_compass_rejected(self):
         for key in ('COMPASS_ENABLE','COMPASS_USE','COMPASS_DEV_ID'):

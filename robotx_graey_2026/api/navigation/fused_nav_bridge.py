@@ -23,7 +23,7 @@ from .odometry_profile import PROFILE
 from .maintenance_safety import require_maintenance, require_compass_setup
 from .automatic_recovery import AutomaticRecovery
 from .land_north import LandNorth
-from .cube_north import CubeNorth, COMPASS_PARAMS
+from .cube_north import CubeNorth, COMPASS_PARAMS, CALIBRATION_CHANGES, RESTORE_PROFILE
 
 
 class FusedNavBridge(SteadyNode):
@@ -144,7 +144,7 @@ class FusedNavBridge(SteadyNode):
                     self.land_north.reference=dict(self.cube_north.reference)
                 else:
                     self.land_north.invalidate()
-            self.get_logger().warning('COMPASS_REFERENCE_ACTION '+json.dumps(dict(action=name,changes=changes)))
+            self.get_logger().warning('COMPASS_REFERENCE_ACTION '+json.dumps(dict(action=name,changes=changes,original_profile=self.cube_north.original_profile)))
             for key,value in changes.items():
                 self.link.send('param_set_send',1,1,key.encode(),float(value),9)
             response.success,response.message=True,self.cube_north.reason
@@ -155,8 +155,14 @@ class FusedNavBridge(SteadyNode):
     def finish_compass_reference(self,now):
         """Return yaw to ExternalNav only in fresh pilot-controlled MANUAL."""
         if (not hasattr(self,'cube_north') or self.output_permitted
-                or self.cube_north.phase not in ('captured','restoring')
+                or self.cube_north.phase not in ('learning','captured','restoring')
                 or now-getattr(self,'compass_restore_attempt',-math.inf)<1.):return
+        n=self.cube_north
+        if n.phase=='learning':
+            pending={k:v for k,v in CALIBRATION_CHANGES.items()
+                     if k not in self.params or now-self.params[k][0]>=3 or self.params[k][1]!=v}
+            elapsed=now-n.started
+            if not pending and n.active_seen and elapsed<=600:return
         c=self.control_state
         if not (self.control_received is not None and 0<=now-self.control_received<.7
                 and c.get('vehicle_fresh') is True
@@ -165,7 +171,17 @@ class FusedNavBridge(SteadyNode):
         self.compass_restore_attempt=now
         try:
             require_compass_setup()
-            if self.cube_north.phase=='captured':
+            if n.phase=='learning':
+                if (elapsed>10 and (pending or not n.active_seen)) or elapsed>600:
+                    changes=n.cancel(now,self.params)
+                    n.fault=('Calibration profile or learning acknowledgement failed' if elapsed<=600
+                             else 'Firmware learning timed out without a validated north reference')
+                    n.reason=n.fault+'; restoring complete bridge-only profile in MANUAL'
+                    self.land_north.invalidate()
+                else:
+                    # Retry source writes, never retrigger a possibly finished learner.
+                    changes=pending
+            elif self.cube_north.phase=='captured':
                 if not self.est.fresh(self.est.imu_at,now):
                     self.cube_north.invalidate_vn()
                     self.land_north.invalidate()
@@ -173,7 +189,7 @@ class FusedNavBridge(SteadyNode):
                 reference,changes=self.cube_north.capture(now,self.params)
                 self.land_north.reference=dict(reference)
             else:
-                changes={**{f'EK3_SRC{i}_YAW':6 for i in (1,2,3)},'COMPASS_LEARN':0}
+                changes=dict(RESTORE_PROFILE)
             for key,value in changes.items():
                 self.link.send('param_set_send',1,1,key.encode(),float(value),9)
         except (ValueError,OSError):
@@ -351,10 +367,10 @@ class FusedNavBridge(SteadyNode):
         names=list(PROFILE)
         if (not self.output_permitted or (hasattr(self,'cube_north') and self.cube_north.phase in ('learning','captured','restoring'))):
             for mid in (1,30):self.link.command(511,mid,100000)
-            names=list(dict.fromkeys((*names,*COMPASS_PARAMS)))
-        # Cube's bounded reply queue can starve the tail of a repeated burst.
-        # Both current schemas fit into two one-second batches, within the
-        # existing three-second readback gate. Keep navigation fields in both.
+            names=list(COMPASS_PARAMS)
+        # Cube's parameter reply queue is bounded. A single 29-name burst can
+        # indefinitely starve its tail. At most 16 requests per one-second tick
+        # covers either profile in two ticks, inside the three-second age gate.
         if getattr(self,'parameter_schema',None)!=tuple(names):
             self.parameter_schema=tuple(names);self.parameter_cursor=0
         first=self.parameter_cursor;last=min(first+16,len(names))
