@@ -1496,3 +1496,23 @@ other compasses remain off,yaw6/6/6,GSF_RUN_MASK3. Before-state saved onboard
 verified, fresh GPS25sat/fix4/accuracy1.121m; pure learner start preconditions pass.
 No live learning started; operator start required. Killed/disarmed/ESCoff MANUAL
 at verification, odometry withheld pending north/depth Prepare. See docs/compass-learn-repair-2026-10-21.md.
+
+2026-10-21 userapproved initialnorth learning safeguards ca50d14 DEPLOYED tether.
+Beforechange livelearnattempt225s confirmedmode3/nativeGPSbutnoFinished; Cube
+IMU_MASK7 vs GSFRUN3 excludedcore2, GPSmedian0.16m/s with31.98m/sglitch.
+Added allactivecore GSFcoverage check, learning-only GPS quality watchdog,
+seriousjump/speed/stale/sustaineduncertainty rejection + MANUAL profilerestore,
+no auto retries; GUI quality/motion guidance, no invented GSFconfidence.
+305local/onboard tests + bothGUIs PASS; actualnative3corelearning/capture/restore
+PASS compass-learning-20261021-223707; injectedGPSjump rejected/restored PASS
+compass-learning-20261021-223916;31fieldpollingmax2.007s PASS. Initial fake-node
+logger test fixture failure fixed. Postdeploy verifier first used nonexistent
+HTMLphrase; corrected to actual served wording and all assertions passed.
+Backup /home/graey/deployment-backups/20261021-compass-quality-222653.
+Freshsafe maintenance confirmed; EK3_GSF_RUN_MASK3->7, USE_MASKunchanged3,
+IMU_MASK7; Cube rebooted. Maskbefore saved logs/gsf-coverage-before-20261021.json.
+Verified fullbridgeprofile, GPSfix4/24sat/accuracy0.707m atsample, freshVN/DVL,
+latestfusedbridgeonly/newGUI; killed/disarmed/ESCoffMANUAL atverification.
+No live learning/mission started. Workflow only establishes initialVNnorth;
+physicalaccuracy/GSFvariance stillrequirelivecheck/DataFlash. See
+robotx_graey_2026/docs/compass-learning-quality-2026-10-21.md.
