@@ -17,7 +17,7 @@ import time
 from types import SimpleNamespace as NS
 
 from robotx_graey_2026.api.navigation.odometry_profile import PROFILE
-from robotx_graey_2026.api.navigation.cube_north import COMPASS_PARAMS
+COMPASS_PARAMS=tuple(PROFILE)+('COMPASS_LEARN',)
 from robotx_graey_2026.api.pixhawk.mavlink import Link
 
 
@@ -51,7 +51,7 @@ def main():
         node=NS(link=link,settings={},sync_clock=lambda:None)
         for compass in (False,True):
             node.output_permitted=not compass
-            required=set(PROFILE)|set(COMPASS_PARAMS if compass else ())
+            required=set(COMPASS_PARAMS)
             received={};values={};started=time.monotonic();poll=0.;checks=0;maximum_age=0.
             while time.monotonic()-started<7.:
                 now=time.monotonic()

@@ -12,7 +12,7 @@ from .north_maneuver import NorthManeuver
 class NorthManeuverNode(SteadyNode):
     def __init__(self):
         super().__init__('north_maneuver')
-        self.declare_parameter('max_distance_m',6.)
+        self.declare_parameter('max_distance_m',10.)
         self.logic = NorthManeuver(time.monotonic(),self.get_parameter('max_distance_m').value)
         # Exclusive with waypoint_mission through GUI mission inventory and lease.
         self.link = Link('udpout:127.0.0.1:14553',198,self.get_logger(),system=255)
@@ -58,12 +58,12 @@ class NorthManeuverNode(SteadyNode):
         h=b.get('heading_vn') or {}
         gps=b.get('gps_admission') or {}
         was_terminal=self.logic.stage in self.logic.terminal
-        x,r=self.logic.step(now,dict(control_ok=bool(control),abort=self.cancelled,fresh=bool(fresh),
+        x,r=self.logic.step(now,dict(control_ok=bool(control),abort=self.cancelled or (b.get('north_alignment') or {}).get('active') is False,fresh=bool(fresh),
             depth=b.get('depth_m'),yaw=h.get('raw_yaw',math.nan),rate=h.get('rate',math.nan),
             speed=math.sqrt(sum(a*a for a in v)),forward=v[0],sideways=v[1],
             dvl_valid=b.get('inputs',{}).get('dvl') and not b.get('dvl_continuity',{}).get('recovering'),
             gps_qualified=gps.get('qualified'),gps_speed=(b.get('gps_observation') or {}).get('speed_mps',math.inf),
-            aligned=(b.get('north_alignment') or {}).get('aligned')))
+            candidate_ready=(b.get('north_alignment') or {}).get('candidate_ready')))
         # Yield immediately on pilot mode change/kill/disarm; never fight takeover.
         if control and not was_terminal:
             self.link.send('manual_control_send',1,x,self.logic.lateral_command,500,r,0)

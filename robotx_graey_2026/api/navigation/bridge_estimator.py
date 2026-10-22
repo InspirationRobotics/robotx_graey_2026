@@ -8,6 +8,7 @@ from collections import deque
 import math
 from .gps_admission import GPSAdmission
 from .north_alignment import NorthAlignment
+from .track_north import TrackNorth
 from .course_heading import CourseHeading
 
 
@@ -409,7 +410,7 @@ class BridgeEstimator:
         self.pending_gps = None
         if self.north_alignment and not self.heading_validated:
             aligned = self.north_alignment.observe(now, fix,
-                rotate(sample['q'], sample['raw_velocity']), sample['rates'], sample['q'])
+                rotate(sample['q'], sample['raw_velocity']), sample['rates'], sample['q'], **({'position':sample['position']} if isinstance(self.north_alignment,TrackNorth) else {}))
             if not aligned:
                 self.event.update(decision='aligning', reason=self.north_alignment.reason)
                 return False

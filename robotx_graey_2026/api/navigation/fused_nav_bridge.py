@@ -20,10 +20,10 @@ from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.pixhawk.mavlink import Link
 from .bridge_estimator import BridgeEstimator, yaw
 from .odometry_profile import PROFILE
-from .maintenance_safety import require_maintenance, require_compass_setup
+from .maintenance_safety import require_maintenance
 from .automatic_recovery import AutomaticRecovery
 from .land_north import LandNorth
-from .cube_north import CubeNorth, COMPASS_PARAMS, CALIBRATION_CHANGES, RESTORE_PROFILE
+from .track_north import TrackNorth
 
 
 class FusedNavBridge(SteadyNode):
@@ -45,9 +45,9 @@ class FusedNavBridge(SteadyNode):
             raise ValueError('Synthetic depth is restricted to isolated SITL')
         self.est = BridgeEstimator(self.settings['heading_reference_validated'],
                                    self.settings['auto_north_alignment'])
+        if self.est.north_alignment is not None:
+            self.est.north_alignment = TrackNorth()
         self.land_north = LandNorth()
-        self.cube_north = CubeNorth()
-        self.compass_health=None
         self.raw_gps_health=None
         self.link = Link(self.settings['mavlink'], 197, self.get_logger())
         self.instance = str(uuid.uuid4())
@@ -74,8 +74,8 @@ class FusedNavBridge(SteadyNode):
         self.create_service(SetParametersAtomically, '/graey/navigation/align_heading', self.align_heading)
         self.create_service(SetParametersAtomically, '/graey/navigation/align_land', self.align_land)
         self.create_service(Trigger, '/graey/navigation/forget_land', self.forget_land)
-        for name in ('compass_start','compass_capture','compass_cancel'):
-            self.create_service(Trigger,'/graey/navigation/'+name,lambda request,response,name=name:self.compass_action(name,response))
+        self.create_service(Trigger, '/graey/navigation/begin_motion_north', self.begin_motion_north)
+        self.create_subscription(String, '/graey/navigation/north_maneuver', self.motion_north_status, 10)
         if self.settings['sitl_depth_topic']:
             self.create_subscription(Float32, self.settings['sitl_depth_topic'],
                 self.sitl_depth, 20)
@@ -102,7 +102,6 @@ class FusedNavBridge(SteadyNode):
             self.vn_calibration = (time.monotonic(), json.loads(msg.data))
             if self.vn_calibration[1].get('phase') not in ('idle','collected'):
                 self.land_north.invalidate()
-                if hasattr(self,'cube_north'):self.cube_north.invalidate_vn()
         except (ValueError, TypeError):
             self.vn_calibration = None
 
@@ -114,92 +113,38 @@ class FusedNavBridge(SteadyNode):
         except (ValueError,TypeError):
             pass
 
-    def compass_action(self,name,response):
+    def begin_motion_north(self, request, response):
         try:
-            require_compass_setup()
-            if name=='compass_start':
-                self.output_permitted=False
-                self.est.fault='Navigation maintenance; Prepare required before reuse'
-            if self.output_permitted:
-                raise ValueError('Pause navigation before compass reference maintenance')
+            require_maintenance(lambda c: '' if c.get('online') is True and c.get('vehicle_fresh') is True and c.get('mode')=='MANUAL' and c.get('armed') is True and c.get('sa_active') is False and c.get('esc_commanded_on') is True and c.get('mission_claimed') is False and c.get('autonomous') is False and not c.get('inhibit') else 'Enable propulsion in MANUAL with no mission before alignment')
             now=time.monotonic()
-            if name=='compass_start':
-                if (not self.vn_calibration or not 0<=now-self.vn_calibration[0]<1.5
-                        or self.vn_calibration[1].get('phase') not in ('idle','collected')):
-                    raise ValueError('Fresh completed VN calibration status required')
-                health=getattr(self,'compass_health',None);gps=getattr(self,'raw_gps_health',None)
-                if not (health and 0<=now-health[0]<.5 and health[1] and gps and 0<=now-gps[0]<.5 and gps[1]):
-                    raise ValueError('Fresh healthy enabled Cube compass and GPS fix required before learning')
-                changes=self.cube_north.start(now,self.params)
-                self.land_north.invalidate()
-            elif name=='compass_capture':
-                if not self.est.fresh(self.est.imu_at,now):
-                    self.cube_north.invalidate_vn()
-                    raise ValueError('VN continuity required to retain captured north')
-                reference,changes=self.cube_north.capture(now,self.params)
-                self.land_north.reference=dict(reference)
-            else:
-                changes=self.cube_north.cancel(now,self.params)
-                if self.cube_north.reference:
-                    self.land_north.reference=dict(self.cube_north.reference)
-                else:
-                    self.land_north.invalidate()
-            self.get_logger().warning('COMPASS_REFERENCE_ACTION '+json.dumps(dict(action=name,changes=changes,original_profile=self.cube_north.original_profile)))
-            for key,value in changes.items():
-                self.link.send('param_set_send',1,1,key.encode(),float(value),9)
-            response.success,response.message=True,self.cube_north.reason
+            if not self.output_permitted or not self.configured(now) or self.est.fault or self.est.heading_validated:
+                raise ValueError('Prepare fresh unaligned navigation with the bridge-only profile first')
+            if (not self.est.gps_eligible(now) or not self.est.gps.status(now)['qualified']
+                    or not self.est.motion_valid or not self.est.fresh(self.est.motion_at,now)
+                    or not self.est.fresh(self.est.imu_at,now)):
+                raise ValueError('Qualified surface GPS and fresh valid DVL/VN required')
+            self.est.north_alignment=TrackNorth()
+            self.est.north_alignment.begin()
+            self.motion_north_started=now
+            if hasattr(self,'motion_north_received'):del self.motion_north_received
+            response.success,response.message=True,'GPS coordinate alignment armed; explicit maneuver launch follows'
         except (ValueError,OSError) as error:
             response.success,response.message=False,str(error)
         return response
 
-    def finish_compass_reference(self,now):
-        """Return yaw to ExternalNav only in fresh pilot-controlled MANUAL."""
-        if (not hasattr(self,'cube_north') or self.output_permitted
-                or self.cube_north.phase not in ('learning','captured','restoring')
-                or now-getattr(self,'compass_restore_attempt',-math.inf)<1.):return
-        n=self.cube_north
-        if n.phase=='learning':
-            pending={k:v for k,v in CALIBRATION_CHANGES.items()
-                     if k not in self.params or now-self.params[k][0]>=3 or self.params[k][1]!=v}
-            elapsed=now-n.started
-            if not pending and n.active_seen and elapsed<=600 and not n.fault:return
-        c=self.control_state
-        if not (self.control_received is not None and 0<=now-self.control_received<.7
-                and c.get('vehicle_fresh') is True
-                and isinstance(c.get('armed'),bool) and c.get('mode')=='MANUAL'
-                and c.get('mission_claimed') is False and c.get('autonomous') is False):return
-        self.compass_restore_attempt=now
+    def motion_north_status(self, msg):
         try:
-            require_compass_setup()
-            if n.fault and n.phase in ('learning','captured'):
-                changes=n.cancel(now,self.params)
-                n.reason=n.fault+'; restoring complete bridge-only profile in MANUAL'
-                self.land_north.invalidate()
-                self.get_logger().warning('COMPASS_LEARNING_REJECTED '+json.dumps(n.status(now)))
-            elif n.phase=='learning':
-                if n.fault or (elapsed>10 and (pending or not n.active_seen)) or elapsed>600:
-                    changes=n.cancel(now,self.params)
-                    n.fault=n.fault or ('Calibration profile or learning acknowledgement failed' if elapsed<=600
-                             else 'Firmware learning timed out without a validated north reference')
-                    n.reason=n.fault+'; restoring complete bridge-only profile in MANUAL'
-                    self.land_north.invalidate()
-                else:
-                    # Retry source writes, never retrigger a possibly finished learner.
-                    changes=pending
-            elif self.cube_north.phase=='captured':
-                if not self.est.fresh(self.est.imu_at,now):
-                    self.cube_north.invalidate_vn()
-                    self.land_north.invalidate()
-                    return
-                reference,changes=self.cube_north.capture(now,self.params)
-                self.land_north.reference=dict(reference)
-            else:
-                changes=dict(RESTORE_PROFILE)
-            for key,value in changes.items():
-                self.link.send('param_set_send',1,1,key.encode(),float(value),9)
-        except (ValueError,OSError):
-            # No write, no disarm, no propulsion action. Preserve passive capture.
-            return
+            m=json.loads(msg.data);now=time.monotonic()
+            a=self.est.north_alignment
+            if not isinstance(a,TrackNorth) or not a.active:return
+            stamp=m.get('published_monotonic',-math.inf)
+            if not getattr(self,'motion_north_started',math.inf)<=stamp<=now or now-stamp>.5:return
+            self.motion_north_received=now
+            if m.get('stage') in ('ABORTED','COMPLETE'):
+                a.stop(m['stage']=='COMPLETE')
+                self.get_logger().info('GPS_TRACK_NORTH '+json.dumps(dict(status=a.status(),candidate=a.candidate)))
+        except (ValueError,TypeError):
+            pass
 
     def forget_land(self, request, response):
         try:
@@ -278,8 +223,6 @@ class FusedNavBridge(SteadyNode):
         try:
             require_maintenance()
             now = time.monotonic()
-            if hasattr(self,'cube_north') and self.cube_north.phase in ('learning','captured','restoring'):
-                raise ValueError('Finish or cancel compass learning and verify ExternalNav restoration before Prepare')
             if request.data is not True:
                 raise ValueError('Operator must confirm floating at the water surface')
             if not self.vn_calibration or not 0 <= now-self.vn_calibration[0] < 1.5:
@@ -297,6 +240,7 @@ class FusedNavBridge(SteadyNode):
             clock, origin = self.est.gps.clock, self.est.origin
             self.output_permitted = False
             self.est = BridgeEstimator(auto_north_alignment=True)
+            self.est.north_alignment = TrackNorth()
             reference=self.land_north.current(now) if hasattr(self,'land_north') else None
             if reference:
                 self.est.north_offset=reference['offset_deg']
@@ -331,7 +275,6 @@ class FusedNavBridge(SteadyNode):
         if not 0 <= clock.now().nanoseconds-stamp < 500000000:
             self.est.imu_at = None
             if hasattr(self,'land_north'):self.land_north.invalidate()
-            if hasattr(self,'cube_north'):self.cube_north.invalidate_vn()
             return
         if self.advancing('imu', stamp):
             q, r = m.orientation, m.angular_velocity
@@ -339,11 +282,9 @@ class FusedNavBridge(SteadyNode):
             if hasattr(self,'land_north'):
                 if self.est.imu_at is None:
                     self.land_north.invalidate()
-                    if hasattr(self,'cube_north'):self.cube_north.invalidate_vn()
                 else:
                     previous=bool(self.land_north.rows)
                     self.land_north.observe(time.monotonic(),self.est.raw_q,self.est.rates)
-                    if previous and len(self.land_north.rows)==1 and hasattr(self,'cube_north'):self.cube_north.invalidate_vn()
 
     def dvl(self, m):
         try:
@@ -370,9 +311,7 @@ class FusedNavBridge(SteadyNode):
         for mid in (24,pressure_id,49):
             self.link.command(511, mid, 100000)
         names=list(PROFILE)
-        if (not self.output_permitted or (hasattr(self,'cube_north') and self.cube_north.phase in ('learning','captured','restoring'))):
-            for mid in (1,30):self.link.command(511,mid,100000)
-            names=list(COMPASS_PARAMS)
+        names.append('COMPASS_LEARN')  # Reject an interrupted legacy calibration; never start one.
         # Cube's parameter reply queue is bounded. A single 29-name burst can
         # indefinitely starve its tail. At most 16 requests per one-second tick
         # covers either profile in two ticks, inside the three-second age gate.
@@ -391,7 +330,7 @@ class FusedNavBridge(SteadyNode):
 
     def configured(self, now):
         return all(k in self.params and self.params[k][1] == v and 0 <= now-self.params[k][0] < 3.
-                   for k, v in PROFILE.items())
+                   for k, v in dict(PROFILE, COMPASS_LEARN=0).items())
 
     def consume(self, kind, m):
         if (m.get_srcSystem(), m.get_srcComponent()) != (1, 1):
@@ -405,26 +344,6 @@ class FusedNavBridge(SteadyNode):
             self.est.gps.clock.reply(m.ts1, m.tc1, time.monotonic_ns())
         elif kind == 'PARAM_VALUE':
             self.params[m.param_id.rstrip('\x00')] = (now, m.param_value)
-            if hasattr(self,'cube_north'):
-                self.cube_north.parameter(now,m.param_id.rstrip('\x00'),m.param_value)
-        elif kind=='SYS_STATUS':
-            self.compass_health=(now,bool(m.onboard_control_sensors_present&4 and m.onboard_control_sensors_enabled&4 and m.onboard_control_sensors_health&4))
-        elif kind=='ATTITUDE' and hasattr(self,'cube_north'):
-            if not self.advancing('compass_attitude',m.time_boot_ms):return
-            health=getattr(self,'compass_health',None);gps=getattr(self,'raw_gps_health',None)
-            q=self.est.raw_q
-            good=bool(self.cube_north.phase=='learning' and self.cube_north.gps_quality.capture_allowed(now)
-                      and health and now-health[0]<.5 and health[1] and gps and now-gps[0]<.5 and gps[1]
-                      and self.est.imu_at is not None and 0<=now-self.est.imu_at<.15
-                      and max(abs(math.degrees(r)) for r in self.est.rates)<=10
-                      and 1-2*(q[1]*q[1]+q[2]*q[2])>=math.cos(math.radians(30))
-                      and abs(m.roll)<=math.radians(30) and abs(m.pitch)<=math.radians(30))
-            previous_phase=self.cube_north.phase
-            self.cube_north.observe(now,self.params,math.degrees(m.yaw),yaw(q),good)
-            if self.cube_north.phase!=previous_phase:
-                self.get_logger().info('COMPASS_NORTH_STATE '+json.dumps(self.cube_north.status()))
-        elif kind=='STATUSTEXT' and hasattr(self,'cube_north'):
-            self.cube_north.message(now,str(m.text))
         elif kind == 'GPS_GLOBAL_ORIGIN':
             self.est.set_origin((m.latitude/1e7, m.longitude/1e7, m.altitude/1000))
         elif kind == self.settings.get('pressure_message','SCALED_PRESSURE3'):
@@ -455,7 +374,6 @@ class FusedNavBridge(SteadyNode):
                        speed_mps=m.vel/100 if m.vel < 65535 else None,
                        course_deg=m.cog/100 if m.cog < 36000 else None,
                        speed_accuracy_mps=getattr(m, 'vel_acc', 0)/1000 or None)
-            if hasattr(self,'cube_north'):self.cube_north.gps(now,fix)
             previous = self.est.gps.last_fix
             self.est.observe_gps(now, fix)
             if previous != m.time_usec:
@@ -464,8 +382,11 @@ class FusedNavBridge(SteadyNode):
     def tick(self):
         self.link.drain(self.consume)
         now = time.monotonic()
-        if hasattr(self,'cube_north'):self.cube_north.check_gps(now)
-        self.finish_compass_reference(now)
+        a=self.est.north_alignment
+        if (isinstance(a,TrackNorth) and a.active
+                and now-getattr(self,'motion_north_received',getattr(self,'motion_north_started',now))
+                > (.7 if hasattr(self,'motion_north_received') else 10.)):
+            a.stop(False)
         if self.output_permitted and self.configured(now):
             if self.auto_recovery.step(now,self.est,self.control_state,self.control_received):
                 self.reset_counter=(self.reset_counter+1)%256
@@ -480,14 +401,12 @@ class FusedNavBridge(SteadyNode):
             self.last_sent = now
         status.update(instance=self.instance, fusion_policy='bridge_odometry',
                       land_north_reference=self.land_north.current(now) if hasattr(self,'land_north') else None,
-                      compass_north=self.cube_north.status(now) if hasattr(self,'cube_north') else None,
-                      compass_parameters={k:dict(value=self.params[k][1],fresh=0<=now-self.params[k][0]<3) for k in COMPASS_PARAMS if k in self.params},
                       automatic_recovery=self.auto_recovery.status(now,self.control_state,self.control_received),
                       clock_mapping=dict(offset=self.est.gps.clock.offset,
                           uncertainty=self.est.gps.clock.uncertainty, updated=self.est.gps.clock.updated),
                       pressure_sample=getattr(self, 'pressure_sample', None),
                       profile_mismatches={k: dict(expected=v, actual=self.params.get(k, (None, None))[1])
-                          for k, v in PROFILE.items() if k not in self.params or self.params[k][1] != v},
+                          for k, v in dict(PROFILE,COMPASS_LEARN=0).items() if k not in self.params or self.params[k][1] != v},
                       configuration_verified=configured, enabled=self.output_permitted,
                       surface_pressure_hpa=self.settings['surface_pressure_hpa'],
                       startup_output_enabled=self.settings['enabled'],

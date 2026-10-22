@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import Mock
 
 from robotx_graey_2026.api.navigation.odometry_profile import PROFILE
-from robotx_graey_2026.api.navigation.cube_north import COMPASS_PARAMS
+COMPASS_PARAMS=tuple(PROFILE)+('COMPASS_LEARN',)
 
 
 class ParameterPollingTests(unittest.TestCase):
@@ -38,26 +38,20 @@ class ParameterPollingTests(unittest.TestCase):
     def test_all_navigation_and_compass_fields_refresh_under_bounded_reply_queue(self):
         for compass in (False,True):
             self.node.output_permitted=not compass;self.received.clear()
-            required=set(PROFILE)|set(COMPASS_PARAMS if compass else ())
+            required=set(COMPASS_PARAMS)
             for t in range(10):
                 self.tick(float(t))
                 if t>=1:
                     self.assertTrue(required.issubset(self.received))
                     self.assertTrue(all(0<=t-self.received[k]<3 for k in required))
 
-    def test_schema_change_restarts_batch_without_permanently_skipping_tail(self):
-        self.tick(0.)
-        self.node.output_permitted=False
-        self.assertEqual(self.tick(1.),list(PROFILE)[:16])
-        self.tick(2.)
+    def test_output_permission_does_not_reset_polling_cursor(self):
+        self.tick(0.);self.node.output_permitted=False
+        self.assertEqual(self.tick(1.),list(COMPASS_PARAMS)[16:])
         self.assertTrue(set(COMPASS_PARAMS).issubset(self.received))
-        self.node.output_permitted=True
-        self.assertEqual(self.tick(3.),list(PROFILE)[:16])
-        self.tick(4.)
-        self.assertTrue(all(4-self.received[k]<3 for k in PROFILE))
 
-    def test_learning_keeps_compass_polling_without_source_or_control_writes(self):
-        self.node.cube_north=NS(phase='learning')
+    def test_polling_never_writes_sources_or_commands_motion(self):
+
         self.tick(0.);self.tick(1.)
         self.assertTrue(set(COMPASS_PARAMS).issubset(self.received))
         self.assertTrue(all(c.args[0]=='param_request_read_send' for c in self.node.link.send.call_args_list))

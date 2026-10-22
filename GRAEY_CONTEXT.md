@@ -1516,3 +1516,17 @@ latestfusedbridgeonly/newGUI; killed/disarmed/ESCoffMANUAL atverification.
 No live learning/mission started. Workflow only establishes initialVNnorth;
 physicalaccuracy/GSFvariance stillrequirelivecheck/DataFlash. See
 robotx_graey_2026/docs/compass-learning-quality-2026-10-21.md.
+
+2026-10-21 LOCAL GPS coordinate north pivot authorized. Replaced Compass Learn
+UI/services/profile-write state machine with explicit 10 m surface maneuver.
+Prepare surface baseline first killed/disarmed, then operator arms MANUAL and
+starts script. Relative VN yaw hold + DVL speed/lateral feedback; neutral
+vertical command; GPS coordinates paired to relative DVL positions fit north
+offset, accepted only after controlled stop and fresh admitted GPS. No live
+vehicle or parameter changes. Normal ExternalNav profile remains; legacy
+COMPASS_LEARN must read0. Quality/telemetry/kill/takeover/depth limits retained.
+Native integrated GUI/SITL north-maneuver-896be1b3 PASS, travel9.896m, injected
+VN+40deg recovered offset-40deg, Prepare commissioned after simulated stop.
+Earlier failed attempts preserved; fixed startup discovery grace and test
+fixture clock/arm-state races. See docs/gps-track-north-2026-10-21.md. This is
+not deployment or physical heading accuracy evidence; wet verification needed.

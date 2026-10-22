@@ -12,23 +12,6 @@ def maintenance_reason(c):
     return ''
 
 
-def compass_setup_reason(c):
-    """Compass learning is a pilot-controlled MANUAL operation, armed or not."""
-    if not (c.get('online') is True and c.get('vehicle_fresh') is True):
-        return 'Fresh controller and vehicle telemetry required'
-    if not isinstance(c.get('armed'), bool):
-        return 'Fresh arm-state telemetry required'
-    if c.get('mode') != 'MANUAL':
-        return 'Select MANUAL before setting up Compass Learn'
-    if c.get('mission_claimed') is not False or c.get('autonomous') is not False:
-        return 'Stop the mission before setting up Compass Learn'
-    return ''
-
-
-def require_compass_setup():
-    return require_maintenance(compass_setup_reason)
-
-
 def require_maintenance(check=maintenance_reason):
     with urllib.request.urlopen('http://localhost:8090/api/controller', timeout=.2) as source:
         c = json.load(source)

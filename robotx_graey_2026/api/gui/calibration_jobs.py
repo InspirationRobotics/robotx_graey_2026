@@ -5,7 +5,7 @@ import queue
 import threading
 import time
 import uuid
-from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason, compass_setup_reason
+from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason
 
 
 class ServiceQueue:
@@ -18,16 +18,13 @@ class ServiceQueue:
         self.clients = {}
         for name, path, kind in (
             ('suspend','/graey/navigation/suspend',Trigger),
-            ('compass_suspend','/graey/navigation/compass_suspend',Trigger),
             ('pause','/graey/navigation/pause_odometry',Trigger),
             ('prepare','/graey/navigation/prepare',SetBool),
             ('recover_dvl','/graey/navigation/recover_dvl',Trigger),
             ('align_heading','/graey/navigation/align_heading',SetParametersAtomically),
             ('align_land','/graey/navigation/align_land',SetParametersAtomically),
             ('forget_land','/graey/navigation/forget_land',Trigger),
-            ('compass_start','/graey/navigation/compass_start',Trigger),
-            ('compass_capture','/graey/navigation/compass_capture',Trigger),
-            ('compass_cancel','/graey/navigation/compass_cancel',Trigger),
+            ('begin_motion_north','/graey/navigation/begin_motion_north',Trigger),
             ('calibrate','/graey/vn100/calibrate_start',Trigger),
             ('cancel','/graey/vn100/calibrate_cancel',Trigger),
             ('commission','/graey/navigation/commission',Trigger)):
@@ -110,10 +107,13 @@ class CalibrationJobs:
                         or not b.get('inputs',{}).get('vn') or not (b.get('gps_admission') or {}).get('qualified')
                         or (b.get('north_alignment') or {}).get('aligned')):
                     raise ValueError('Wait for qualified surface GPS, DVL and VN before starting movement')
-                self.maneuver('start',body.get('max_distance_m'))
+                if body.get('max_distance_m') != 10:
+                    raise ValueError('This alignment run requires 10 m plus stopping clearance')
+                self.service('begin_motion_north')
+                self.maneuver('start',10.)
                 self.job.update(auto_started=True,auto_started_at=self.clock(),phase='aligning',message='Automatic surface alignment started; keep clear and supervise Abort')
                 return self.snapshot()
-        if action not in ('calibrate','align_land','prepare','recover_dvl','cancel','compass_start','compass_capture','compass_cancel'):
+        if action not in ('calibrate','align_land','prepare','recover_dvl','cancel'):
             raise ValueError('Unknown calibration action')
         if action == 'cancel':
             with self.lock:
@@ -124,14 +124,11 @@ class CalibrationJobs:
                 if self.maneuver and self.job.get('auto_started'):
                     self.maneuver('abort',None)
             return self.snapshot()
-        reason = (compass_setup_reason if action.startswith('compass_') else maintenance_reason)(self.controller())
+        reason = maintenance_reason(self.controller())
         if reason or self.mission_running():
             raise ValueError(reason or 'Stop the mission before calibration or preparation')
         if body.get('confirmed') is not True:
             raise ValueError('Confirm that you read the instructions and maintained kill/disarm')
-        learning=(self.sample('bridge').get('compass_north') or {}).get('phase')
-        if learning in ('learning','captured','restoring') and action not in ('compass_capture','compass_cancel'):
-            raise ValueError('Capture or cancel active compass learning before calibration or preparation')
         if action in ('prepare','recover_dvl') and body.get('surface_confirmed') is not True:
             raise ValueError('Confirm floating stationary at the water surface before pressure calibration')
         mode=body.get('alignment_mode','gps')
@@ -161,15 +158,11 @@ class CalibrationJobs:
 
     def run(self, action):
         try:
-            self.service('compass_suspend' if action.startswith('compass_') else 'suspend')
-            if action != 'recover_dvl' and not action.startswith('compass_'):
+            self.service('suspend')
+            if action != 'recover_dvl':
                 self.service('pause')
             if self.snapshot().get('cancel'):
                 raise ValueError('Preparation cancelled; navigation remains suspended')
-            if action in ('compass_start','compass_capture','compass_cancel'):
-                message=self.service(action)
-                self.update(phase='compass',busy=False,message=message)
-                return
             if action=='align_land':
                 self.update(phase='aligning',message='Keep level, stationary and killed; capturing known true bearing')
                 self.sleep(2.2)

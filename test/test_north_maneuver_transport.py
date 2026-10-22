@@ -19,13 +19,13 @@ class TransportTests(unittest.TestCase):
         ns=dict(json=json,math=math,time=NS(monotonic=lambda:10.),String=lambda **k:NS(**k),Bool=lambda **k:NS(**k))
         exec(compile(tree,str(path),'exec'),ns)
         self.node=ns['NorthManeuverNode']()
-        self.node.logic=NorthManeuver(9.,6.);self.node.logic.last=9.95
+        self.node.logic=NorthManeuver(9.,10.);self.node.logic.last=9.95
         self.node.active=True;self.node.cancelled=False;self.node.stopped_at=None
         self.node.bridge_at=self.node.control_at=9.9
         self.node.pub=Mock();self.node.claim=Mock();self.node.link=Mock()
         self.node.bridge=dict(published_monotonic=9.9,depth_m=0.,inputs=dict(vn=True,dvl=True),
             heading_vn=dict(received=9.9,raw_yaw=40.,yaw=200.,rate=0.),
-            heading_dvl=dict(velocity=[.6,0.,0.]),gps_admission=dict(qualified=True),gps_observation=dict(speed_mps=.6))
+            heading_dvl=dict(velocity=[.1,0.,0.]),gps_admission=dict(qualified=True),gps_observation=dict(speed_mps=.6))
         self.node.control=dict(vehicle_fresh=True,armed=True,mode='MANUAL',sa_active=False,esc_commanded_on=True)
 
     def test_commands_relative_yaw_without_arming_or_mode_changes(self):

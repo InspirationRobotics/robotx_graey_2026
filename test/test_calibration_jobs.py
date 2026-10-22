@@ -3,37 +3,16 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from robotx_graey_2026.api.gui.calibration_jobs import CalibrationJobs
-from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason, compass_setup_reason
+from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason
 from robotx_graey_2026.api.navigation.vn_calibration import VNCalibration
 
 
 class CalibrationJobsTests(unittest.TestCase):
-    def test_compass_actions_never_prepare_depth_or_commission(self):
-        self.job.job=dict(busy=True,cancel=False)
-        self.job.run('compass_start')
-        self.assertEqual(self.calls,[('compass_suspend',None),('compass_start',None)])
-        self.assertFalse(self.job.waypoint_permission)
+    def test_retired_compass_actions_are_rejected(self):
+        for action in ('compass_start','compass_capture','compass_cancel'):
+            with self.assertRaisesRegex(ValueError,'Unknown'):
+                self.job.request(dict(action=action,confirmed=True))
 
-    def test_compass_setup_accepts_armed_manual_but_rejects_stale_modes_and_missions(self):
-        c=dict(self.c,armed=True,mode='MANUAL',sa_active=False,esc_commanded_on=True)
-        self.assertEqual(compass_setup_reason(c),'')
-        self.assertTrue(maintenance_reason(c))
-        for change in ({'armed':None},{'mode':'GUIDED'},{'vehicle_fresh':False},
-                       {'online':False},{'mission_claimed':True},{'autonomous':True}):
-            self.assertTrue(compass_setup_reason(dict(c,**change)),change)
-        self.assertTrue(compass_setup_reason({}))
-        self.c.update(c)
-        with patch('robotx_graey_2026.api.gui.calibration_jobs.threading.Thread') as thread:
-            self.job.request(dict(action='compass_start',confirmed=True))
-            thread.assert_called_once()
-        self.job.job['busy']=False
-        with self.assertRaisesRegex(ValueError,'kill engaged'):
-            self.job.request(dict(action='calibrate',confirmed=True))
-
-    def test_calibration_cannot_interrupt_active_compass_learning(self):
-        self.put('bridge',dict(compass_north=dict(phase='learning')))
-        with self.assertRaisesRegex(ValueError,'Capture or cancel'):
-            self.job.request(dict(action='calibrate',confirmed=True))
     def test_land_alignment_job_never_prepares_pressure_or_commissions(self):
         self.job.job=dict(busy=True,cancel=False,true_heading_deg=90.)
         self.job.run('align_land')
@@ -63,15 +42,15 @@ class CalibrationJobsTests(unittest.TestCase):
         from unittest.mock import Mock
         self.job.maneuver=Mock()
         with self.assertRaisesRegex(ValueError,'Run GPS/DVL Prepare'):
-            self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=6.))
+            self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=10.))
         self.job.job=dict(busy=True,action='prepare',alignment_mode='gps')
         with self.assertRaisesRegex(ValueError,'Confirm clear'):
-            self.job.request(dict(action='align_auto',max_distance_m=6.))
+            self.job.request(dict(action='align_auto',max_distance_m=10.))
         with self.assertRaisesRegex(ValueError,'Wait for qualified'):
-            self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=6.))
+            self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=10.))
         self.put('bridge',dict(gps_eligible=True,inputs=dict(vn=True,dvl=True),gps_admission=dict(qualified=True)))
-        self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=6.))
-        self.job.maneuver.assert_called_once_with('start',6.)
+        self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=10.))
+        self.job.maneuver.assert_called_once_with('start',10.)
         self.assertTrue(self.job.snapshot()['auto_started'])
         self.assertFalse(self.job.waypoint_permission)
         self.job.request(dict(action='cancel'))

@@ -1,0 +1,77 @@
+{
+  "run": "north-maneuver-896be1b3",
+  "passed": true,
+  "hardware_interlocks_tested": false,
+  "qgc_forwarding": false,
+  "maneuver": {
+    "stage": "COMPLETE",
+    "reason": "North motion alignment and stationary verification complete; disarm and engage kill",
+    "distance_m": 9.895791500182868,
+    "measured_speed_mps": 0.030592155115721466,
+    "forward_command": 0,
+    "sideways_command": 0,
+    "maximum_distance_m": 10.0,
+    "reference_relative_heading_deg": 40.0,
+    "published_monotonic": 114.152863984,
+    "observation": {
+      "bridge_age_s": 0.05774570700000936,
+      "control_age_s": 0.021448398000003976,
+      "depth_m": 0.0,
+      "vn_fresh": true,
+      "bridge_fault": "",
+      "fresh": true,
+      "control_ok": false
+    }
+  },
+  "north": {
+    "aligned": true,
+    "offset_deg": -40.0,
+    "reason": "North accepted from GPS coordinate track after controlled stop",
+    "samples": 226,
+    "method": "GPS coordinate track / relative DVL displacement",
+    "reference": {
+      "offset_deg": -40.0,
+      "baseline_m": 9.884718876541621,
+      "residual_m": 0.015702506178528315,
+      "heading_uncertainty_deg": 3.4735777947502715,
+      "samples": 226,
+      "method": "GPS coordinate track / relative DVL displacement"
+    },
+    "candidate_ready": true,
+    "active": false,
+    "persistence": "bridge session only"
+  },
+  "bridge_healthy": true,
+  "job": {
+    "id": "48b1cb4105844e5c88f8c8877e170f91",
+    "action": "prepare",
+    "phase": "ready",
+    "busy": false,
+    "cancel": false,
+    "message": "Supervisor commissioned for this session; vehicle remains disarmed",
+    "alignment_mode": "gps",
+    "true_heading_deg": null,
+    "north": {
+      "aligned": true,
+      "offset_deg": -40.0,
+      "reason": "North accepted from GPS coordinate track after controlled stop",
+      "samples": 226,
+      "method": "GPS coordinate track / relative DVL displacement",
+      "reference": {
+        "offset_deg": -40.0,
+        "baseline_m": 9.884718876541621,
+        "residual_m": 0.015702506178528315,
+        "heading_uncertainty_deg": 3.4735777947502715,
+        "samples": 226,
+        "method": "GPS coordinate track / relative DVL displacement"
+      },
+      "candidate_ready": true,
+      "active": false,
+      "persistence": "bridge session only"
+    },
+    "auto_started": true,
+    "auto_started_at": 67.901890348,
+    "auto_last_status_at": 113.052852704,
+    "auto_verified": true
+  }
+}

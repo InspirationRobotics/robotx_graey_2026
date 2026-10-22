@@ -11,8 +11,8 @@ class NorthManeuver:
     terminal = {'COMPLETE', 'ABORTED'}
 
     def __init__(self, now, max_distance):
-        if isinstance(max_distance, bool) or not isinstance(max_distance, (int,float)) or not math.isfinite(max_distance) or not 3 <= max_distance <= 10:
-            raise ValueError('Confirm 3 to 10 m of clear travel plus stopping clearance')
+        if isinstance(max_distance, bool) or not isinstance(max_distance, (int,float)) or not math.isfinite(max_distance) or not max_distance == 10:
+            raise ValueError('Confirm 10 m of clear travel plus additional stopping clearance')
         self.limit = max_distance
         self.stage, self.reason = 'MOVE', 'Collecting surface GPS/DVL north alignment'
         self.started = self.last = now
@@ -20,6 +20,7 @@ class NorthManeuver:
         self.heading = self.still_since = self.bad_since = None
         self.thrust = 0.
         self.speed = 0.
+        self.integral = 0.
         self.lateral_command = 0
 
     def abort(self, reason):
@@ -31,7 +32,7 @@ class NorthManeuver:
         if self.stage in self.terminal:
             return (0,0)
         dt, self.last = now-self.last, now
-        if not 0 <= dt <= .3 or now-self.started > 30:
+        if not 0 <= dt <= .3 or now-self.started > 60:
             return self.abort('Alignment timing limit exceeded')
         if not o.get('control_ok') or o.get('abort'):
             return self.abort('Kill, pilot takeover, disarm, cancel or watchdog loss')
@@ -59,19 +60,23 @@ class NorthManeuver:
             return (0,0)
         self.bad_since = None
         self.distance += abs(speed)*dt
-        if self.distance >= self.limit or speed > 1.:
+        if self.distance >= self.limit+2 or speed > 1.:
             return self.abort('Travel or speed limit reached; stop and inspect clearance')
         yaw_command = round(max(-150,min(150,8*error-3*rate)))
         if self.stage == 'MOVE':
-            if o.get('aligned'):
+            if self.distance >= self.limit-.5:
+                if not o.get('candidate_ready'):
+                    return self.abort('10 m run did not produce a reliable GPS coordinate track; no north accepted')
                 self.stage, self.reason = 'SETTLE', 'DVL velocity braking; verifying stationary GPS/DVL for 3 seconds'
                 self.thrust = 0.
-            elif now-self.started > 20:
-                return self.abort('No accepted north alignment within 20 seconds')
+            elif now-self.started > 45:
+                return self.abort('No accepted north alignment within 45 seconds')
             else:
                 # Bounded speed feedback with rate-limited thrust. No geographic
                 # position or Cube compass is used before alignment exists.
-                target = max(0.,min(800.,700.+700.*(.65-o['forward'])))
+                self.integral=max(0.,min(300.,self.integral+120*(.4-o['forward'])*dt))
+                target = max(0.,min(450.,400.*(.4-o['forward'])+self.integral))
+                self.lateral_command=round(max(-150,min(150,-400*o.get('sideways',0.))))
                 self.thrust = min(target,self.thrust+400.*dt)
                 return (round(self.thrust),yaw_command)
         if self.stage == 'SETTLE':
@@ -81,6 +86,8 @@ class NorthManeuver:
             stationary = (speed <= .05 and abs(rate) <= 2 and isinstance(gs,(int,float)) and math.isfinite(gs) and gs <= .2)
             self.still_since = (now if self.still_since is None else self.still_since) if stationary else None
             if self.still_since is not None and now-self.still_since >= 3:
+                if not o.get('candidate_ready'):
+                    return self.abort('GPS coordinate track lost validity during stop; no north accepted')
                 self.stage, self.reason = 'COMPLETE', 'North motion alignment and stationary verification complete; disarm and engage kill'
                 self.thrust=self.lateral_command=0
                 return (0,0)

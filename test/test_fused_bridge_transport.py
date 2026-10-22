@@ -13,123 +13,39 @@ from robotx_graey_2026.api.navigation.bridge_estimator import BridgeEstimator, y
 from robotx_graey_2026.api.navigation.odometry_profile import PROFILE
 from robotx_graey_2026.api.navigation.automatic_recovery import AutomaticRecovery
 from robotx_graey_2026.api.navigation.land_north import LandNorth
-from robotx_graey_2026.api.navigation.cube_north import CubeNorth,COMPASS_PARAMS,YAW_PARAMS,CALIBRATION_PROFILE,CALIBRATION_CHANGES,RESTORE_PROFILE
+from robotx_graey_2026.api.navigation.track_north import TrackNorth
 
 
 class TransportTests(unittest.TestCase):
-    def test_tainted_capture_restores_profile_only_in_manual_without_actuation(self):
-        from test_cube_north import CubeNorthTests
-        from test_compass_gps_quality import fix
-        n=CubeNorth();f=CubeNorthTests();n.start(0.,f.params())
-        n.phase='captured';n.reference=dict(offset_deg=10.)
-        n.gps(1.,fix(1.,speed_mps=32.))
-        self.b.cube_north=n;self.b.land_north=LandNorth();self.b.output_permitted=False
+    def test_track_start_checks_profile_and_never_writes_parameters_or_controls(self):
+        self.b.configured=lambda now:True
+        self.b.est.gps_eligible=lambda now:True
+        self.b.est.gps.status=lambda now:dict(qualified=True)
+        self.b.est.motion_valid=True
+        self.b.est.motion_at=self.b.est.imu_at=10.
+        result=self.b.begin_motion_north(None,NS())
+        self.assertTrue(result.success)
+        self.assertTrue(self.b.est.north_alignment.active)
+        self.b.link.send.assert_not_called()
+        self.b.link.command.assert_not_called()
+        self.b.est.heading_validated=True
+        self.assertFalse(self.b.begin_motion_north(None,NS()).success)
+
+    def test_old_or_aborted_maneuver_status_cannot_accept_north(self):
+        a=TrackNorth();a.begin();a.candidate=dict(offset_deg=73.)
+        self.b.est.north_alignment=a;self.b.motion_north_started=9.
         self.b.get_logger=Mock(return_value=Mock())
-        self.b.params=f.params(1.,1,0)
-        self.b.control_state=dict(vehicle_fresh=True,armed=True,mode='GUIDED',mission_claimed=False,autonomous=False)
-        self.b.control_received=1.
-        self.b.finish_compass_reference(1.)
-        self.b.link.send.assert_not_called()
-        self.b.control_state['mode']='MANUAL'
-        self.b.finish_compass_reference(1.)
-        self.assertEqual(n.phase,'restoring');self.assertIsNone(n.reference)
-        self.assertEqual({c.args[3].decode() for c in self.b.link.send.call_args_list},set(RESTORE_PROFILE))
-        self.b.link.command.assert_not_called();self.b.link.set_mode.assert_not_called()
+        self.b.motion_north_status(NS(data=json.dumps(dict(stage='COMPLETE',published_monotonic=8.))))
+        self.assertFalse(a.approved)
+        self.b.motion_north_status(NS(data=json.dumps(dict(stage='ABORTED',published_monotonic=10.))))
+        self.assertFalse(a.active);self.assertIsNone(a.candidate)
 
-    def test_missing_calibration_source_writes_retry_then_restore_without_restarting_learn(self):
-        from test_cube_north import CubeNorthTests
-        f=CubeNorthTests();n=CubeNorth();n.start(0,f.params())
-        n.parameter(.1,'COMPASS_LEARN',3)
-        self.b.cube_north=n;self.b.land_north=LandNorth();self.b.output_permitted=False
-        self.b.control_state=dict(vehicle_fresh=True,armed=True,mode='MANUAL',mission_claimed=False,autonomous=False)
-        self.b.control_received=5.;self.b.params=f.params(5.,6,3)
-        self.b.finish_compass_reference(5.)
-        keys={c.args[3].decode() for c in self.b.link.send.call_args_list}
-        self.assertEqual(keys,set(CALIBRATION_CHANGES));self.assertNotIn('COMPASS_LEARN',keys)
-        self.b.link.send.reset_mock();self.b.control_received=12.;self.b.params=f.params(12.,6,3)
-        self.b.finish_compass_reference(12.)
-        self.assertEqual(n.phase,'restoring');self.assertTrue(n.fault)
-        self.assertEqual({c.args[3].decode() for c in self.b.link.send.call_args_list},set(RESTORE_PROFILE))
-        self.b.link.command.assert_not_called();self.b.link.set_mode.assert_not_called()
-
-    def test_compass_setup_rechecks_disarmed_manual_before_pausing_or_writing(self):
-        self.b.compass_action.__func__.__globals__['require_compass_setup'].side_effect=ValueError('Disarm first')
-        result=self.b.compass_action('compass_start',NS())
-        self.assertFalse(result.success)
-        self.assertTrue(self.b.output_permitted)
-        self.b.link.send.assert_not_called()
-
-    def test_passive_capture_and_restoration_while_armed_manual_not_guided(self):
-        from test_cube_north import CubeNorthTests
-        fixture=CubeNorthTests();n=CubeNorth();n.start(0,fixture.params());fixture.completed(n)
-        for i in range(31):
-            t=1+i*.1;n.observe(t,fixture.params(t,1),90.,30.,True)
-        self.assertEqual(n.phase,'captured')
-        self.b.cube_north=n;self.b.land_north=LandNorth();self.b.output_permitted=False
-        self.b.params=fixture.params(4.,1)
-        # Raw watchdog topic has no GUI-added `online` field; receipt age proves it.
-        self.b.control_state=dict(vehicle_fresh=True,armed=True,sa_active=False,esc_commanded_on=True,mode='GUIDED',mission_claimed=False,autonomous=False)
-        self.b.control_received=4.
-        self.b.finish_compass_reference(4.)
-        self.assertEqual(n.phase,'captured');self.b.link.send.assert_not_called()
-        self.b.control_state.update(mode='MANUAL')
-        self.b.control_received=4.1
-        self.b.est.imu_at=4.1
-        self.b.finish_compass_reference(4.1)
-        self.assertEqual(n.phase,'restoring')
-        self.assertAlmostEqual(self.b.land_north.reference['offset_deg'],60.)
-        self.b.link.command.assert_not_called();self.b.link.set_mode.assert_not_called()
-        self.b.control_received=5.2
-        self.b.finish_compass_reference(5.2)
-        self.assertEqual(self.b.link.send.call_count,2*len(RESTORE_PROFILE))
-        n.observe(5.3,fixture.params(5.3),0.,0.,False)
-        self.assertEqual(n.phase,'ready')
-
-    def test_compass_parameter_polling_does_not_add_load_to_normal_navigation(self):
-        self.b.sync_clock=Mock();self.b.request()
-        self.assertLessEqual(sum(c.args[0]=='param_request_read_send' for c in self.b.link.send.call_args_list),16)
-        self.b.request()
-        names=[c.args[3].decode() for c in self.b.link.send.call_args_list if c.args[0]=='param_request_read_send']
-        self.assertEqual(names,list(PROFILE))
-        self.b.link.send.reset_mock();self.b.output_permitted=False;self.b.request();self.b.request()
-        names=[c.args[3].decode() for c in self.b.link.send.call_args_list if c.args[0]=='param_request_read_send']
-        self.assertTrue(set(COMPASS_PARAMS).issubset(names))
-
-    def test_compass_setup_pauses_output_without_full_maintenance_and_restoration_requires_it(self):
-        self.b.cube_north=CubeNorth();self.b.land_north=LandNorth()
-        self.b.output_permitted=True;self.b.get_logger=Mock(return_value=Mock())
-        self.b.compass_health=(10.,True);self.b.raw_gps_health=(10.,True)
-        self.b.params={k:(10.,v) for k,v in PROFILE.items()}
-        self.b.params.update({k:(10.,v) for k,v in dict(COMPASS_ENABLE=1,COMPASS_USE=1,COMPASS_DEV_ID=123,COMPASS_LEARN=0,EK3_GSF_RUN_MASK=7,EK3_GSF_USE_MASK=3,EK3_IMU_MASK=7).items()})
-        result=self.b.compass_action('compass_start',NS())
-        self.assertTrue(result.success,result.message)
-        self.b.compass_action.__func__.__globals__['require_maintenance'].assert_not_called()
-        self.assertFalse(self.b.output_permitted)
-        calls=self.b.link.send.call_args_list
-        self.assertEqual({c.args[3] for c in calls},{k.encode() for k in (*CALIBRATION_CHANGES,'COMPASS_LEARN')})
-        self.b.link.command.assert_not_called();self.b.link.set_mode.assert_not_called()
-        self.b.params.update({k:(10.,v) for k,v in CALIBRATION_PROFILE.items()})
-        self.b.params['COMPASS_LEARN']=(10.,3)
-        self.b.cube_north.observe(10.,self.b.params,90.,30.,True)
-        self.b.cube_north.message(10.,'CompassLearn: Finished')
-        self.b.params['COMPASS_LEARN']=(10.,0)
-        for i in range(31):
-            t=10+i*.1
-            self.b.params={k:(t,v[1]) for k,v in self.b.params.items()}
-            self.b.cube_north.observe(t,self.b.params,90.,30.,True)
-        self.clock.now=13.
-        self.b.est.imu_at=13.
-        result=self.b.compass_action('compass_capture',NS())
-        self.assertTrue(result.success,result.message)
-        self.assertAlmostEqual(self.b.land_north.reference['offset_deg'],60.)
-        self.assertEqual(self.b.cube_north.phase,'restoring')
-        self.assertFalse(self.b.output_permitted)
-        self.assertTrue(self.b.compass_action('compass_cancel',NS()).success)
-        self.assertAlmostEqual(self.b.land_north.reference['offset_deg'],60.)
-        self.b.compass_action.__func__.__globals__['require_compass_setup'].side_effect=ValueError('Select MANUAL')
-        self.b.link.send.reset_mock()
-        self.assertFalse(self.b.compass_action('compass_cancel',NS()).success)
-        self.b.link.send.assert_not_called()
+    def test_startup_discovery_grace_then_short_running_watchdog(self):
+        a=TrackNorth();a.begin();self.b.est.north_alignment=a
+        self.b.motion_north_started=6.
+        self.b.tick();self.assertTrue(a.active)
+        self.b.motion_north_received=9.
+        self.b.tick();self.assertFalse(a.active)
 
     def test_land_capture_then_prepare_retains_north_without_land_depth_or_dvl(self):
         self.b.land_north=LandNorth()
@@ -140,7 +56,7 @@ class TransportTests(unittest.TestCase):
         response=self.b.align_land(request,NS(result=NS()))
         self.assertTrue(response.result.successful,response.result.reason)
         self.assertFalse(self.b.output_permitted)
-        self.b.params={k:(10.,v) for k,v in PROFILE.items()}
+        self.b.params={k:(10.,v) for k,v in dict(PROFILE,COMPASS_LEARN=0).items()}
         self.b.pressures=deque((8.+i*.1,1000.) for i in range(21))
         response=self.b.prepare(NS(data=True),NS())
         self.assertTrue(response.success,response.message)
@@ -180,7 +96,7 @@ class TransportTests(unittest.TestCase):
         self.clock = NS(now=10.)
         ns = dict(SteadyNode=object, math=math, json=json, String=NS, PROFILE=PROFILE,
                   yaw=yaw, time=NS(monotonic=lambda: self.clock.now),
-                  statistics=statistics, BridgeEstimator=BridgeEstimator, require_maintenance=Mock(), require_compass_setup=Mock(), AutomaticRecovery=AutomaticRecovery, COMPASS_PARAMS=COMPASS_PARAMS, CALIBRATION_CHANGES=CALIBRATION_CHANGES,RESTORE_PROFILE=RESTORE_PROFILE)
+                  statistics=statistics, BridgeEstimator=BridgeEstimator,TrackNorth=TrackNorth, require_maintenance=Mock(), AutomaticRecovery=AutomaticRecovery)
         exec(compile(tree, str(path), 'exec'), ns)
         self.b = ns['FusedNavBridge'].__new__(ns['FusedNavBridge'])
         self.b.est = BridgeEstimator()
@@ -259,7 +175,7 @@ class TransportTests(unittest.TestCase):
             self.b.link.odometry.assert_not_called()
 
     def test_profile_readback_expires_and_inhibits_output(self):
-        self.b.params = {k: (10., v) for k, v in PROFILE.items()}
+        self.b.params = {k: (10., v) for k, v in dict(PROFILE,COMPASS_LEARN=0).items()}
         self.assertTrue(self.b.configured(10.))
         self.assertFalse(self.b.configured(13.))
         self.b.tick()
@@ -274,7 +190,7 @@ class TransportTests(unittest.TestCase):
 
     def test_armed_start_latches_fault_and_missing_heartbeat_blocks_output(self):
         self.b.start_checked = False
-        self.b.params = {k: (10., v) for k, v in PROFILE.items()}
+        self.b.params = {k: (10., v) for k, v in dict(PROFILE,COMPASS_LEARN=0).items()}
         self.b.est.status = lambda now: dict(healthy=not self.b.est.fault)
         self.b.tick()
         self.b.link.odometry.assert_not_called()
@@ -286,7 +202,7 @@ class TransportTests(unittest.TestCase):
         self.assertTrue(self.b.est.fault)  # Must restart; no automatic recovery.
 
     def test_prepare_requires_confirmed_surface_and_restarts_alignment_with_reset_counter(self):
-        self.b.params = {k:(10.,v) for k,v in PROFILE.items()}
+        self.b.params = {k:(10.,v) for k,v in dict(PROFILE,COMPASS_LEARN=0).items()}
         self.b.pressures.extend((8.+i*.1,1000.+i*.001) for i in range(21))
         self.b.est.set_origin((33.,-117.,0.))
         self.b.est.initialized = True
@@ -307,7 +223,7 @@ class TransportTests(unittest.TestCase):
         self.b.link.command.assert_not_called()
 
     def test_prepare_rejects_unstable_pressure_or_failed_calibration(self):
-        self.b.params = {k:(10.,v) for k,v in PROFILE.items()}
+        self.b.params = {k:(10.,v) for k,v in dict(PROFILE,COMPASS_LEARN=0).items()}
         for phase,spread in (('failed',0.),('collecting',0.),('idle',20.)):
             self.b.vn_calibration = (10.,dict(phase=phase))
             self.b.pressures = deque((8.+i*.1,1000.+spread*i/20) for i in range(21))
@@ -321,7 +237,7 @@ class TransportTests(unittest.TestCase):
                 self.assertEqual(PROFILE[f'EK3_SRC{slot}_{axis}'], 6)
 
     def test_fast_receive_polling_does_not_flood_odometry(self):
-        self.b.params = {k: (10., v) for k, v in PROFILE.items()}
+        self.b.params = {k: (10., v) for k, v in dict(PROFILE,COMPASS_LEARN=0).items()}
         self.b.est.status = lambda now: dict(healthy=True)
         self.b.tick()
         self.clock.now = 10.01

@@ -12,13 +12,17 @@ import subprocess
 import threading
 import time
 import urllib.request
+import urllib.error
 import uuid
 
 
 def api(body=None):
     req=urllib.request.Request('http://127.0.0.1:8090/api/calibration',
         data=json.dumps(body).encode() if body else None,headers={'Content-Type':'application/json'})
-    with urllib.request.urlopen(req,timeout=3) as f:return json.load(f)
+    try:
+        with urllib.request.urlopen(req,timeout=3) as f:return json.load(f)
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(error.read().decode()) from error
 
 
 def main():
@@ -34,6 +38,7 @@ def main():
             proc=subprocess.Popen(['bash','sitl/run.sh'],env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
         os.environ.update(ROS_DOMAIN_ID='73',ROS_LOCALHOST_ONLY='1')
         import rclpy
+        from rclpy.clock import Clock, ClockType
         from std_msgs.msg import String,Bool
         from robotx_graey_2026.api.pixhawk.mavlink import Link
         rclpy.init();node=rclpy.create_node('isolated_north_maneuver_fixture')
@@ -49,11 +54,14 @@ def main():
                 sa_active=not actual['armed'],esc_commanded_on=actual['armed'],
                 mission_claimed=actual['claim'],autonomous=False,inhibit=''))))
             vn.publish(String(data=json.dumps(dict(phase='idle',reason='Isolated synthetic VN'))))
-        node.create_timer(.1,publish)
+        # Match production scheduling: host UTC adjustments must not stall the
+        # synthetic control watchdog and create a false takeover in this test.
+        steady_clock=Clock(clock_type=ClockType.STEADY_TIME)
+        node.create_timer(.1,publish,clock=steady_clock)
         def spin():
             while not stop.is_set():rclpy.spin_once(node,timeout_sec=.05)
         worker=threading.Thread(target=spin);worker.start()
-        link=None;prepared=started=False;seen=[];deadline=time.monotonic()+160
+        link=None;prepared=started=False;seen=[];deadline=time.monotonic()+240
         last=None
         while time.monotonic()<deadline:
             if proc.poll() is not None:raise RuntimeError('Owned SITL exited')
@@ -79,9 +87,10 @@ def main():
                 if link is None:link=Link('udpout:127.0.0.1:14559',202,system=255)
                 link.heartbeat();link.set_mode(19)
                 if not actual['armed']:link.command(400,1)
-                else:
-                    time.sleep(.3)
-                    api(dict(action='align_auto',clearance_confirmed=True,max_distance_m=6.))
+                elif (state['controller'].get('armed') is True
+                      and state['controller'].get('sa_active') is False
+                      and state['controller'].get('esc_commanded_on') is True):
+                    api(dict(action='align_auto',clearance_confirmed=True,max_distance_m=10.))
                     started=True
             motion=streams.get('north_maneuver',{}).get('data',{})
             stage=motion.get('stage')
