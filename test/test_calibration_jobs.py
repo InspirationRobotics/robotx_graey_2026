@@ -42,15 +42,15 @@ class CalibrationJobsTests(unittest.TestCase):
         from unittest.mock import Mock
         self.job.maneuver=Mock()
         with self.assertRaisesRegex(ValueError,'Run GPS/DVL Prepare'):
-            self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=10.))
+            self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=5.))
         self.job.job=dict(busy=True,action='prepare',alignment_mode='gps')
         with self.assertRaisesRegex(ValueError,'Confirm clear'):
-            self.job.request(dict(action='align_auto',max_distance_m=10.))
+            self.job.request(dict(action='align_auto',max_distance_m=5.))
         with self.assertRaisesRegex(ValueError,'Wait for qualified'):
-            self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=10.))
+            self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=5.))
         self.put('bridge',dict(gps_eligible=True,inputs=dict(vn=True,dvl=True),gps_admission=dict(qualified=True)))
-        self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=10.))
-        self.job.maneuver.assert_called_once_with('start',10.)
+        self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=5.))
+        self.job.maneuver.assert_called_once_with('start',5.)
         self.assertTrue(self.job.snapshot()['auto_started'])
         self.assertFalse(self.job.waypoint_permission)
         self.job.request(dict(action='cancel'))

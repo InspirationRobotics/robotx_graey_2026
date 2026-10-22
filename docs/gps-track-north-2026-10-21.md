@@ -115,3 +115,14 @@ output states: all 25 readbacks refreshed within 2.005 seconds. Evidence:
 `sitl/logs/parameter-polling-20261021-233854/result.json`.
 No live deployment was performed. First physical run must verify mounting,
 forward/lateral/yaw signs, neutral vertical behavior and stopping clearance.
+
+## Five-metre revision
+
+The user requested 5 m instead of 10 m, with only targeted checks. The current
+run target is 5 m: brake at 4.5 m, require at least 4 m usable GPS/DVL baseline,
+and retain 2 m stopping clearance (7 m hard travel limit). Speed, feedback,
+freshness and quality thresholds are unchanged. A shorter baseline can reject
+GPS that would have passed the longer run; no accuracy gate was weakened.
+Targeted maneuver/transport checks (13), closed-loop checks (2) and GUI checks
+passed. This supersedes the 10 m distances above; that native run remains
+historical evidence and was not rerun as a 5 m native mission.

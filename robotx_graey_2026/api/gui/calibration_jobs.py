@@ -107,10 +107,10 @@ class CalibrationJobs:
                         or not b.get('inputs',{}).get('vn') or not (b.get('gps_admission') or {}).get('qualified')
                         or (b.get('north_alignment') or {}).get('aligned')):
                     raise ValueError('Wait for qualified surface GPS, DVL and VN before starting movement')
-                if body.get('max_distance_m') != 10:
-                    raise ValueError('This alignment run requires 10 m plus stopping clearance')
+                if body.get('max_distance_m') != 5:
+                    raise ValueError('This alignment run requires 5 m plus stopping clearance')
                 self.service('begin_motion_north')
-                self.maneuver('start',10.)
+                self.maneuver('start',5.)
                 self.job.update(auto_started=True,auto_started_at=self.clock(),phase='aligning',message='Automatic surface alignment started; keep clear and supervise Abort')
                 return self.snapshot()
         if action not in ('calibrate','align_land','prepare','recover_dvl','cancel'):

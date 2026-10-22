@@ -19,7 +19,7 @@ class TransportTests(unittest.TestCase):
         ns=dict(json=json,math=math,time=NS(monotonic=lambda:10.),String=lambda **k:NS(**k),Bool=lambda **k:NS(**k))
         exec(compile(tree,str(path),'exec'),ns)
         self.node=ns['NorthManeuverNode']()
-        self.node.logic=NorthManeuver(9.,10.);self.node.logic.last=9.95
+        self.node.logic=NorthManeuver(9.,5.);self.node.logic.last=9.95
         self.node.active=True;self.node.cancelled=False;self.node.stopped_at=None
         self.node.bridge_at=self.node.control_at=9.9
         self.node.pub=Mock();self.node.claim=Mock();self.node.link=Mock()

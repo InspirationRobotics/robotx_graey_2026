@@ -15,7 +15,7 @@ class TrackNorth:
         self.rows = []
         self.active = self.approved = False
         self.last_fix = None
-        self.reason = 'Prepare surface sensors, then explicitly start the 10 m alignment run'
+        self.reason = 'Prepare surface sensors, then explicitly start the 5 m alignment run'
 
     def begin(self):
         self.__init__()
@@ -74,8 +74,8 @@ class TrackNorth:
             return [(r[0]-mean[0], r[1]-mean[1]) for r in rows]
         g, d = centered(gps), centered(dvl)
         travel = math.dist(dvl[0], dvl[-1])
-        if travel < 9:
-            return self.reject(f'Recording coordinate track: {travel:.1f}/9 m usable baseline')
+        if travel < 4:
+            return self.reject(f'Recording coordinate track: {travel:.1f}/4 m usable baseline')
         dot = sum(a*c+b*e for (a,b),(c,e) in zip(d,g))
         cross = sum(a*e-b*c for (a,b),(c,e) in zip(d,g))
         angle = math.atan2(cross, dot)
@@ -84,7 +84,7 @@ class TrackNorth:
         scale = math.hypot(dot,cross)/max(energy,1e-9)
         residual = math.sqrt(sum((cs*a-sn*b-c)**2+(sn*a+cs*b-e)**2 for (a,b),(c,e) in zip(d,g))/len(d))
         # Reported accuracy is not reduced by sqrt(N): correlated GPS bias is
-        # common. A 10 m run may legitimately be insufficient in poor reception.
+        # common. A 5 m run may legitimately be insufficient in poor reception.
         uncertainty = math.degrees(math.atan2(2*max(r[5] for r in self.rows),travel))
         if not .75 <= scale <= 1.25 or residual > .75 or uncertainty > 12:
             self.candidate = None

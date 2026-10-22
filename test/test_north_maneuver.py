@@ -4,7 +4,7 @@ from robotx_graey_2026.api.navigation.north_maneuver import NorthManeuver
 
 class ManeuverTests(unittest.TestCase):
     def setUp(self):
-        self.run=NorthManeuver(0.,10.)
+        self.run=NorthManeuver(0.,5.)
         self.o=dict(control_ok=True,fresh=True,depth=0.,yaw=40.,rate=0.,
             speed=.6,forward=.6,dvl_valid=True,gps_qualified=True,gps_speed=.6,candidate_ready=False)
 
@@ -15,7 +15,7 @@ class ManeuverTests(unittest.TestCase):
         for i in range(1,121):
             x,r=self.step(i*.05)
             self.assertGreaterEqual(x,0);self.assertEqual(r,0)
-        self.run.distance=9.6
+        self.run.distance=4.6
         x,r=self.step(6.05,candidate_ready=True,speed=.1,forward=.1)
         self.assertLess(x,0);self.assertEqual(self.run.stage,'SETTLE')
         for i in range(122,184):self.step(i*.05,candidate_ready=True,speed=0.,forward=0.,gps_speed=0.)
@@ -23,7 +23,7 @@ class ManeuverTests(unittest.TestCase):
         self.assertEqual(self.run.thrust,0)
 
     def test_settling_brakes_body_velocity_with_bounded_commands(self):
-        self.run.distance=9.6
+        self.run.distance=4.6
         x,r=self.step(.05,candidate_ready=True,forward=.6,sideways=-.4)
         self.assertEqual(x,-300);self.assertEqual(self.run.lateral_command,300)
 
@@ -47,9 +47,9 @@ class ManeuverTests(unittest.TestCase):
         self.assertEqual(self.run.stage,'ABORTED')
 
     def test_candidate_never_stops_run_early_or_extends_it_when_missing(self):
-        for i in range(1,200):self.step(i*.05,candidate_ready=True)
+        for i in range(1,100):self.step(i*.05,candidate_ready=True)
         self.assertEqual(self.run.stage,'MOVE')
-        for i in range(200,350):self.step(i*.05,candidate_ready=False)
+        for i in range(100,350):self.step(i*.05,candidate_ready=False)
         self.assertEqual(self.run.stage,'ABORTED')
 
     def test_sustained_sensor_loss_aborts_without_accepting_heading(self):
@@ -57,7 +57,7 @@ class ManeuverTests(unittest.TestCase):
         self.assertEqual(self.run.stage,'ABORTED')
 
     def test_stationary_gps_wandering_cannot_finish(self):
-        self.run.distance=9.6
+        self.run.distance=4.6
         self.step(.05,candidate_ready=True)
         for i in range(2,120):self.step(i*.05,speed=0.,gps_speed=.4,candidate_ready=True)
         self.assertEqual(self.run.stage,'SETTLE')

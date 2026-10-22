@@ -12,7 +12,7 @@ from .north_maneuver import NorthManeuver
 class NorthManeuverNode(SteadyNode):
     def __init__(self):
         super().__init__('north_maneuver')
-        self.declare_parameter('max_distance_m',10.)
+        self.declare_parameter('max_distance_m',5.)
         self.logic = NorthManeuver(time.monotonic(),self.get_parameter('max_distance_m').value)
         # Exclusive with waypoint_mission through GUI mission inventory and lease.
         self.link = Link('udpout:127.0.0.1:14553',198,self.get_logger(),system=255)

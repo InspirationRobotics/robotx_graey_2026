@@ -6,7 +6,7 @@ from robotx_graey_2026.api.navigation.track_north import TrackNorth
 
 
 def simulate(offset=73, bad_gps=False, dropout=False, cancel=False):
-    a=TrackNorth();a.begin();m=NorthManeuver(0.,10.)
+    a=TrackNorth();a.begin();m=NorthManeuver(0.,5.)
     v=x=0.;dt=.05;last=None
     for i in range(1,1201):
         t=i*dt;x+=v*dt
@@ -17,7 +17,7 @@ def simulate(offset=73, bad_gps=False, dropout=False, cancel=False):
             # become a yaw correction. DVL stays in the relative VN frame.
             gn=x*math.cos(angle)+2+.02*math.sin(t)
             ge=x*math.sin(angle)-3+.02*math.cos(t)
-            if bad_gps and t>10:ge+=8
+            if bad_gps and t>5:ge+=8
             last=dict(cube_fix_time_us=i*50000,lat=32+gn/111320,
                 lon=-117+ge/(111320*math.cos(math.radians(32))),accuracy=.3)
             a.observe(t,last,(v,0,0),(0,0,0),(1,0,0,0),(x,0,0))
@@ -35,11 +35,11 @@ def simulate(offset=73, bad_gps=False, dropout=False, cancel=False):
 
 
 class LoopTests(unittest.TestCase):
-    def test_known_offsets_complete_near_ten_metres_without_compass(self):
+    def test_known_offsets_complete_near_five_metres_without_compass(self):
         for offset in (0,73,-170):
             m,a,x=simulate(offset)
             self.assertEqual(m.stage,'COMPLETE',m.reason)
-            self.assertTrue(9<=x<=12,x)
+            self.assertTrue(4<=x<=7,x)
             self.assertLess(abs(a.offset-offset),1)
 
     def test_distorted_gps_dropout_and_cancel_never_publish_offset(self):
@@ -47,4 +47,4 @@ class LoopTests(unittest.TestCase):
             m,a,x=simulate(**args)
             self.assertEqual(m.stage,'ABORTED')
             self.assertIsNone(a.offset)
-            self.assertLess(x,12)
+            self.assertLess(x,7)

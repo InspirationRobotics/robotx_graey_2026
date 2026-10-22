@@ -11,8 +11,8 @@ class NorthManeuver:
     terminal = {'COMPLETE', 'ABORTED'}
 
     def __init__(self, now, max_distance):
-        if isinstance(max_distance, bool) or not isinstance(max_distance, (int,float)) or not math.isfinite(max_distance) or not max_distance == 10:
-            raise ValueError('Confirm 10 m of clear travel plus additional stopping clearance')
+        if isinstance(max_distance, bool) or not isinstance(max_distance, (int,float)) or not math.isfinite(max_distance) or not max_distance == 5:
+            raise ValueError('Confirm 5 m of clear travel plus additional stopping clearance')
         self.limit = max_distance
         self.stage, self.reason = 'MOVE', 'Collecting surface GPS/DVL north alignment'
         self.started = self.last = now
@@ -66,7 +66,7 @@ class NorthManeuver:
         if self.stage == 'MOVE':
             if self.distance >= self.limit-.5:
                 if not o.get('candidate_ready'):
-                    return self.abort('10 m run did not produce a reliable GPS coordinate track; no north accepted')
+                    return self.abort('5 m run did not produce a reliable GPS coordinate track; no north accepted')
                 self.stage, self.reason = 'SETTLE', 'DVL velocity braking; verifying stationary GPS/DVL for 3 seconds'
                 self.thrust = 0.
             elif now-self.started > 45:

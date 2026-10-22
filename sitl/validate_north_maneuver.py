@@ -90,7 +90,7 @@ def main():
                 elif (state['controller'].get('armed') is True
                       and state['controller'].get('sa_active') is False
                       and state['controller'].get('esc_commanded_on') is True):
-                    api(dict(action='align_auto',clearance_confirmed=True,max_distance_m=10.))
+                    api(dict(action='align_auto',clearance_confirmed=True,max_distance_m=5.))
                     started=True
             motion=streams.get('north_maneuver',{}).get('data',{})
             stage=motion.get('stage')
