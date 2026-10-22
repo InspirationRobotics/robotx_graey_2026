@@ -266,6 +266,7 @@ def main():
             "fade": cmap.fade,
             "band": list(cmap.band) if cmap.band else None,
             "compact": cmap.compact, "near": cmap.near_m, "far": cmap.far_m,
+            "floorBand": list(cmap.floor_band) if cmap.floor_band else None,
             "turning": cmap.turning and run["state"] == "running",
             "skippedTurning": cmap.skipped_turning,
             "slice": reach(*sector_arc(*cur["sector"]), cur["range"]),
@@ -298,6 +299,7 @@ def main():
         cmap.fade = webview.fade()
         cmap.band = webview.band()
         cmap.compact = webview.compact()
+        cmap.floor_band = webview.floor_band()
         cmap.near_m = webview.near()
         cmap.far_m = webview.far()
         take(partial)
@@ -321,6 +323,7 @@ def main():
             fade=cmap.fade,
             band_m=np.array(cmap.band if cmap.band else (np.nan, np.nan), float),
             compact=cmap.compact, near_m=cmap.near_m, far_m=cmap.far_m,
+            floor_band_m=np.array(cmap.floor_band if cmap.floor_band else (np.nan, np.nan), float),
             floor_cut_m=cmap.floor_cut_m,
             range_m=cur["range"], sector=np.array(cur["sector"]),
             threshold=cmap.threshold, state=run["state"], map_epoch=cur["epoch"],
@@ -346,6 +349,7 @@ def main():
         cmap.fade = webview.fade()
         cmap.band = webview.band()
         cmap.compact = webview.compact()
+        cmap.floor_band = webview.floor_band()
         cmap.near_m = webview.near()
         cmap.far_m = webview.far()
         cmap.new_sweep()

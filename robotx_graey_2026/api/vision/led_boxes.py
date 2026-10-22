@@ -26,7 +26,8 @@ import urllib.request
 
 import numpy as np
 
-SMALL = (160, 90)              # frames are judged at this size: plenty for a lit LED box
+SMALL = (320, 180)             # frames are judged at this size: a lake LED ring ~1 m below is only
+                               # 15-300 px of it (Oct 18)
 
 # HSV ranges, on OpenCV's scale: H 0-179 (half degrees: 0 red, 30 yellow, 60 green,
 # 120 blue), S and V 0-255. Measured on the pool footage (down camera, Oct 15-17): the
@@ -34,23 +35,24 @@ SMALL = (160, 90)              # frames are judged at this size: plenty for a li
 # 105-109; between green and blue (90-104) is the glow at a light's edge. LED pixels
 # have S 130-255; the washed-out white middle and pale halo S < 65. Red sits at both
 # ends of the hue circle, so it needs two ranges; orange (to 20) counts as red.
-V_MIN = 140                    # bright: the LED, not the water. 140 found exactly the lights the old RGB
-                               # rule did on all the pool footage; 100 also caught a dim red flash the old
-                               # rule missed and lights at the picture's edge, and makes every light bigger
-                               # (shares x1.4, so pair it with light_min_share ~0.14) (Oct 18)
-S_MIN = 100                    # strongly coloured: not the white-hot middle or grey water
+V_MIN = 100                    # bright: the LED, not the water. Red LEDs are dim (V 80-150): at 150 a red
+                               # flash was lost in the pool; the lake water is rejected by S, not V
+S_MIN = 150                    # strongly coloured. Lake, daylight (Oct 18): the whole picture is olive-green
+                               # water over rocks, S ~100-140 at V 140-180, so S 100 called the water a light;
+                               # the LED rings are S 150+. Pool LEDs are S 130-255 (median 254)
 HUES = {
-    'red': ((0, 20), (160, 180)),
+    'red': ((0, 10), (160, 180)),
     'yellow': ((20, 35),),
     'green': ((35, 97),),
     'blue': ((97, 140),),
 }
 # The survey's colours (Ruth, Oct 17): while the pipeline is surveyed its lights are only
-# GREEN or RED, so every coloured pixel counts as whichever of the two its hue is nearer:
-# the splits are halfway between the LEDs' hues (red ~178, green ~77). A green LED's
-# blue-ish edge is green, not a third colour (Oct 16 footage).
+# GREEN or RED, so a coloured pixel counts as whichever of the two its hue is nearer - except
+# orange (H 10-38): the lake pipe has orange tags and cable, which counted as red lights
+# (Oct 18), and the red LEDs are H 175-179 and 0-4. A green LED's blue-ish edge is green,
+# not a third colour (Oct 16 footage).
 SURVEY_HUES = {
-    'red': ((0, 38), (128, 180)),
+    'red': ((0, 10), (128, 180)),
     'green': ((38, 128),),
 }
 
@@ -145,7 +147,12 @@ class LightTracker:
     camera, whichever way the camera is turned. Repeat sightings of a colour within
     same_m are that light again; boxes holds the lights, in BoxTracker's format."""
 
-    def __init__(self, min_frac=0.02, gap_s=1.0, same_m=0.3, new_frac=0.04, link=0.6):
+    def __init__(self, min_frac=0.02, gap_s=1.0, same_m=0.3, new_frac=0.10, link=0.6):
+        # A NEW light must once be seen whole - its blob clear of the picture's edge - or be big
+        # (new_frac of the picture): glimpses at the edge (pool, Oct 16-17: 5-8%) sat in the wrong
+        # place and were counted twice, while a lake ring ~1 m below is whole but tiny (0.03-6%,
+        # Oct 18). min_frac drops specks: 0.02 suits the pool, where the camera is close and the
+        # glow breaks into many small pieces; ~0.0003 the lake (light_min_frac).
         self.min_frac, self.gap_s, self.same_m, self.new_frac = min_frac, gap_s, same_m, new_frac
         self.link = link            # a blob this close (picture half-widths) to a track's last is that track:
                                     # 0.6 kept one track per real light on the Oct 15-16 footage (0.35 split
@@ -155,23 +162,28 @@ class LightTracker:
 
     @staticmethod
     def blobs(rgb, min_frac):
-        """(colour, x, y, share): x, y from -1 to 1 across the picture, share of its area."""
+        """(colour, x, y, share, whole): x, y from -1 to 1 across the picture, share of its area,
+        whole = the blob is clear of the picture's edge."""
         import cv2
         h, w = rgb.shape[:2]
         out = []
         for colour, mask in hsv_masks(rgb, SURVEY_HUES).items():
-            n, _, stats, cents = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+            # close small gaps, so a ring's separate LEDs and a glow's pieces are one blob
+            mask = cv2.morphologyEx(mask.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+            n, _, stats, cents = cv2.connectedComponentsWithStats(mask, connectivity=8)
             for k in range(1, n):
                 share = stats[k, cv2.CC_STAT_AREA] / float(h * w)
                 if share >= min_frac:
-                    out.append((colour, cents[k][0] / w * 2 - 1, cents[k][1] / h * 2 - 1, share))
+                    x0, y0, bw, bh = (int(v) for v in stats[k, :4])
+                    whole = x0 > 0 and y0 > 0 and x0 + bw < w and y0 + bh < h
+                    out.append((colour, cents[k][0] / w * 2 - 1, cents[k][1] / h * 2 - 1, share, whole))
         return out
 
     def update(self, t, rgb, pos):
         """One frame at time t (s); pos = (north, east) of the camera, or None.
         Returns the lights whose sightings just ended (new or seen again): a list."""
         free = list(self._tracks)
-        for colour, x, y, share in sorted(self.blobs(rgb, self.min_frac), key=lambda b: -b[3]):
+        for colour, x, y, share, whole in sorted(self.blobs(rgb, self.min_frac), key=lambda b: -b[3]):
             best = None
             for tr in free:
                 dd = math.hypot(x - tr['x'], y - tr['y'])
@@ -181,9 +193,10 @@ class LightTracker:
                 tr = best[1]
                 free.remove(tr)
             else:
-                tr = {'colour': colour, 't0': t, 'best': 0.0, 'mid': 9.0, 'pos': pos}
+                tr = {'colour': colour, 't0': t, 'best': 0.0, 'mid': 9.0, 'pos': pos, 'whole': False}
                 self._tracks.append(tr)
             tr['x'], tr['y'], tr['last'], tr['best'] = x, y, t, max(tr['best'], share)
+            tr['whole'] = tr['whole'] or whole
             if math.hypot(x, y) < tr['mid']:
                 tr['mid'] = math.hypot(x, y)
                 if pos is not None:
@@ -209,7 +222,7 @@ class LightTracker:
                 b['colours'][colour] = max(b['colours'][colour], tr['best'])
                 b['new'] = False
                 return b
-        if tr['best'] < self.new_frac:
+        if not tr['whole'] and tr['best'] < self.new_frac:
             return None                     # a glimpse, not a light
         b = {'n': pos[0] if pos else None, 'e': pos[1] if pos else None, 'colour': colour,
              'colours': {colour: tr['best']}, 'sightings': 1, 'first_t': tr['t0'], 'last_t': tr['last'],

@@ -75,6 +75,7 @@ import math
 import numpy as np
 
 from . import settings as S
+from . import floorline
 
 THRESHOLD = 100         # smoothed echo strength, 0-255, that makes a crumb. A guess:
                         # the pool pipe peaked ~125 out to 2.25 m.
@@ -149,7 +150,7 @@ class CrumbMap:
     def __init__(self, threshold=THRESHOLD, max_per_ping=MAX_PER_PING,
                  sonar_fwd_m=S.SONAR_FWD_M, sonar_right_m=S.SONAR_RIGHT_M,
                  max_turn_dps=MAX_TURN_DPS, floor_cut_m=FLOOR_CUT_M, fade=True, band=None,
-                 compact=False, near_m=0.0, far_m=0.0):
+                 compact=False, near_m=0.0, far_m=0.0, floor_band=None):
         self.threshold = threshold
         self.floor_cut_m = floor_cut_m
         self.max_per_ping = max_per_ping
@@ -163,6 +164,9 @@ class CrumbMap:
                                     # blind zone. 1.05 also drops the ringing just past it (Oct 11)
         self.far_m = far_m          # no crumbs farther than this; 0 = out to the range. In the pool
                                     # most wrong dots were 3-5.6 m out, the pipe 0.8-2.1 m (Oct 14)
+        self.floor_band = floor_band    # (lo, hi) m above the floor line: the floor filter
+                                    # (floorline.py) makes the crumbs instead of threshold, band,
+                                    # floor cut and little dots. None = off
         self.clear()
 
     def clear(self):
@@ -171,6 +175,7 @@ class CrumbMap:
         self.turning = False        # was the last ping ignored for turning?
         self.skipped_turning = 0
         self._pending = []          # little dots only: this sweep's pings, judged when it ends
+        self.floor_pts = np.zeros((0, 2))   # the floor filter's last floor line (side, up)
 
     def new_sweep(self):
         """Call at the start of every sweep, including one cut short."""
@@ -187,6 +192,8 @@ class CrumbMap:
             return 0
         n = len(pend[0][1])
         pend = [p for p in pend if len(p[1]) == n and p[2] == pend[0][2]]   # one sweep's geometry
+        if self.floor_band is not None:
+            return self._floor_filter(pend)
         tall = tall_mask([p[1] for p in pend], [p[0] for p in pend], pend[0][2], self.threshold)
         added = 0
         for k, (a_deg, raw, mpb, pose, sm, peaks) in enumerate(pend):
@@ -207,6 +214,10 @@ class CrumbMap:
             return 0
         if self.fade:
             self._fade(angle_deg, pose, step_deg, max_range_m)
+        if self.floor_band is not None:     # the floor filter needs the whole sweep
+            raw = np.convolve(np.asarray(row, float), np.ones(SMOOTH_BINS) / SMOOTH_BINS, "same")
+            self._pending.append((angle_deg, raw, metres_per_bin, pose, raw, []))
+            return 0
         if self.compact:
             raw, sm, peaks = self._peaks(angle_deg, row, metres_per_bin, pose)
             self._pending.append((angle_deg, raw, metres_per_bin, pose, sm, peaks))
@@ -292,6 +303,19 @@ class CrumbMap:
         if not keep.all():
             for f in _FIELDS:
                 c[f] = c[f][keep]
+
+    def _floor_filter(self, pend):
+        """The floor filter on one sweep's pings: crumbs at its dots."""
+        sm = np.array([p[1] for p in pend])
+        alts = [p[3].alt_m for p in pend if p[3].alt_m > 0]
+        dots, self.floor_pts = floorline.pipe_dots(
+            sm, [p[0] for p in pend], pend[0][2], self.floor_band,
+            float(np.median(alts)) if alts else float("nan"), self.near_m, self.far_m)
+        added = 0
+        for k, b in dots:
+            a_deg, raw, mpb, pose, _, _ = pend[k]
+            added += self._place(a_deg, [b], raw, mpb, pose)
+        return added
 
     def _add(self, a_deg, row, metres_per_bin, pose):
         _, sm, peaks = self._peaks(a_deg, row, metres_per_bin, pose)

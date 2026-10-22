@@ -68,6 +68,8 @@ _floor_cut = 0.0                     # m above the floor with no crumbs; 0 = off
 _fade = True                         # newer sweeps wipe crumbs they don't see again
 _band = None                         # (lo, hi) m from the sonar's height that make crumbs; None = all
 _compact = False                     # little dots only: wall-like tall echoes make no crumbs
+_floor_band = None                   # (lo, hi) m above the floor line: the floor filter (floorline.py)
+                                     # makes the crumbs; None = off. Only missions set it
 _far = 0.0                           # no crumbs farther than this, m; 0 = out to the range. Missions set it
 _near = 0.0                          # no crumbs closer than this, m; 0 = the blind zone only. Only
                                      # missions set it (the pool scan skips the ringing), not the page
@@ -258,6 +260,18 @@ def set_band(band):
 def band():
     with _lock:
         return _band
+
+
+def set_floor_band(band):
+    """(lo, hi) m above the floor line for the floor filter, or None = off."""
+    global _floor_band
+    with _lock:
+        _floor_band = None if band is None else (float(band[0]), float(band[1]))
+
+
+def floor_band():
+    with _lock:
+        return _floor_band
 
 
 def set_compact(flag):
@@ -756,7 +770,8 @@ class _Handler(BaseHTTPRequestHandler):
         """
         global _target, _range, _sector, _threshold
         if self.path in ('/sector', '/threshold', '/floorcut', '/mapcmd', '/record', '/mark',
-                         '/missionpoint', '/fade', '/band', '/compact', '/near', '/far'):
+                         '/missionpoint', '/fade', '/band', '/compact', '/near', '/far',
+                         '/floorband'):
             self._map_post()
             return
         if self.path == '/view':
@@ -814,13 +829,14 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _map_post(self):
         global _sector, _threshold, _floor_cut, _mission_point, _fade, _band, _compact, _near, _far
+        global _floor_band
         with _lock:
             on = _map_on
         if not on:
             self.send_error(404)
             return
         text = self._body().decode('utf-8', 'replace').strip()[:300]
-        if self.path == '/band':
+        if self.path in ('/band', '/floorband'):
             if text == 'off':
                 band = None
             else:
@@ -833,8 +849,14 @@ class _Handler(BaseHTTPRequestHandler):
                     self._send(b'need -20 <= lo < hi <= 20 m', 'text/plain')
                     return
                 band = (round(lo, 3), round(hi, 3))
+            if self.path == '/floorband' and band is not None and not 0 <= band[0] < band[1] <= 10:
+                self._send(b'need 0 <= lo < hi <= 10 m above the floor', 'text/plain')
+                return
             with _lock:
-                _band = band
+                if self.path == '/band':
+                    _band = band
+                else:
+                    _floor_band = band
             self._send(b'ok', 'text/plain')
             return
         if self.path in ('/near', '/far'):
@@ -970,6 +992,7 @@ class _Handler(BaseHTTPRequestHandler):
                          'sectorEditable': _sector_editable,
                          'band': list(_band) if _band else None, 'radar': _radar_geom,
                          'threshold': _threshold, 'compact': _compact, 'dots': _radar_dots,
+                         'floorBand': list(_floor_band) if _floor_band else None,
                          'rows': _rows, 'perPage': _per_page,
                          'page': _view["page"], 'selected': _view["selected"]}
             self._send(json.dumps(state).encode(), 'application/json')
