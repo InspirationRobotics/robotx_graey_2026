@@ -1468,3 +1468,16 @@ SITL source/cache verification added after discovering stale build imports.
 Temporary native-GPS compass calibration was approved by user historically but
 implementation remains checkpointed separately, not included in waypoint work.
 No deployment or main changes. See docs/waypoint-heading-loop-2026-10-20.md.
+
+2026-10-21 TETHER deployment: merged Jetson d1c4f73e sonar/LED/pipeline commits
+into tether_toggle_beichen as c29083d, preserving untracked vehicle files.
+Built installed runtime, all289 onboard+local regressions passed; GUI heading
+status served. Backup /home/graey/deployment-backups/20261021-waypoint-heading-210857.
+Core initially failed fused bridge ownership: manually launched tools/august_bridge.py
+PID10327 with yaw_offset_deg=-60 held lock. User explicitly requires latest bridge;
+safe killed/disarmed/ESCoff confirmed, stopped that session and restarted core.
+Verified one fused_nav_bridge, no August process, fresh VN/DVL/Cube/supervisor.
+No vehicle parameter writes or arm/mission commands. Postrestart source RF,
+kill engaged, disarmed, ESCoff. NOT mission ready: EK3_SRC1_POSZ actual1 vs expected6,
+output disabled, depth baseline absent and north unaligned. Do not transfer August
+-60 offset blindly. Restore/verify intended profile and prepare before water test.
