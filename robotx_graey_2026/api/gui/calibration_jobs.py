@@ -5,7 +5,7 @@ import queue
 import threading
 import time
 import uuid
-from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason
+from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason, compass_setup_reason
 
 
 class ServiceQueue:
@@ -18,10 +18,16 @@ class ServiceQueue:
         self.clients = {}
         for name, path, kind in (
             ('suspend','/graey/navigation/suspend',Trigger),
+            ('compass_suspend','/graey/navigation/compass_suspend',Trigger),
             ('pause','/graey/navigation/pause_odometry',Trigger),
             ('prepare','/graey/navigation/prepare',SetBool),
             ('recover_dvl','/graey/navigation/recover_dvl',Trigger),
             ('align_heading','/graey/navigation/align_heading',SetParametersAtomically),
+            ('align_land','/graey/navigation/align_land',SetParametersAtomically),
+            ('forget_land','/graey/navigation/forget_land',Trigger),
+            ('compass_start','/graey/navigation/compass_start',Trigger),
+            ('compass_capture','/graey/navigation/compass_capture',Trigger),
+            ('compass_cancel','/graey/navigation/compass_cancel',Trigger),
             ('calibrate','/graey/vn100/calibrate_start',Trigger),
             ('cancel','/graey/vn100/calibrate_cancel',Trigger),
             ('commission','/graey/navigation/commission',Trigger)):
@@ -54,7 +60,7 @@ class ServiceQueue:
         request = kind.Request()
         if job['name'] == 'prepare':
             request.data = job['value'] is True
-        if job['name'] == 'align_heading':
+        if job['name'] in ('align_heading','align_land'):
             request.parameters=[self.parameter(name='true_heading_deg',
                 value=self.parameter_value(type=3,double_value=float(job['value'])))]
         try:
@@ -62,7 +68,7 @@ class ServiceQueue:
             def done(result):
                 try:
                     response = result.result()
-                    if job['name']=='align_heading':
+                    if job['name'] in ('align_heading','align_land'):
                         finish(response.result.successful,response.result.reason)
                     else:
                         finish(response.success,response.message)
@@ -107,7 +113,7 @@ class CalibrationJobs:
                 self.maneuver('start',body.get('max_distance_m'))
                 self.job.update(auto_started=True,auto_started_at=self.clock(),phase='aligning',message='Automatic surface alignment started; keep clear and supervise Abort')
                 return self.snapshot()
-        if action not in ('calibrate','prepare','recover_dvl','cancel'):
+        if action not in ('calibrate','align_land','prepare','recover_dvl','cancel','compass_start','compass_capture','compass_cancel'):
             raise ValueError('Unknown calibration action')
         if action == 'cancel':
             with self.lock:
@@ -118,22 +124,27 @@ class CalibrationJobs:
                 if self.maneuver and self.job.get('auto_started'):
                     self.maneuver('abort',None)
             return self.snapshot()
-        reason = maintenance_reason(self.controller())
+        reason = (compass_setup_reason if action.startswith('compass_') else maintenance_reason)(self.controller())
         if reason or self.mission_running():
             raise ValueError(reason or 'Stop the mission before calibration or preparation')
         if body.get('confirmed') is not True:
             raise ValueError('Confirm that you read the instructions and maintained kill/disarm')
+        learning=(self.sample('bridge').get('compass_north') or {}).get('phase')
+        if learning in ('learning','captured','restoring') and action not in ('compass_capture','compass_cancel'):
+            raise ValueError('Capture or cancel active compass learning before calibration or preparation')
         if action in ('prepare','recover_dvl') and body.get('surface_confirmed') is not True:
             raise ValueError('Confirm floating stationary at the water surface before pressure calibration')
         mode=body.get('alignment_mode','gps')
         heading=body.get('true_heading_deg')
-        if action=='prepare':
-            if mode not in ('gps','known'):
+        if action in ('prepare','align_land'):
+            if mode not in ('gps','known','retained'):
                 raise ValueError('Unknown north alignment method')
-            if mode=='known' and (body.get('heading_confirmed') is not True
+            if (mode=='known' or action=='align_land') and (body.get('heading_confirmed') is not True
                     or isinstance(heading,bool) or not isinstance(heading,(int,float))
                     or not math.isfinite(heading) or not 0 <= heading < 360):
                 raise ValueError('Confirm an independently measured true heading between 0 and 360 degrees')
+            if action=='prepare' and mode=='retained' and not self.sample('bridge').get('land_north_reference'):
+                raise ValueError('Capture land north first and keep VN continuously powered; otherwise select surface movement alignment')
         with self.lock:
             if self.job.get('busy'):
                 raise ValueError('A calibration or preparation job is already active')
@@ -150,11 +161,23 @@ class CalibrationJobs:
 
     def run(self, action):
         try:
-            self.service('suspend')
-            if action != 'recover_dvl':
+            self.service('compass_suspend' if action.startswith('compass_') else 'suspend')
+            if action != 'recover_dvl' and not action.startswith('compass_'):
                 self.service('pause')
             if self.snapshot().get('cancel'):
                 raise ValueError('Preparation cancelled; navigation remains suspended')
+            if action in ('compass_start','compass_capture','compass_cancel'):
+                message=self.service(action)
+                self.update(phase='compass',busy=False,message=message)
+                return
+            if action=='align_land':
+                self.update(phase='aligning',message='Keep level, stationary and killed; capturing known true bearing')
+                self.sleep(2.2)
+                if self.snapshot().get('cancel') or maintenance_reason(self.controller()):
+                    raise ValueError('Land north capture cancelled or safety state changed')
+                message=self.service('align_land',self.snapshot()['true_heading_deg'])
+                self.update(phase='aligned_land',busy=False,message=message)
+                return
             if action == 'calibrate':
                 previous_log = self.sample('vn_calibration').get('log')
                 self.service('calibrate')
@@ -178,6 +201,8 @@ class CalibrationJobs:
                     self.sleep(.5)
                 self.service('cancel')
                 raise ValueError('Calibration timed out; inspect sensor status')
+            if action=='prepare' and self.snapshot().get('alignment_mode')!='retained' and self.sample('bridge').get('land_north_reference'):
+                self.service('forget_land')
             self.update(phase='preparing',message=(self.service('recover_dvl') if action=='recover_dvl' else self.service('prepare',True)))
             # While the first suspend/pause/reset was in flight, supervisor can
             # legitimately latch the OLD bridge fault. Wait for post-reset clean
@@ -188,6 +213,8 @@ class CalibrationJobs:
                 stamp=b.get('published_monotonic')
                 if (isinstance(stamp,(int,float)) and reset_ack <= stamp <= self.clock()
                         and not b.get('fault')):
+                    if action=='prepare' and self.snapshot().get('alignment_mode')=='retained' and not b.get('land_north_reference'):
+                        raise ValueError('Land north continuity expired during Prepare; capture north again')
                     break
                 if self.snapshot().get('cancel') or self.clock()-reset_ack>=10:
                     raise ValueError('No clean bridge status after reset; preparation stopped')

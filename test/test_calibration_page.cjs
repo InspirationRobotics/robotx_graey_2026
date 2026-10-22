@@ -10,7 +10,7 @@ async function render(state){
  return {elements,posts,expire:()=>{now=5000;el('calConfirm').onchange()}};
 }
 (async()=>{
- const safe={online:true,vehicle_fresh:true,armed:false,sa_active:true,esc_commanded_on:false,mission_claimed:false,autonomous:false};
+ const safe={online:true,vehicle_fresh:true,armed:false,mode:'MANUAL',sa_active:true,esc_commanded_on:false,mission_claimed:false,autonomous:false};
  let page=await render({controller:safe,job:{phase:'idle',busy:false},navigation:{streams:{vn_calibration:{fresh:true,data:{phase:'idle',faces:[0,0,0,0,0,0]}}}}});
  let e=page.elements;assert(e.calibrate.disabled);assert(e.prepare.disabled);
  e.calConfirm.checked=true;e.calConfirm.onchange();assert(!e.calibrate.disabled);
@@ -29,6 +29,50 @@ async function render(state){
  e.trueHeading.value='90';e.headingConfirm.checked=true;e.headingConfirm.onchange();assert(!e.prepare.disabled);
  await e.prepare.onclick();assert.equal(page.posts[0].alignment_mode,'known');assert.equal(page.posts[0].true_heading_deg,90);assert(page.posts[0].heading_confirmed);
  assert(html.includes('not an independent compass reference'));assert(html.includes('not save flash'));
+ assert(html.includes('armed MANUAL'));assert(html.includes('COMPASS_LEARN=3'));
+ assert(html.includes('No button or disarm is required for this passive capture'));
+ page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'idle'}}}}}});
+ e=page.elements;assert(!e.compassStart.disabled);assert(!html.includes('id="compassConfirm"'));
+ await e.compassStart.onclick();assert.equal(page.posts[0].action,'compass_start');assert(page.posts[0].confirmed);assert(!page.posts[0].surface_confirmed);
+ const compassState={controller:{...safe,armed:true,sa_active:false,esc_commanded_on:true},job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'idle'}}}}}};
+ page=await render(compassState);assert(!page.elements.compassStart.disabled);assert(page.elements.calibrate.disabled);
+ await page.elements.compassStart.onclick();assert.equal(page.posts[0].action,'compass_start');
+ page=await render({...compassState,navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'learning'}}}}}});
+ assert(!page.elements.compassCancel.disabled);assert(page.elements.compassStart.disabled);
+ await page.elements.compassCancel.onclick();assert.equal(page.posts[0].action,'compass_cancel');
+ const compassInstructions=html.split('<h2>2 · Compass Learn')[1].split('</section>')[0];
+ assert(!compassInstructions.includes('switch ESC power off'));assert(!compassInstructions.includes('Select disarmed'));
+ for(const change of [{armed:null},{mode:'GUIDED'},{vehicle_fresh:false},{mission_claimed:true}]){
+  page=await render({...compassState,controller:{...compassState.controller,...change}});
+  assert(page.elements.compassStart.disabled);assert(page.elements.compassStart.title.length>0);
+ }
+ page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{phase:'ready'},land_north_reference:{offset_deg:10}}}}}});
+ e=page.elements;e.healthConfirm.checked=true;e.healthConfirm.onchange();assert(!e.healthPrepare.disabled);
+ await e.healthPrepare.onclick();assert.equal(page.posts[0].action,'prepare');assert.equal(page.posts[0].alignment_mode,'retained');assert(page.posts[0].surface_confirmed);
+ for(const [north,reference,reason] of [
+  [{phase:'learning',finished_seen:false},null,'not confirmed'],
+  [{phase:'learning',finished_seen:true,learning_complete:true},null,'hold level'],
+  [{phase:'restoring'}, {offset_deg:10},'readbacks'],
+  [{phase:'cancelled'},null,'No validated north']]){
+  page=await render({controller:safe,job:{busy:false},navigation:{streams:{bridge:{fresh:true,data:{compass_north:north,land_north_reference:reference}}}}});
+  page.elements.healthConfirm.checked=true;page.elements.healthConfirm.onchange();
+  assert(page.elements.healthPrepare.disabled);assert(page.elements.healthPrepareReason.textContent.includes(reason));
+ }
+ for(const [north,expected] of [
+  [{phase:'learning',active_readback_seen:true,finished_seen:false,learning_complete:false},'RUNNING — not complete'],
+  [{phase:'learning',active_readback_seen:true,finished_seen:true,learning_complete:false},'Completion reported; waiting for mode-0 readback'],
+  [{phase:'learning',active_readback_seen:true,finished_seen:true,learning_complete:true,paired_span_s:1},'1.0/2.0 s'],
+  [{phase:'ready',finished_seen:true,learning_complete:true,reference:{offset_deg:10}},'RESTORED — ready']]){
+  page=await render({controller:safe,job:{action:'compass_start',busy:false,message:'OLD SETUP MESSAGE'},navigation:{streams:{bridge:{fresh:true,data:{compass_north:{...north,reason:'LIVE REASON'}}}}}});
+  assert(page.elements.compassStatus.textContent.includes(expected),expected);
+  assert(!page.elements.compassStatus.textContent.includes('CompassLearn: Finished'));
+  assert(page.elements.status.textContent.includes('LIVE REASON'));
+  assert(!page.elements.status.textContent.includes('OLD SETUP MESSAGE'));
+ }
+ page=await render({controller:safe,job:{phase:'idle'},navigation:{streams:{}}});
+ e=page.elements;e.trueHeading.value='90';e.headingConfirm.checked=true;e.headingConfirm.onchange();
+ assert(!e.alignLand.disabled);assert(!e.surfaceConfirm.checked);
+ await e.alignLand.onclick();assert.equal(page.posts[0].action,'align_land');assert(page.posts[0].confirmed);assert(!page.posts[0].surface_confirmed);
  const recovery={controller:safe,job:{phase:'ready'},navigation:{streams:{bridge:{fresh:true,data:{fault:'DVL continuity lost; position uncertainty requires revalidation',heading_reference_validated:true,heading_continuity_lost:false,inputs:{vn:true,dvl:true}}}}}};
  page=await render(recovery);e=page.elements;assert(e.recoverDvl.disabled);e.surfaceConfirm.checked=true;e.surfaceConfirm.onchange();assert(!e.recoverDvl.disabled);
  await e.recoverDvl.onclick();assert.equal(page.posts[0].action,'recover_dvl');assert(page.posts[0].surface_confirmed);

@@ -1,0 +1,8 @@
+{
+  "samples": 34,
+  "commands": 33,
+  "max_pressure_depth_m": 0.06000000238418554,
+  "positive_down_requests": 0,
+  "zero_vertical_requests": 29,
+  "maximum_upward_request_mps": 0.015000001192092771
+}

@@ -12,7 +12,7 @@ from rclpy.parameter import Parameter
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from .commissioning import commission_reason
-from .maintenance_safety import require_maintenance
+from .maintenance_safety import require_maintenance, require_compass_setup
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.pixhawk.mavlink import Link
 from robotx_graey_2026.api.navigation.mission_reference import MissionReference
@@ -64,14 +64,16 @@ class NavigationSupervisor(Node):
         self.latest_heading = {}
         self.create_service(Trigger, '/graey/navigation/commission', self.commission)
         self.create_service(Trigger, '/graey/navigation/suspend', self.suspend)
+        self.create_service(Trigger, '/graey/navigation/compass_suspend',
+                            lambda request, response: self.suspend(request, response, compass=True))
         self.create_timer(0.1, self.tick)
         self.create_timer(1.0, self.link.heartbeat)
         self.create_timer(5.0, self.request_telemetry)
         self.request_telemetry()
 
-    def suspend(self, request, response):
+    def suspend(self, request, response, compass=False):
         try:
-            require_maintenance()
+            (require_compass_setup if compass else require_maintenance)()
             result = self.set_parameters_atomically([
                 Parameter('active', value=False), Parameter('vehicle_validation_complete', value=False)])
             if not result.successful:

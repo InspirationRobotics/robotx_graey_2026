@@ -6,11 +6,20 @@ from robotx_graey_2026.api.pixhawk.mavlink import Link
 
 
 class SurfaceControlTests(unittest.TestCase):
-    def test_all_depths_request_ascent_never_descent(self):
+    def test_surface_deadband_never_requests_continuous_ascent_or_descent(self):
         for depth in (-.1,0.,.03,.08,.2,1.):
             n,e,d=surface_velocity((10.,-10.,0.),(0.,0.,0.),(0.,0.,0.),depth)
             self.assertLessEqual(math.hypot(n,e),.200001)
-            self.assertTrue(-.1<=d<0.)
+            self.assertTrue(-.05<=d<=0.)
+            if depth<=.03:self.assertEqual(d,0.)
+            else:self.assertLess(d,0.)
+
+    def test_depth_correction_is_continuous_bounded_and_independent_of_horizontal_target(self):
+        previous=0.
+        for depth in (.03,.030001,.04,.06,.08,.2,1.):
+            _,_,d=surface_velocity((0.,0.,0.),(0.,0.,0.),(0.,0.,0.),depth)
+            self.assertAlmostEqual(d,-min(.05,max(0.,depth-.03)*.5))
+            self.assertLessEqual(d,previous);previous=d
 
     def test_near_target_brakes_and_bad_input_rejected(self):
         n,e,d=surface_velocity((0.,0.,0.),(0.,0.,0.),(.1,-.1,0.),0.)

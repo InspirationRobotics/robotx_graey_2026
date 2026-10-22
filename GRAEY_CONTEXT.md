@@ -1334,3 +1334,106 @@ not surveyed, shoreline/photo date unverified, coverage bounded; map20mmissionli
 unchanged. User initiallyrequestedWiFi thenauthorizedtether afterWiFiunreachable.
 Tetherreadback5e6b9be,killed/disarmedESCoff,landcapturefailedlevel/stationarycheck,
 noDVLlock;deploymentpending freshsafetycheck. See docs/miramar-offline-revert-2026-10-18.md.
+
+2026-10-18 latest user decision RESTORES land VN/north preparation from5e6b9be,
+while retaining offline Miramar imagery/routes and all surface mission protections
+from2effc53. Calibration before land Capture north; independently known true bearing,
+continuous powered VN required; surface Prepare remains necessary for pressure,
+GPS/DVL/Cube commissioning. Not a land pressure calibration.254Python tests and
+both GUIJSsuitesPASS. WiFi deployment attempted only:graey.local unresolved,
+192.168.8.105 timedout. No live stateverified/no deployment/restart/parameters in
+this restoration session. Last verified Jetson2effc53. AwaitcurrentWiFiIP if needed.
+
+2026-10-19 user requests VNcalibration -> CubeCompassLearn/manualdrive -> sensor
+health GUI; clarifies Cube supplies independent north once, then offsetappliedtoVN.
+LOCAL implementation only; deploymenthold remains. New CubeNorth maintenance
+services require identifiedenabledhealthyprimarycompass/GPS,pausedodometry,killed/
+disarmedESCoff; selectcompassyaw1temporarily+LEARN3,neverarm/drive. Requiresactive
+learningreadback,firmwareFinished+learn0,independentconfiguredcompassyaw,freshpaired
+Cube/VNoffset2s/20pairs/spread<=5deg beforecapture. RestoresallExternalNavyaw6 and
+waitsreadbacks beforewaterPrepare/commission. LegacyheadingGUIhidden;3stepsclear.
+DoesNOTenableunknowncompass/reboot;previousM9Ndisabled/mountinguncertain andfirmware
+GSFsupportrequireliveverification. Unit/adaptertestsPASS but NO native/vehicle
+CompassLearnconvergenceclaimed. Cancellationrecoversinterruptedknownprofileunder
+maintenance;VNlossinvalidatesreference. Supervisorruntimehealthchecksretained.
+Removedconstantupwardvelocity:zeroverticalspeedatpressuredepth<=.03m;boundedupward
+correctionbeyonddeadband,capped.05m/s;depth>.08mabortretained. Zero-speedstilluses
+CubeZcontroller/notneutralmotors.265Python+bothJSsuitespass. NativeGUI/SITL
+waypoint-637a1d879bpassedupfix+GPSoutage;expandedbridgefirst5cc75b0fa4failedprofile
+permissionbeforetransit(preserved);restrictcompasspollingtomaintenance,rereun
+68b7289639passedwith2sGPSoutageand.0782msimulatederror. See docs/navigation-revision-
+2026-10-19.md. Straight-lineleg/slowGPS-DVLheadingestimationareproposalsnotimplemented
+here;currentmotioncorrectionthreshold.5m/sstillabove.2m/smissioncap.
+
+2026-10-19 userclarifies disarmcomplaintwas compassnorthCAPTURE,notMANUALdriving.
+LOCAL fix: CubeNorth automatically captures pairednorth offset after confirmed
+learn3active/Finished/learn0 and2svalidindependentCubeVNagreement,evenwhilearmed
+MANUAL. Passivecapturewritesnoparameters/controlcommands. GUI manualcapturebutton
+hidden;showscapturedreferenceandVNheadingpreview. Onceoperatorstops/disarms/kills/
+ESCoff,freshcontrolstatus+maintenancecheckautomaticallyrestoreExternalNavyaw6and
+learn0,rate-limitedretryuntilreadbacks;noautoarm/disarm/modechange. Initialsource
+setupstillmaintenanceonly. COMPASS_LEARN=3alreadycorrect;EK3_SRCx_YAW=1meanscompass,
+notdeprecatedLEARN1. Requiredrealcompass/GPS/freshness/completionchecksretained.
+266Python+bothGUItestsPASS. NoSSH/deployment/liveparamchangesinthisrevision.
+See docs/automatic-cube-north-2026-10-19.md. LastverifiedJetson1d60ae1;compassdisabled
+atthatcheck,requiresverifiedacquisitionsetupbeforelearningcanrun.
+
+2026-10-19 removed redundant compass ESC-off confirmation checkbox. GUI uses live
+controller safety state for initial setup/restoration; no tick required. Deliberate
+button click sends confirmation; backend independently verifies maintenance state.
+Manual learning and passive north capture remain allowed armed. Both JS suitespass.
+StaticHTMLonly(no navigation/backendbehaviorchanges); canupdatewithoutservice
+restart/reference loss. Existingrealcompass/readbackprerequisitesunchanged.
+
+2026-10-19 checkbox GUI-only hotfix24fdbc1 deployed via tether,Jetson/GitHubmatch. Verified servedcalibrationHTML no compassConfirm checkbox; no service restart, parameters or propulsion changes. Backup /home/graey/deployment-backups/20261019-checkbox-201620. Actual initialsetupmaintenance and realcompassrequirements remain; passivelearning/capturearmedunchanged.
+
+2026-10-19 live compass setup repair: killed/disarmed/ESCoff verified over tether;
+COMPASS_ENABLE0->1 and approved Cube reboot, recovered fresh with ExternalNav profile
+intact. Existing internal primary DEV_ID=PRIO1_ID590114/EXTERNAL0 identified;
+COMPASS_USE0->1, USE2/USE3 remain0, yaw slots all6, no mounting changes. M9N unused.
+First enable attempt aborted incomplete readbacks before writes. Dedicated disarmed
+MANUAL/no-mission setup gate now replaces kill/ESCoff gate across GUI/job/supervisor/
+bridge; restoration and other maintenance unchanged. Deployment pending; firmware
+learning convergence and absolute heading accuracy not yet verified. See
+robotx_graey_2026/docs/compass-setup-button-2026-10-19.md.
+robotx_graey_2026/docs/compass-setup-button-2026-10-19.md.
+
+2026-10-19 compasssetup05b009c deploymentVERIFIEDtether:backup
+/home/graey/deployment-backups/20261019-compass-setup-203251,build/runtimeverified,
+268onboardtestsPASS,graey-rosactive,newHTMLserved. FreshcompassENABLE/USE1,LEARN0,
+yaw6/6/6,profileverified;VNrelativefresh. Killed/disarmedESCoffMANUAL. Learningnot
+started,northnotcaptured,Preparestillrequired. Earlierdeploymentstoppedbeforecode
+changeswhenkillreleased/ESCon;resumedonlyafterfreshsafestate. Noaccuracyclaim.
+changeswhenkillreleased/ESCon;resumedonlyafterfreshsafestate. Noaccuracyclaim.
+
+2026-10-19 usercorrectscompassworkflow: setupmustalsoacceptalreadyarmedMANUAL.
+Compassstart/cancel/passivecapture/automaticyawrestorationnowMANUALwithfreshonline,
+vehicleandexplicitarmstate,no mission/autonomy;armed/disarmedbothallowed,noESCoff
+orkillgateforcompassactions. Stillnopropulsion/arm/disarm/modecommands;waypoints
+suspendeduntilPrepare. Compassinstructionsupdated;othermaintenanceunchanged.
+268Python+bothGUIsuitespass;actualarmedlearningconvergencenotverified.
+268Python+bothGUIsuitespass;actualarmedlearningconvergencenotverified.
+
+2026-10-19 Preparegrey investigation: livelearning3/yaw1/finishedfalse,noreference;
+thenoperatorCancelobserved,learn0/yaw6/cancelled,noreference. UserreportsGUIhadsaid
+completed;historicalcapturenotverified. FixeddemonstratedCancelrace: preserveverified
+referenceincaptured/restoring;neverinventonefromincompletelearning. GUIexplicit
+Prepareblocker+firmwarecompletion/capture/restorationstates,auditlogsadded.
+269Python+bothGUIsuitespass. Currentnorthnotready;VNcalibrationnotrequiredtorepeat.
+269Python+bothGUIsuitespass. Currentnorthnotready;VNcalibrationnotrequiredtorepeat.
+
+2026-10-19 Preparefix1ea1464DEPLOYED:tetherbackup204942,269onboardtestsPASS,
+servicesactive,newreadinessHTMLverified,profilematches.Currentnorthreferenceabsent;
+repeatcompassnorthworkflowrequired,nofabricatedcompletionornavigationpermission.
+repeatcompassnorthworkflowrequired,nofabricatedcompletionornavigationpermission.
+
+2026-10-19 compassstatusfix: screenshotoldwaitingstringincludedexpectedFinishedtext,
+notactualcompletionevidence. GUIexplicitstages+stablepairseconds+livejobbanner;
+fastactualcompletioneventretainedifbeforemode3ACK;ACKhandledonPARAM_VALUEdirectly,
+requiresmode0readbackaftereventbeforecapture.No fabricatedcompletion/minimumtimer.
+273Python+bothGUItestsPASS;physicallearningconvergencestillunverified.
+273Python+bothGUItestsPASS;physicallearningconvergencestillunverified.
+
+2026-10-19 statuslogicdeploya61692eVERIFIED:273onboardtestsPASS,servicesactive,
+newfields/HTMLverified,profileintact,backupcompass-status-210326.Currentnorthidle,
+noarm/learningstarted.Followupfixidleinitialreadbackstatuslatch,274testspass.
