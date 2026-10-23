@@ -165,18 +165,30 @@ class WaypointMission(Node):
                 # DDS subscriptions can take a moment to match at startup.
                 # Wait disarmed for the first status, without granting readiness.
                 if not (self.safety_time == -math.inf and self.logic.stage == 'WAIT_SURFACE'
-                        and now-self.logic.since < 2):
+                        and now-self.logic.since < 5):
                     failure = 'Control watchdog or ESC permission unavailable'
         b=getattr(self,'bridge',{})
         cube_fresh=bool(hb and local and att and origin and self.view.position_healthy()
             and ned and velocity and depth is not None
             and all(isinstance(v,(int,float)) and math.isfinite(v)
                     for v in (*ned,*velocity,*att.get('rpy',[None]),depth)))
+        continuity=b.get('dvl_continuity') or {}
+        # Brief DVL loss permits bounded hold, never continued travel.
+        dvl_hold=bool(continuity.get('recovering') is True
+            and continuity.get('state')=='COASTING'
+            and 0<=continuity.get('gap_age_s',math.inf)<1.5
+            and 0<=continuity.get('position_sigma_m',math.inf)<=5.
+            and not continuity.get('requires_position_revalidation',True)
+            and b.get('initialized') is True and b.get('enabled') is True
+            and not b.get('heading_continuity_lost',True)
+            and (b.get('inputs') or {}).get('vn') is True
+            and 0<=now-(b.get('pressure_sample') or {}).get('received',-math.inf)<.5)
         hold_safe=bool(cube_fresh and not failure
             and 0<=now-getattr(self,'bridge_time',-math.inf)<.3
             and 0<=now-b.get('published_monotonic',-math.inf)<.3
-            and b.get('healthy') is True and b.get('navigation_valid') is True
-            and b.get('transmitting') is True and b.get('configuration_verified') is True
+            and ((b.get('healthy') is True and b.get('navigation_valid') is True
+                  and b.get('transmitting') is True) or dvl_hold)
+            and b.get('configuration_verified') is True
             and not b.get('fault'))
         gps=b.get('gps_admission') or {}
         fix=b.get('gps_observation') or {}

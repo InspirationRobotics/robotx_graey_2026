@@ -24,7 +24,8 @@ class WaypointTransportTest(unittest.TestCase):
                      position_healthy=lambda:True)
         first=node.observation(.1)
         self.assertFalse(first['fresh']);self.assertEqual(first['failure'],'')
-        self.assertIn('watchdog',node.observation(3.)['failure'])
+        self.assertIn('watchdog',node.observation(6.)['failure'])
+        self.assertEqual(node.observation(3.)['failure'],'')
         node.supervisor_time=.1;node.safety_time=.1
         node.safety=dict(vehicle_fresh=True,inhibit=False,sa_active=False,esc_commanded_on=True)
         self.assertTrue(node.observation(.1)['fresh'])
@@ -41,6 +42,17 @@ class WaypointTransportTest(unittest.TestCase):
         self.assertTrue(node.observation(.1)['navigation_hold_safe'])
         node.bridge['healthy']=False
         self.assertFalse(node.observation(.1)['navigation_hold_safe'])
+        node.bridge.update(navigation_valid=False,transmitting=False,initialized=True,enabled=True,
+            heading_continuity_lost=False,inputs={'vn':True},pressure_sample={'received':.1},
+            dvl_continuity=dict(recovering=True,state='COASTING',gap_age_s=.21,
+                position_sigma_m=1.14,requires_position_revalidation=False))
+        self.assertTrue(node.observation(.1)['navigation_hold_safe'])
+        node.bridge['dvl_continuity']['gap_age_s']=1.5
+        self.assertFalse(node.observation(.1)['navigation_hold_safe'])
+        node.bridge['dvl_continuity']['gap_age_s']=.21
+        node.bridge['fault']='heading fault'
+        self.assertFalse(node.observation(.1)['navigation_hold_safe'])
+        node.bridge['fault']=''
         node.bridge_time=.1
         node.nav_limits['WPNAV_SPEED_DN']=(.1,150.)
         self.assertFalse(node.observation(.1)['fresh'])
