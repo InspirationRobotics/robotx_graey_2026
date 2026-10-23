@@ -13,7 +13,7 @@ from robotx_graey_2026.api.navigation.waypoint_logic import WaypointRun
 from robotx_graey_2026.api.navigation.guided_surface_mission import GuidedSurfaceRun
 from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
 from robotx_graey_2026.api.navigation.surface_measurement import SurfaceMeasurement
-from robotx_graey_2026.api.navigation.surface_control import surface_velocity,SurfaceLeg
+from robotx_graey_2026.api.navigation.surface_control import surface_velocity,SurfaceLeg,gentle_horizontal
 from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL
 
 
@@ -245,6 +245,10 @@ class WaypointMission(Node):
                 down=surface_velocity((0.,0.),(0.,0.),(0.,0.),depth)[2] if o.get('fresh') and isinstance(depth,(int,float)) and math.isfinite(depth) else 0.
                 v=(payload[0],payload[1],down) if action=='align_velocity' else (0.,0.,down)
                 heading=payload[2] if action=='align_velocity' else payload[0]
+                if action!='stop':
+                    if self.logic.navigation_wait_since is None:
+                        v=gentle_horizontal(v,getattr(self,'sent_surface_velocity',(0.,0.,0.)),now-getattr(self,'surface_command_at',now-.1))
+                self.surface_command_at=now
                 self.link.surface_velocity(*v,heading)
                 self.sent_surface_velocity=v;self.sent_surface_heading=heading
             elif action == 'target':
@@ -256,6 +260,9 @@ class WaypointMission(Node):
                     else:
                         v=surface_velocity(payload,o['local'],o['velocity_ned'],o['depth'])
                         heading=payload[3]
+                    if self.logic.navigation_wait_since is None:
+                        v=gentle_horizontal(v,getattr(self,'sent_surface_velocity',(0.,0.,0.)),now-getattr(self,'surface_command_at',now-.1))
+                    self.surface_command_at=now
                     self.link.surface_velocity(*v,heading)
                     self.sent_surface_velocity=v
                     self.sent_surface_heading=heading

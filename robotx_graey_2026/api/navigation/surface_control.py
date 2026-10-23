@@ -9,7 +9,7 @@ def surface_velocity(target, local, velocity, depth):
     # Slow down near the point; velocity feedback damps momentum.
     horizontal=[.4*(target[i]-local[i])-.6*velocity[i] for i in (0,1)]
     speed=math.hypot(*horizontal)
-    if speed>.2:horizontal=[v*.2/speed for v in horizontal]
+    if speed>.1:horizontal=[v*.1/speed for v in horizontal]
     # NED positive Z is down. Inside the surface pressure deadband, request
     # zero vertical speed; an impossible continuous ascent at the air/water
     # boundary can keep driving the Cube Z controller upward. Correct only
@@ -69,15 +69,29 @@ class SurfaceLeg:
         remaining=max(0.,length-projection)
         # N/E translation is independent of nose direction: a vectored sub can
         # move laterally while GUIDED slews yaw. There is no turn-only stage.
-        forward=min(.2,.4*remaining)
+        forward=min(.1,.4*remaining)
         command=[forward*unit[i]-.18*(local[i]-nearest[i])-.35*velocity[i] for i in (0,1)]
         if distance<.5 or projection>=length:
             command=list(surface_velocity(target,local,velocity,depth)[:2])
         speed=math.hypot(*command)
-        if speed>.2:command=[v*.2/speed for v in command]
+        if speed>.1:command=[v*.1/speed for v in command]
         down=surface_velocity(local,local,velocity,depth)[2]
         self.state=dict(stage='tracking',reason='Tracking GPS-aided position with DVL velocity feedback',
                         cross_track_m=cross,heading_error_deg=math.degrees(error),
                         along_track_m=projection,target_distance_m=distance)
         self.state.update(lookahead_m=lookahead_distance,yaw_rate_limit_deg_s=math.degrees(yaw_rate))
         return (*command,down),self.command_yaw
+
+
+def gentle_horizontal(command, previous, dt):
+    """Ramp horizontal commands at 0.04 m/s^2, capped at 0.10 m/s.
+
+    Explicit stops bypass this function so braking is never delayed.
+    """
+    x,y,z=command
+    speed=math.hypot(x,y)
+    if speed>.1:x,y=x*.1/speed,y*.1/speed
+    dx,dy=x-previous[0],y-previous[1]
+    delta=math.hypot(dx,dy);limit=.04*min(.2,max(0.,dt))
+    if delta>limit and delta>0:x,y=previous[0]+dx*limit/delta,previous[1]+dy*limit/delta
+    return x,y,z

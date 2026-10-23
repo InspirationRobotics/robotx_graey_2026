@@ -134,7 +134,7 @@ class GuidedSurfaceRun(WaypointRun):
                     self.check_started=None
                     self.enter('ALIGN_CHECK',now,'One metre: brake and check GPS/DVL; retain full alignment track')
                     return self.command(now,'stop',(self.align_heading,),interval=.1)
-                return self.command(now,'align_velocity',(.2*math.cos(self.align_heading),.2*math.sin(self.align_heading),self.align_heading),interval=.1)
+                return self.command(now,'align_velocity',(.1*math.cos(self.align_heading),.1*math.sin(self.align_heading),self.align_heading),interval=.1)
             if self.stage=='ALIGN_CHECK':
                 if self.checked(now,o,b):
                     self.segment_start=local;self.segment_checks+=1
