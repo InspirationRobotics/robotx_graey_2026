@@ -147,6 +147,10 @@ def main():
                             if args.abort and not args.abort_during_hold and (result['gps_outage_seen'] or not args.dive) and not abort_sent:
                                 api(dict(action='abort',run_id=run_id));abort_sent=True
                         if m['stage'] in ('COMPLETE','ABORTED'):
+                            # GUI mission and supervisor snapshots arrive independently.
+                            # Wait for observed disarm rather than fail on an older heartbeat.
+                            if m['stage']=='COMPLETE' and streams['heartbeat']['data']['armed']:
+                                continue
                             if args.abort and m['stage']=='ABORTED' and streams['heartbeat']['data']['mode_id']!=19:
                                 continue
                             result['mission']=m;result['supervisor']=s
