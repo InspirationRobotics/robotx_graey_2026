@@ -28,6 +28,7 @@ class CourseHeading:
         self.last_update=None
         self.last_error=None
         self.updates=0
+        self.preserve_stationary_anchor=False
 
     def reset_window(self,reason):
         self.velocity_rows.clear();self.anchor=None;self.reason=reason
@@ -51,6 +52,12 @@ class CourseHeading:
             self.reason='Correction settling; waiting for independent motion evidence'
             return 0.
         rates=sample['rates']
+        if (self.preserve_stationary_anchor and all(math.isfinite(v) for v in (*world,*rates))
+                and math.hypot(*world[:2])<.08 and abs(world[2])<=.15
+                and abs(math.degrees(rates[2]))<=3. and max(abs(math.degrees(r)) for r in rates[:2])<=10.):
+            self.velocity_rows.clear()
+            self.reason='Stopped segment check; retaining cumulative position baseline'
+            return 0.
         if (not all(math.isfinite(v) for v in (*world,*rates))
                 or abs(math.degrees(rates[2]))>3.
                 or max(abs(math.degrees(r)) for r in rates[:2])>10. or abs(world[2])>.15

@@ -50,5 +50,11 @@ class WaypointTransportTest(unittest.TestCase):
         node.nav_limits={k:(.1,v) for k,v in cls.SHALLOW_LIMITS.items()}
         self.assertTrue(node.limits_ready(.2))
         self.assertFalse(node.limits_ready(12.2))
+        node.SHALLOW_LIMITS=dict(WP_SPD_DN=.1,WP_SPD_UP=.15,WP_ACC_Z=.5)
+        node.nav_limits={'WP_SPD_DN':(.1,.10000000149011612),
+                         'WP_SPD_UP':(.1,.15000000596046448),'WP_ACC_Z':(.1,.5)}
+        self.assertTrue(node.limits_ready(.2))
+        node.nav_limits['WP_SPD_DN']=(.1,.11)
+        self.assertFalse(node.limits_ready(.2))
         node.bridge['healthy']=True;node.bridge_time=-1.
         self.assertFalse(node.observation(.1)['navigation_hold_safe'])

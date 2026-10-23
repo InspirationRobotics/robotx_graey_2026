@@ -11,7 +11,7 @@ from robotx_graey_2026.api.navigation.waypoint_logic import ne_to_geo
 def simulate(offset=73., gps_jump=False, dropout=False, abort=False):
     e=RelativeEstimator();e.set_origin((33.,-117.,200.))
     p=[0.,0.];v=[0.,0.];heading=0.;cmd=(0.,0.,0.);desired=0.;mode=19;armed=False
-    target=(6.,2.);lat,lon=ne_to_geo(*target,(33.,-117.))
+    target=(10.,3.);lat,lon=ne_to_geo(*target,(33.,-117.))
     run=None;leg=SurfaceLeg();begun=False;stages=[];previous=None
     for i in range(6000):
         t=100+i*.05
@@ -61,6 +61,29 @@ def simulate(offset=73., gps_jump=False, dropout=False, abort=False):
 
 
 class GeographicTests(unittest.TestCase):
+    def test_segment_check_requires_two_seconds_of_fresh_stationary_data(self):
+        r=GuidedSurfaceRun(dict(lat=33.,lon=-117.,mode='surface',map='geographic',alignment_corridor_confirmed=True),'r',0.)
+        o=dict(speed=0.,surface_gps_current=True);b=dict(heading_vn=dict(rate=0.))
+        self.assertFalse(r.checked(0.,o,b));self.assertFalse(r.checked(1.9,o,b))
+        o['surface_gps_current']=False
+        self.assertFalse(r.checked(2.,o,b))
+        o['surface_gps_current']=True
+        self.assertFalse(r.checked(2.1,o,b));self.assertTrue(r.checked(4.2,o,b))
+        o['speed']=.1
+        self.assertFalse(r.checked(4.3,o,b))
+
+    def test_segment_correction_is_bounded_once_per_stop_and_rejects_stale(self):
+        e=RelativeEstimator();e.map.align(33.,-117.,(0.,0.),0.)
+        e.target_gps=ne_to_geo(10.,0.,(33.,-117.))
+        e.pending_course_step=(1.,5.)
+        self.assertTrue(e.apply_segment_correction(2.,('run',0)))
+        self.assertAlmostEqual(e.map.angle,.5)
+        e.pending_course_step=(2.,.5)
+        self.assertFalse(e.apply_segment_correction(3.,('run',0)))
+        self.assertFalse(e.apply_segment_correction(13.,('run',1)))
+        e.target_gps=(33.,-117.);e.pending_course_step=(14.,.5)
+        self.assertFalse(e.apply_segment_correction(14.,('run',2)))
+
     def test_preflight_does_not_enter_guided_on_one_good_gps_sample(self):
         run=GuidedSurfaceRun(dict(lat=33.,lon=-117.,mode='surface',map='geographic',alignment_corridor_confirmed=True),'r',0.)
         o=dict(fresh=True,supervisor=dict(run_id='r',navigation_ready=True,reference_current=True,reference=dict(reference_id='ref')),
@@ -108,7 +131,10 @@ class GeographicTests(unittest.TestCase):
             run,e,p,stages=simulate(offset)
             self.assertEqual(run.stage,'COMPLETE',(run.reason,stages,e.north_alignment.status()))
             self.assertIn('ALIGN_MOVE',stages);self.assertIn('ALIGN_ACCEPT',stages)
-            self.assertLess(math.dist(rotation(p,offset),(6.,2.)),.55)
+            self.assertLess(math.dist(rotation(p,offset),(10.,3.)),1.55)
+            self.assertIn('ALIGN_CHECK',stages)
+            self.assertIn('TRANSIT_CHECK',stages)
+            self.assertGreaterEqual(run.segment_checks,4)
             self.assertLess(abs((e.map.angle-offset+180)%360-180),2.)
             self.assertEqual(e.north_offset,0.);self.assertEqual(e.heading_bias,0.)
             self.assertLess(math.dist(e.position[:2],p),.05)

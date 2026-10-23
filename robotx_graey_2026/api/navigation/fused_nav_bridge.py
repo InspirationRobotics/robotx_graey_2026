@@ -88,6 +88,7 @@ class FusedNavBridge(SteadyNode):
         # ODOMETRY/status at 20 Hz separately below.
         self.create_timer(.01, self.tick)
         self.create_timer(1., self.request)
+        self.create_timer(.2, self.request_parameters)
         self.create_timer(.2, self.sync_clock)
 
     def sitl_depth(self, msg):
@@ -152,6 +153,20 @@ class FusedNavBridge(SteadyNode):
                 return
             plan=m.get('plan') or {}
             self.est.target_gps=(plan['lat'],plan['lon'])
+            if getattr(self,'segmented_course_run',None)!=m['run_id']:
+                self.segmented_course_run=m['run_id']
+                self.est.pending_course_step=None
+                self.est.last_segment_correction=None
+                self.est.course_heading.reset_window('New segmented mission; collect fresh correction evidence')
+            if m.get('stage')=='TRANSIT_CHECK':
+                status=self.est.status(now)
+                v=self.est.velocity()
+                # Never turn a queued correction into a stale-motion update.
+                if (status.get('healthy') and self.est.motion_valid and self.est.fresh(self.est.motion_at,now)
+                        and len(v)==3 and math.sqrt(sum(x*x for x in v))<=.08
+                        and abs(math.degrees(self.est.rates[2]))<=3.
+                        and (status.get('gps_admission') or {}).get('qualified')):
+                    self.est.apply_segment_correction(now,(m['run_id'],m.get('segment_checks',0)))
             a=self.est.north_alignment
             if m.get('stage')=='ALIGN_MOVE' and getattr(self,'motion_north_run',None)!=m['run_id']:
                 self.motion_north_run=m['run_id'];a.begin()
@@ -355,14 +370,16 @@ class FusedNavBridge(SteadyNode):
         pressure_id={'SCALED_PRESSURE':29,'SCALED_PRESSURE2':137,'SCALED_PRESSURE3':143}[self.settings.get('pressure_message','SCALED_PRESSURE3')]
         for mid in (24,pressure_id,49):
             self.link.command(511, mid, 100000)
+
+    def request_parameters(self):
         names=list(PROFILE)
         names.append('COMPASS_LEARN')  # Reject an interrupted legacy calibration; never start one.
-        # Cube's parameter reply queue is bounded. A single 29-name burst can
-        # indefinitely starve its tail. At most 16 requests per one-second tick
-        # covers either profile in two ticks, inside the three-second age gate.
+        # Spread reads across the bounded Cube reply queue. Four every 200 ms
+        # refresh the full profile in 1.4 s without competing in large bursts
+        # with stream requests. Keep the three-second verification age gate.
         if getattr(self,'parameter_schema',None)!=tuple(names):
             self.parameter_schema=tuple(names);self.parameter_cursor=0
-        first=self.parameter_cursor;last=min(first+16,len(names))
+        first=self.parameter_cursor;last=min(first+4,len(names))
         for name in names[first:last]:
             self.link.send('param_request_read_send',1,1,name.encode(),-1)
         self.parameter_cursor=0 if last==len(names) else last

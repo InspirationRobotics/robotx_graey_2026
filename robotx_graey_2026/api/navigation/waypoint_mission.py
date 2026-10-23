@@ -23,6 +23,8 @@ class WaypointMission(Node):
 
     def __init__(self):
         super().__init__('waypoint_mission')
+        from .odometry_profile import SHALLOW_LIMITS
+        self.SHALLOW_LIMITS=SHALLOW_LIMITS.copy()
         for key, value in dict(plan_json='', run_id='', commissioned=False, simulation=False,
                               mavlink='udpout:127.0.0.1:14553', result_file='').items():
             self.declare_parameter(key, value)
@@ -81,7 +83,7 @@ class WaypointMission(Node):
         for name,maximum in self.SHALLOW_LIMITS.items():
             stamp,value=getattr(self,'nav_limits',{}).get(name,(-math.inf,None))
             if not (0<=now-stamp<12 and isinstance(value,(int,float))
-                    and math.isfinite(value) and 0<value<=maximum):
+                    and math.isfinite(value) and 0<value<=maximum+max(1e-7,abs(maximum)*1e-6)):
                 return False
         return True
 
