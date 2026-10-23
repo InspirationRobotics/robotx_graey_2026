@@ -4,6 +4,7 @@ import json
 import math
 import statistics
 from collections import deque
+from robotx_graey_2026.api.navigation.relative_estimator import RelativeEstimator
 from pathlib import Path
 from types import SimpleNamespace as NS
 import unittest
@@ -96,7 +97,7 @@ class TransportTests(unittest.TestCase):
         self.clock = NS(now=10.)
         ns = dict(SteadyNode=object, math=math, json=json, String=NS, PROFILE=PROFILE,
                   yaw=yaw, time=NS(monotonic=lambda: self.clock.now),
-                  statistics=statistics, BridgeEstimator=BridgeEstimator,TrackNorth=TrackNorth, require_maintenance=Mock(), AutomaticRecovery=AutomaticRecovery)
+                  statistics=statistics, BridgeEstimator=BridgeEstimator,RelativeEstimator=RelativeEstimator,TrackNorth=TrackNorth, require_maintenance=Mock(), AutomaticRecovery=AutomaticRecovery)
         exec(compile(tree, str(path), 'exec'), ns)
         self.b = ns['FusedNavBridge'].__new__(ns['FusedNavBridge'])
         self.b.est = BridgeEstimator()

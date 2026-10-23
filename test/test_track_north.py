@@ -4,6 +4,21 @@ from robotx_graey_2026.api.navigation.track_north import TrackNorth
 
 
 class TrackTests(unittest.TestCase):
+    def test_bounded_gps_pause_preserves_continuous_local_track(self):
+        a=TrackNorth(maximum_gap_s=5.);a.begin()
+        f=self.feed(a)
+        rows=len(a.rows)
+        a.reject('Brief rejected GPS sample')
+        self.assertIsNone(a.candidate)
+        f['cube_fix_time_us']+=3_000_000
+        a.observe(29.,f,(0,0,0),(0,0,0),(1,0,0,0),(10.36,2.59,0))
+        self.assertEqual(len(a.rows),rows+1)
+        self.assertIsNotNone(a.candidate)
+        f['cube_fix_time_us']+=6_000_000
+        a.observe(35.,f,(0,0,0),(0,0,0),(1,0,0,0),(10.36,2.59,0))
+        self.assertEqual(a.rows,[])
+        self.assertIsNone(a.candidate)
+
     def feed(self, a, angle=73, scale=1, accuracy=.3, sideways=.1):
         cs,sn=math.cos(math.radians(angle)),math.sin(math.radians(angle))
         for i in range(260):

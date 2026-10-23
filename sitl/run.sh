@@ -129,6 +129,7 @@ print('SITL runtime source and GUI assets verified',flush=True)
 PY
 ros2 launch "$ROOT/launch/sitl.launch.py" \
   interactive_waypoint:="${WAYPOINT_INTERACTIVE:-false}" \
+  control_fixture:="${SITL_CONTROL_FIXTURE:-false}" \
   continuous_fusion:="true" \
   auto_north_alignment:="${AUTO_NORTH_ALIGNMENT:-false}" \
   relative_yaw_offset_deg:="${RELATIVE_YAW_OFFSET_DEG:-0.0}" \

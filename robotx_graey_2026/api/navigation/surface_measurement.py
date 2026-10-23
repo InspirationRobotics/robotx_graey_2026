@@ -21,6 +21,9 @@ class SurfaceMeasurement:
                    if 0<b[0]-a[0]<=.5 and a[4]==b[4])
 
     def update(self, now, bridge):
+        relative=bridge.get('coordinate_frame')=='fixed_local'
+        speed_limit,rate_limit=(.12,5.) if relative else (.05,2.)
+        scatter_limit,disagreement_limit=(3.,4.) if relative else (1.5,2.)
         fix=bridge.get('gps_observation') or {}
         dvl=bridge.get('heading_dvl') or {}
         heading=bridge.get('heading_vn') or {}
@@ -34,8 +37,8 @@ class SurfaceMeasurement:
               and bridge.get('gps_eligible') is True
               and not (bridge.get('dvl_continuity') or {}).get('recovering')
               and dvl.get('valid') is True and 0<fix.get('accuracy',math.inf)<=2.
-              and math.sqrt(sum(v*v for v in velocity))<=.05
-              and abs(heading['rate'])<=2.)  # bridge reports degrees/second
+              and math.sqrt(sum(v*v for v in velocity))<=speed_limit
+              and abs(heading['rate'])<=rate_limit)  # bridge reports degrees/second
         good=(independent_good and 0<=now-fix.get('received',-math.inf)<.5
               and admitted.get('qualified') is True)
         blockers=[]
@@ -46,10 +49,10 @@ class SurfaceMeasurement:
         if dvl.get('valid') is not True: blockers.append('DVL bottom lock invalid')
         if len(velocity)==3 and all(isinstance(v,(int,float)) and math.isfinite(v) for v in velocity):
             speed=math.sqrt(sum(v*v for v in velocity))
-            if speed>.05: blockers.append(f'DVL speed {speed:.3f} m/s exceeds stationary limit 0.050')
+            if speed>speed_limit: blockers.append(f'DVL speed {speed:.3f} m/s exceeds hold limit {speed_limit:.3f}')
         rate=heading.get('rate')
-        if isinstance(rate,(int,float)) and math.isfinite(rate) and abs(rate)>2:
-            blockers.append(f'VN turn rate {rate:.1f} deg/s exceeds stationary limit 2.0')
+        if isinstance(rate,(int,float)) and math.isfinite(rate) and abs(rate)>rate_limit:
+            blockers.append(f'VN turn rate {rate:.1f} deg/s exceeds hold limit {rate_limit}')
         accuracy=fix.get('accuracy')
         if not isinstance(accuracy,(int,float)) or not math.isfinite(accuracy) or not 0<accuracy<=2:
             blockers.append(f'GPS accuracy {accuracy} m; requires 0–2 m')
@@ -97,8 +100,8 @@ class SurfaceMeasurement:
         disagreement=max(max(0.,math.hypot(*p)-(r[3]-first[3])) for p,r in zip(offsets,self.rows))
         elapsed=(self.exposure()
                  if self.tolerated_gps_gap else now-first[0])
-        ready=elapsed>=self.duration and len(self.rows)>=max(10,math.ceil(self.duration*2)) and scatter<=1.5 and disagreement<=2.
-        if scatter>1.5 or disagreement>2.:
+        ready=elapsed>=self.duration and len(self.rows)>=max(10,math.ceil(self.duration*2)) and scatter<=scatter_limit and disagreement<=disagreement_limit
+        if scatter>scatter_limit or disagreement>disagreement_limit:
             reason='GPS scatter or GPS/DVL displacement disagreement excessive; wait for a stable window'
         else:
             reason=f'Surface measurement {min(elapsed,self.duration):.1f}/{self.duration:.0f} s; scatter {scatter:.2f} m'

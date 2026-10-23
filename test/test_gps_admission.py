@@ -5,6 +5,19 @@ from robotx_graey_2026.api.navigation.continuous_supervisor import Observation
 
 
 class AdmissionTests(unittest.TestCase):
+    def test_clock_bound_includes_observed_mapping_jitter(self):
+        c=CubeClock()
+        c.request(10_000_000_000)
+        self.assertTrue(c.reply(10_000_000_000,5_005_000_000,10_010_000_000))
+        c.request(10_200_000_000)
+        self.assertTrue(c.reply(10_200_000_000,5_175_000_000,10_210_000_000))
+        self.assertGreaterEqual(c.uncertainty,.0349)
+        # Slightly negative age within measured mapping variation is bounded,
+        # while genuinely future and stale fixes remain unusable.
+        self.assertIsNotNone(c.age(5_200_000,10.22))
+        self.assertIsNone(c.age(6_000_000,10.22))
+        self.assertGreater(c.age(4_800_000,10.22),.35)
+
     def make(self):
         g = GPSAdmission(dwell=.2)
         g.clock.request(10_000_000_000)

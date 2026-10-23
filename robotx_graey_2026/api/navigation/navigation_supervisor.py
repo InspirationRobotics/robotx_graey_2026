@@ -261,7 +261,8 @@ class NavigationSupervisor(Node):
         ref_ready = bool(self.reference and self.reference.vehicle_epoch == self.epoch and (self.reference.run_id == intent.get('run_id')))
         bridge = self.fresh('bridge', .5) or {}
         self.heading_check.reference_validated = bool(self.settings['heading_reference_validated']
-            or bridge.get('heading_reference_validated') is True)
+            or bridge.get('heading_reference_validated') is True
+            or bridge.get('coordinate_frame')=='fixed_local' and bridge.get('local_navigation_ready') is True)
         heading = self.heading_check.evaluate(now, surface=self.logic.surface is True and depth is not None and math.isfinite(depth) and (depth < self.settings['surface_exit_m']), gps_good=self.fresh('gps_good') is True, gps=self.fresh('gps', 0.5), vn=self.fresh('heading_vn', 0.5), cube=self.fresh('heading_cube', 0.5), dvl=self.fresh('heading_dvl', 0.5))
         self.latest_heading = heading
         o = Observation(healthy=not failed, reason='Unavailable: ' + ', '.join(failed), surface_authoritative=True, surface_observed=(self.fresh('bridge', 0.5) or {}).get('surfaced'), heading_allowed=heading['allowed'], heading_reason=heading['reason'], depth=depth if depth is not None else float('nan'), depth_valid=depth is not None and math.isfinite(depth), intent=intent.get('phase', ''), intent_fresh=bool(intent), run_id=intent.get('run_id', ''), gps_good=self.fresh('gps_good') is True, reference_ready=ref_ready, reference_saved=ref_ready, configuration_verified=bool(self.settings['vehicle_validation_complete'] and (self.fresh('bridge', 0.5) or {}).get('configuration_verified') is True and all((self.params.get(k) == v for (k, v) in getattr(self, 'profile', PROFILE).items()))))
@@ -286,6 +287,20 @@ class NavigationSupervisor(Node):
         status['gps_admission'] = self.fresh('gps_admission', 0.5)
         status['dive_heading_check'] = heading
         status['north_alignment'] = bridge.get('north_alignment')
+        status['coordinate_frame']=bridge.get('coordinate_frame','north_east')
+        status['local_navigation_ready']=bridge.get('local_navigation_ready',False)
+        status['map_transform']=bridge.get('map_transform')
+        status['map_xy']=None
+        if status['coordinate_frame']=='fixed_local':
+            from .geographic_frame import GeographicFrame
+            frame=GeographicFrame.restore(status['map_transform'])
+            status['mission_local_xyz']=status['mission_ned']
+            status['mission_ned']=None
+            if frame.angle is not None and pose:
+                status['map_xy']=frame.to_map(pose['ned'])
+                if ref_ready:
+                    start=frame.to_map(status['reference']['cube_ned'])
+                    status['mission_ned']=[status['map_xy'][i]-start[i] for i in (0,1)]+[status['mission_local_xyz'][2]]
         status['dvl_continuity'] = bridge.get('dvl_continuity')
         status['published_monotonic'] = time.monotonic()
         self.pub.publish(String(data=json.dumps(status, allow_nan=False)))

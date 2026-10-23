@@ -6,16 +6,23 @@ from robotx_graey_2026.api.pixhawk.mavlink import Link
 
 
 class SurfaceControlTests(unittest.TestCase):
-    def test_turn_before_travel_and_heading_setpoint_rate_limited(self):
+    def test_translate_while_slewing_without_turn_only_stage(self):
         c=SurfaceLeg();last=0.
         for i in range(20):
             v,heading=c.step(i*.1,(0,0),(0,5),(0,0),(0,0),0.,0.)
-            self.assertEqual(v,(0.,0.,0.))
-            self.assertLessEqual(abs(heading-last),math.radians(1.50001));last=heading
-        self.assertEqual(c.state['stage'],'aligning')
-        for i in range(20,32):
-            v,heading=c.step(i*.1,(0,0),(0,5),(0,0),(0,0),0.,math.pi/2)
-        self.assertGreater(v[1],0);self.assertAlmostEqual(v[0],0.)
+            self.assertGreater(v[1],0.)
+            self.assertLessEqual(abs(heading-last),math.radians(1.00001));last=heading
+            self.assertEqual(c.state['stage'],'tracking')
+
+    def test_near_target_reduces_lookahead_and_freezes_yaw(self):
+        c=SurfaceLeg()
+        c.step(0.,(0,0),(5,0),(0,0),(0,0),0.,.2)
+        _,before=c.step(.1,(0,0),(5,0),(3.5,0),(0,0),0.,.2)
+        far=c.state.copy()
+        _,after=c.step(.2,(0,0),(5,0),(4.3,.1),(0,0),0.,.2)
+        self.assertEqual(before,after)
+        self.assertLess(c.state['lookahead_m'],far['lookahead_m'])
+        self.assertLess(c.state['yaw_rate_limit_deg_s'],far['yaw_rate_limit_deg_s'])
 
     def test_cross_track_feedback_returns_to_original_line(self):
         c=SurfaceLeg()
@@ -24,7 +31,7 @@ class SurfaceControlTests(unittest.TestCase):
         self.assertLessEqual(math.hypot(*v[:2]),.200001)
         self.assertEqual(v[2],0.)
         v,h=c.step(1.2,(0,0),(5,0),(1,.2),(0,0),0.,math.pi)
-        self.assertEqual(c.state['stage'],'aligning');self.assertEqual(v[:2],(0.,0.))
+        self.assertEqual(c.state['stage'],'tracking');self.assertGreater(v[0],0.)
     def test_surface_deadband_never_requests_continuous_ascent_or_descent(self):
         for depth in (-.1,0.,.03,.08,.2,1.):
             n,e,d=surface_velocity((10.,-10.,0.),(0.,0.,0.),(0.,0.,0.),depth)

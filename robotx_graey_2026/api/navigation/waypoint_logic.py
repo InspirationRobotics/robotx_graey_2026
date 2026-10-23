@@ -32,7 +32,9 @@ def validate_plan(value):
         raise ValueError('Dive depth must be 0.3 to 1.0 m')
     if value.get('map') not in ('pool', 'geographic'):
         raise ValueError('Unknown map')
-    return dict(lat=float(lat), lon=float(lon), depth_m=float(depth), map=value['map'], mode=mode)
+    result=dict(lat=float(lat), lon=float(lon), depth_m=float(depth), map=value['map'], mode=mode)
+    if value.get('alignment_corridor_confirmed') is True:result['alignment_corridor_confirmed']=True
+    return result
 
 
 class WaypointRun:
@@ -297,7 +299,7 @@ class WaypointRun:
                 (*self.target[:2], self.surface_down) if self.stage == 'SURFACE' else self.target)
             depth = o['depth']
             surface = self.plan['mode']=='surface'
-            reached = (math.dist(local[:2], target[:2]) <= .35 and o['speed'] <= .15
+            reached = (math.dist(local[:2], target[:2]) <= (.5 if surface else .35) and o['speed'] <= .15
                        and ((-.1 <= depth <= .12 and o.get('surface_gps_current') is True
                              and o.get('surface_gps_at_target') is True) if surface else
                             (abs(depth-self.plan['depth_m']) <= .08 if self.stage != 'SURFACE' else -.1 <= depth <= .12)))

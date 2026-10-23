@@ -20,7 +20,7 @@ def surface_velocity(target, local, velocity, depth):
 
 
 class SurfaceLeg:
-    """Turn first, then follow the frozen start-to-waypoint line in N/E.
+    """Translate and steer together along the start-to-waypoint line in N/E.
 
     Position/velocity feedback comes from Cube's bridge-aided estimate. This
     controller never interprets a desired bearing as a sensor measurement.
@@ -37,39 +37,39 @@ class SurfaceLeg:
         if not all(isinstance(v,(int,float)) and math.isfinite(v) for v in values):
             raise ValueError('Finite surface leg measurements required')
         delta=tuple(target[i]-start[i] for i in (0,1));length=math.hypot(*delta)
-        if length<.3:raise ValueError('Surface leg must have a distinct target')
+        if length<.3:
+            # Alignment can finish beside the selected point. Brake/hold there
+            # while the mission verifies its arrival dwell; do not crash the node.
+            self.state=dict(stage='tracking',reason='Holding nearby target',
+                target_distance_m=math.dist(local[:2],target[:2]),cross_track_m=0.,
+                lookahead_m=0.,yaw_rate_limit_deg_s=0.)
+            return surface_velocity(target,local,velocity,depth),yaw
         unit=tuple(v/length for v in delta)
         projection=sum((local[i]-start[i])*unit[i] for i in (0,1))
         nearest=tuple(start[i]+projection*unit[i] for i in (0,1))
         cross=math.dist(local[:2],nearest)
-        lookahead=min(length,max(0.,projection)+1.5)
-        aim=tuple(start[i]+lookahead*unit[i] for i in (0,1))
         distance=math.dist(local[:2],target[:2])
+        lookahead_distance=min(1.5,max(.25,.5*distance))
+        lookahead=min(length,max(0.,projection)+lookahead_distance)
+        aim=tuple(start[i]+lookahead*unit[i] for i in (0,1))
         desired=math.atan2(aim[1]-local[1],aim[0]-local[0])
-        if distance<.5:
+        if distance<1.:
             desired=self.command_yaw if self.command_yaw is not None else yaw
         error=(desired-yaw+math.pi)%(2*math.pi)-math.pi
         dt=min(.2,max(0.,now-self.last)) if self.last is not None else .1
         self.last=now
         if self.command_yaw is None:self.command_yaw=yaw
         change=(desired-self.command_yaw+math.pi)%(2*math.pi)-math.pi
-        self.command_yaw+=(max(-math.radians(15)*dt,min(math.radians(15)*dt,change)))
+        yaw_rate=math.radians(min(10.,max(1.,3.*distance)))
+        self.command_yaw+=(max(-yaw_rate*dt,min(yaw_rate*dt,change)))
         self.command_yaw=(self.command_yaw+math.pi)%(2*math.pi)-math.pi
-        if abs(error)>math.radians(40):self.tracking=False;self.aligned_since=None
-        if not self.tracking:
-            if abs(error)<=math.radians(15):
-                self.aligned_since=now if self.aligned_since is None else self.aligned_since
-                if now-self.aligned_since>=.7:self.tracking=True
-            else:self.aligned_since=None
-        if not self.tracking:
-            horizontal=surface_velocity(local,local,velocity,depth)
-            self.state=dict(stage='aligning',reason='Turning toward waypoint before forward travel',
-                            cross_track_m=cross,heading_error_deg=math.degrees(error))
-            return horizontal,self.command_yaw
+        self.tracking=True
         # Along-track progress plus cross-track feedback keeps the commanded
         # earth-frame motion near the original line instead of a frozen heading.
         remaining=max(0.,length-projection)
-        forward=min(.2,.4*remaining)*max(0.,math.cos(error))**2
+        # N/E translation is independent of nose direction: a vectored sub can
+        # move laterally while GUIDED slews yaw. There is no turn-only stage.
+        forward=min(.2,.4*remaining)
         command=[forward*unit[i]-.18*(local[i]-nearest[i])-.35*velocity[i] for i in (0,1)]
         if distance<.5 or projection>=length:
             command=list(surface_velocity(target,local,velocity,depth)[:2])
@@ -79,4 +79,5 @@ class SurfaceLeg:
         self.state=dict(stage='tracking',reason='Tracking GPS-aided position with DVL velocity feedback',
                         cross_track_m=cross,heading_error_deg=math.degrees(error),
                         along_track_m=projection,target_distance_m=distance)
+        self.state.update(lookahead_m=lookahead_distance,yaw_rate_limit_deg_s=math.degrees(yaw_rate))
         return (*command,down),self.command_yaw

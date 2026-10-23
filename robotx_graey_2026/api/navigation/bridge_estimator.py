@@ -99,7 +99,7 @@ class BridgeEstimator:
         return True
 
     def imu(self, now, q, rates):
-        if self.heading_validated and self.imu_at is not None and not self.fresh(self.imu_at, now):
+        if (self.heading_validated or getattr(self,'fixed_local',False) and self.initialized) and self.imu_at is not None and not self.fresh(self.imu_at, now):
             self.heading_continuity_lost = True
         norm = sum(v*v for v in q)
         if len(q) != 4 or len(rates) != 3 or not all(math.isfinite(v) for v in (*q, *rates)) or not .9 < norm < 1.1:
@@ -275,7 +275,7 @@ class BridgeEstimator:
         """Explicit surfaced re-anchor; never invent displacement across a gap."""
         if self.fault != 'DVL continuity lost; position uncertainty requires revalidation':
             raise ValueError('Recovery is only available for a DVL continuity fault')
-        if (not self.heading_validated or self.heading_continuity_lost
+        if ((not self.heading_validated and not getattr(self,'fixed_local',False)) or self.heading_continuity_lost
                 or not self.fresh(self.imu_at, now)):
             raise ValueError('VN continuity or north reference lost; Prepare and align north again')
         if not self.gps_eligible(now) or self.origin is None:

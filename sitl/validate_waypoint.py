@@ -31,7 +31,7 @@ def main():
     parser.add_argument('--dvl-gap-seconds',type=float,default=.1,help='Duration of injected DVL interruption')
     parser.add_argument('--supervisor-interruption',action='store_true',help='Inject a brief false permission status while Cube/bridge stay healthy')
     parser.add_argument('--continuous', action='store_true', default=True)
-    parser.add_argument('--auto-north', action='store_true', help='Manual surface movement with a 40-degree synthetic VN reference error')
+    parser.add_argument('--auto-north', action='store_true', help='Mission-integrated GUIDED alignment with a 40-degree synthetic VN reference error')
     parser.add_argument('--target-north',type=float,default=1.5)
     parser.add_argument('--target-east',type=float,default=1.)
     args=parser.parse_args()
@@ -42,10 +42,10 @@ def main():
     root=Path(__file__).resolve().parents[1]
     folder=root/'sitl/logs'/('waypoint-'+uuid.uuid4().hex[:10]);folder.mkdir(parents=True)
     env=dict(os.environ,SITL_LOG_DIR=str(folder),SITL_RUN_DIR=str(folder/'runtime'),
-             WAYPOINT_INTERACTIVE='true',GRAEY_WAYPOINT_LOG_DIR=str(folder))
+             WAYPOINT_INTERACTIVE='true',SITL_CONTROL_FIXTURE='true',GRAEY_WAYPOINT_LOG_DIR=str(folder))
     env['CONTINUOUS_FUSION'] = str(args.continuous).lower()
     if args.auto_north:
-        env.update(AUTO_NORTH_ALIGNMENT='true', RELATIVE_YAW_OFFSET_DEG='40.0')
+        env.update(AUTO_NORTH_ALIGNMENT='false', RELATIVE_YAW_OFFSET_DEG='40.0')
     env.pop('QGC_HOST',None)
     result=dict(passed=False,continuous=args.continuous,stages=[],gps_outage_seen=False,underwater_cube_seen=False)
     stop=threading.Event()
@@ -88,47 +88,15 @@ def main():
                 if proc.poll() is not None: raise RuntimeError('SITL exited')
                 try:
                     state=api();nav=state['navigation'];streams=nav['streams']
+                    if state.get('capabilities',{}).get('simulation') is not True:
+                        raise RuntimeError('Refusing GUI outside isolated SITL scope')
                     s=streams.get('supervisor',{}).get('data',{});c=nav['cube_estimate']
-                    if args.auto_north and not alignment_stopped and streams.get('heartbeat',{}).get('fresh'):
-                        from pymavlink import mavutil
-                        if not streams.get('supervisor',{}).get('fresh'):
-                            if alignment_drive_started is not None:
-                                raise RuntimeError('Supervisor telemetry disappeared during alignment fixture')
-                            time.sleep(.2)
-                            continue
-                        if manual_link is None:
-                            manual_link=mavutil.mavlink_connection('udpout:127.0.0.1:14559',source_system=255,source_component=202)
-                        manual_link.mav.heartbeat_send(6,8,0,0,0)
-                        alignment=s.get('north_alignment') or {}
-                        if not alignment.get('aligned'):
-                            if alignment_drive_started is None and not (s.get('gps_admission') or {}).get('qualified'):
-                                result['alignment_waiting_for_gps'] = True
-                                time.sleep(.2)
-                                continue
-                            if alignment_drive_started is None:
-                                alignment_drive_started=time.monotonic()
-                            if time.monotonic()-alignment_drive_started > 25:
-                                raise RuntimeError('Alignment fixture movement exceeded 25 seconds')
-                            # Owned isolated simulator only. MANUAL surface movement
-                            # establishes alignment before any external odometry.
-                            manual_link.mav.set_mode_send(1,1,19)
-                            if not streams['heartbeat']['data'].get('armed'):
-                                manual_link.mav.command_long_send(1,1,400,0,1,0,0,0,0,0,0)
-                            manual_link.mav.manual_control_send(1,800,0,500,0,0)
-                            result['alignment_progress']=alignment
-                            time.sleep(.2)
-                            continue
-                        manual_link.mav.manual_control_send(1,0,0,500,0,0)
-                        manual_link.mav.command_long_send(1,1,400,0,0,0,0,0,0,0,0)
-                        if streams['heartbeat']['data'].get('armed'):
-                            time.sleep(.2)
-                            continue
-                        result['north_alignment']=alignment
-                        alignment_stopped=True
-                    if run_id is None and c['valid'] and s.get('configuration_verified') and s.get('surfaced'):
-                        lat,lon=ne_to_geo(args.target_north,args.target_east,(c['lat'],c['lon']))
+                    if run_id is None and (c['valid'] or c.get('local_valid')) and s.get('configuration_verified') and s.get('surfaced'):
+                        fix=streams.get('gps',{}).get('data',{})
+                        origin=(c['lat'],c['lon']) if c['valid'] else (fix['lat'],fix['lon'])
+                        lat,lon=ne_to_geo(args.target_north,args.target_east,origin)
                         result['requested_target']=dict(lat=lat,lon=lon)
-                        plan=api(dict(action='preview',plan=dict(lat=lat,lon=lon,depth_m=.5 if args.dive else 0.,mode='dive' if args.dive else 'surface',map='geographic')))
+                        plan=api(dict(action='preview',plan=dict(lat=lat,lon=lon,depth_m=.5 if args.dive else 0.,mode='dive' if args.dive else 'surface',map='geographic',alignment_corridor_confirmed=True)))
                         started=api(dict(action='start',plan_id=plan['plan_id']));run_id=started['run_id']
                         duplicate=api(dict(action='start',plan_id=plan['plan_id']))
                         result['duplicate_idempotent']=duplicate.get('duplicate') and duplicate['run_id']==run_id
@@ -196,8 +164,9 @@ def main():
                                 and (not args.gps_dropout_seconds or result.get('gps_dropout_injected') and result['gps_outage_seen']) and result.get('duplicate_idempotent')
                                 and (not args.abort or streams['heartbeat']['data']['mode_id']==19))
                             if args.auto_north:
-                                result['passed'] &= bool(alignment_stopped and abs(
-                                    result.get('north_alignment',{}).get('offset_deg',999)+40.) < 5.)
+                                result['north_alignment']=streams.get('bridge',{}).get('data',{}).get('north_alignment',{})
+                                result['passed'] &= bool('ALIGN_MOVE' in result['stages'] and abs(
+                                    (result['north_alignment'].get('offset_deg') or 999)+40.) < 5.)
                             if args.dvl_dropout:
                                 b=streams.get('bridge',{}).get('data',{})
                                 result['dvl_continuity']=b.get('dvl_continuity')

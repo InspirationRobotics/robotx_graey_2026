@@ -277,7 +277,8 @@ class CalibrationJobs:
                         message += '; previous reset: '+gps['last_rejection']
                     message += '. Stay stationary until GPS is qualified.'
                 self.update(north=a,message=message)
-                if action=='prepare' and not a.get('aligned'):
+                relative=s.get('coordinate_frame')=='fixed_local'
+                if action=='prepare' and not a.get('aligned') and not relative:
                     if s.get('state')=='Fault':
                         raise ValueError(s.get('reason','Navigation fault'))
                     self.update(phase='prepared',busy=False,
@@ -285,8 +286,8 @@ class CalibrationJobs:
                     return
                 if s.get('state') == 'Fault':
                     raise ValueError(s.get('reason','Navigation fault'))
-                if a.get('aligned'):
-                    self.update(phase='verify',message='North aligned. Stay stopped, disarmed and killed; checking Cube fusion.')
+                if a.get('aligned') or relative:
+                    self.update(phase='verify',message='Stay stopped, disarmed and killed; checking Cube local fusion. Geographic alignment runs inside Start Mission.')
                     if not maintenance_reason(self.controller()):
                         try:
                             message = self.service('commission')
