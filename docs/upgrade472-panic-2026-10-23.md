@@ -1,0 +1,9 @@
+# Post-upgrade Pixhawk internal fault — 2026-10-23
+
+After the 4.7.2 upgrade, user reported QGC Not Ready and `Arm: Internal errors 0x4000020 l:330 panic,mem_guard`. Read-only live telemetry confirmed MANUAL, disarmed, physical kill engaged, ESC off; the internal fault is distinct from SA_KILL.
+
+The onboard MAVProxy telemetry log confirmed repeated pre-arm errors. Exact 4.7.2 source places line330 at the generic AP_HAL::panic() recorder, not the offending code location. The internal-error mask includes panic and memory guard. No arming check was disabled. Initial SITL successes did not exercise the Cube hardware path that produced this fault; the upgrade cannot currently be considered mission-ready.
+
+Saved before reboot on Jetson: /home/graey/deployment-backups/20261023-ardusub472/panic, including before-reboot.tlog, controller status, and @SYS memory/threads/tasks. @SYS/crash_dump.bin listed as0 bytes. Memory and thread reports obtained, but these alone do not identify the underlying corruption. Navigation was stopped after fresh killed/disarmed/ESC-off verification for an isolated Cube reboot diagnostic.
+
+Recovery observation: one controlled Cube reboot (normal MAVLink reboot, not flashing) with navigation stopped produced no panic during45s observation. RUN_PREARM_CHECKS401 accepted with no error text. Restarted normal core and observed35s with four accepted pre-arm-check commands, no STATUSTEXT errors, and no armed heartbeat. Fresh GUI controller confirmed MANUAL/disarmed/kill engaged/ESCoff; profile verified. Bridge disabled and pressure baseline unset after restart, so Prepare must be repeated at confirmed surface. No firmware/parameter/code fix was applied; root cause remains unresolved. This clears the latched symptom but does not prove nonrecurrence or justify disabling checks. No physical mission was run. Original and postreboot logs preserved onboard.
