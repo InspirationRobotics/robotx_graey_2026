@@ -13,6 +13,11 @@ each light box as a dark body with its LED glowing in its colour
 (SIM_BOX_COLOURS, one per box in order along the pipe). No murk, glare or
 reflections: this tests the mission's logic, not whether colour detection works
 in real water (the Oct 15 footage does that). The FRONT half is left dark.
+
+The repair magnet (Ruth, Oct 22) is drawn where it shows in the real picture
+(led_boxes.MAGNET_PX), MAG_DOWN_M under the lens on that pixel's line of sight. A RED
+light whose LED comes within REPAIR_M of it turns GREEN for 5 s, then flashes BLUE,
+RED, GREEN (1 s on, 1 s off) for 30 s, then stays GREEN, as the handbook's light does.
 """
 import math
 import os
@@ -23,6 +28,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import cv2
 import numpy as np
 
+from robotx_graey_2026.api.vision.led_boxes import MAGNET_PX
+
 W, H = 640, 360
 HFOV = math.radians(float(os.environ.get("SIM_CAM_HFOV", "55")))   # in water (narrower than in air)
 F = (W / 2) / math.tan(HFOV / 2)
@@ -31,6 +38,10 @@ PIPE_D = 0.0889
 BOX_L, BOX_W, BOX_H = 0.20, 0.15, 0.15
 LED_R = 0.07                        # glow radius at the box top, m (real LED boxes filled 5-38% of the picture)
 BGR = {"red": (40, 40, 255), "green": (60, 255, 60), "blue": (255, 120, 40), "yellow": (40, 230, 255)}
+MAG_DOWN_M, MAG_R_PX = 0.149, 49    # the magnet under the lens (Ruth's ruler) and its size in the picture
+REPAIR_M = 0.04                     # the LED this close to the magnet: repaired
+# the magnet in the body frame, on the line of sight of its pixel
+MAG_BODY = np.array([-(MAGNET_PX[1] - H / 2) / F, (MAGNET_PX[0] - W / 2) / F, 1.0]) * MAG_DOWN_M
 
 _frame, _lock = None, threading.Lock()
 
@@ -78,6 +89,17 @@ class SimCamera:
             pts.append(a + (b - a) * np.linspace(0, 1, n)[:, None])
         self.pipe = np.vstack(pts)
         self.rng = np.random.default_rng(3)
+        self.repaired = {}                  # box index -> when the magnet reached its RED light
+
+    def _colour(self, i, colour):
+        """The colour a light shows now (None: off between flashes)."""
+        if i not in self.repaired:
+            return colour
+        dt = time.monotonic() - self.repaired[i]
+        if dt < 5.0 or dt >= 35.0:
+            return "green"
+        k, on = divmod(dt - 5.0, 2.0)
+        return ("blue", "red", "green")[int(k) % 3] if on < 1.0 else None
 
     def start(self):
         threading.Thread(target=lambda: ThreadingHTTPServer(("0.0.0.0", self.port), _Handler).serve_forever(),
@@ -123,22 +145,31 @@ class SimCamera:
                 if ok[i] and ok[i + 1]:
                     t = max(1, int(PIPE_D * F / z[i]))
                     cv2.line(img, (int(u[i]), int(v[i])), (int(u[i + 1]), int(v[i + 1])), (70, 76, 72), t)
-            for c, d, colour in self.boxes:
+            magnet = cam + r @ MAG_BODY
+            for i, (c, d, colour) in enumerate(self.boxes):
                 across = np.cross(d, (0.0, 0.0, 1.0))
                 top = c - np.array([0.0, 0.0, BOX_H / 2])         # NED: up is -z
+                if colour == "red" and i not in self.repaired and np.linalg.norm(magnet - top) < REPAIR_M:
+                    self.repaired[i] = time.monotonic()
+                    print(f"sim_camera: the magnet reached light {i + 1} - GREEN", flush=True)
+                colour = self._colour(i, colour)
                 corners = [top + sx * BOX_L / 2 * d + sy * BOX_W / 2 * across
                            for sx, sy in ((1, 1), (1, -1), (-1, -1), (-1, 1))]
                 cu, cv_, cz = self._project(np.array(corners), cam, r)
                 if np.any(cz <= 0.1):
                     continue
                 cv2.fillPoly(img, [np.stack([cu, cv_], 1).astype(np.int32)], (48, 50, 50))
+                if colour is None:
+                    continue
                 lu, lv, lz = self._project(top, cam, r)
                 rad = int(LED_R * F / lz[0])
                 glow = np.zeros_like(img)
                 cv2.circle(glow, (int(lu[0]), int(lv[0])), int(rad * 2.2), BGR[colour], -1)
                 glow = cv2.GaussianBlur(glow, (0, 0), max(1.0, rad * 0.5))
                 img = cv2.max(img, glow)
-                cv2.circle(img, (int(lu[0]), int(lv[0])), max(1, rad // 3), (235, 235, 235), -1)
+                cv2.circle(img, (int(lu[0]), int(lv[0])), max(1, int(rad * 0.8)), (252, 252, 252), -1)   # washed-out core
+            cv2.circle(img, (int(MAGNET_PX[0]), int(MAGNET_PX[1])), MAG_R_PX, (28, 28, 28), -1)   # the magnet
+            cv2.circle(img, (int(MAGNET_PX[0]), int(MAGNET_PX[1])), MAG_R_PX, (140, 140, 140), 2)
         img = cv2.GaussianBlur(img, (3, 3), 0)
         cv2.putText(img, "DOWN (sim)", (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (230, 230, 230), 1)
         front = np.full((H, W, 3), (8, 8, 8), np.uint8)

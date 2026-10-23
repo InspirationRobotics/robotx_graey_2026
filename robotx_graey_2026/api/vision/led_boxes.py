@@ -73,6 +73,33 @@ def hsv_masks(rgb, hues=None):
     return out
 
 
+MAGNET_PX = (328.0, 292.0)     # the repair magnet's centre in the 640x360 down picture (Oct 22 footage: its rim
+                               # in the median of 400 lit frames, radius 49 px). Picture top = the sub's front,
+                               # picture right = its right (checked against the DVL the same night)
+OPEN_PX = 5                    # SMALL px: wider than the red glare streaks the acrylic board throws (Oct 22)
+CORE_V = 240                   # a light's washed-out middle: the LED ring itself
+
+
+def light_spot(rgb, min_px=20):
+    """Where the light is in a SMALL down frame: ((x, y) in 640x360 pixels, share of the picture) of its
+    bright core (V >= CORE_V), or None. Not the coloured haze: that leans along the glare streaks, while
+    the core sits on the LED ring (Oct 22 footage: the core's middle was 16-34 px from the magnet's when
+    the light switched, the red haze's 65-72 px). Thin streaks are opened away first, then the biggest
+    patch counts; with the magnet inside the ring its middle is hidden, but the ring keeps the centre.
+    Which colour the light is, is red_green_fractions' job."""
+    import cv2
+    m = (cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)[..., 2] >= CORE_V).astype(np.uint8)
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (OPEN_PX, OPEN_PX)))
+    n, _, st, cen = cv2.connectedComponentsWithStats(m)
+    if n < 2:
+        return None
+    k = 1 + int(np.argmax(st[1:, cv2.CC_STAT_AREA]))
+    if st[k, cv2.CC_STAT_AREA] < min_px:
+        return None
+    h, w = m.shape
+    return (float(cen[k][0]) * 640 / w, float(cen[k][1]) * 360 / h), float(st[k, cv2.CC_STAT_AREA]) / m.size
+
+
 def colour_fractions(rgb):
     """Share of the picture (0-1) that is bright and red, green, blue or yellow."""
     return {c: float(m.mean()) for c, m in hsv_masks(rgb).items()}
@@ -283,6 +310,7 @@ class CameraWatcher:
         self.tracker = tracker if tracker is not None else BoxTracker(**tracker_args)
         self.stop = threading.Event()
         self.frames = 0
+        self.latest = None              # (time, SMALL RGB frame) of the newest picture, for centring
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self):
@@ -298,6 +326,7 @@ class CameraWatcher:
                     if rgb is None:
                         continue
                     self.frames += 1
+                    self.latest = (t, rgb)
                     if self.frames == 1:
                         self.report(f'camera: watching for light boxes on {self.url}')
                     for b in self.tracker.update(t, rgb, self.where()):
