@@ -4,7 +4,7 @@ import os
 FIRMWARE_PROFILE=os.environ.get('GRAEY_FIRMWARE_PROFILE','4.5')
 if FIRMWARE_PROFILE not in ('4.5','4.7'):
     raise ValueError('Unsupported navigation firmware profile')
-PROFILE = {'AHRS_EKF_TYPE': 3, 'EK3_ENABLE': 1, 'GPS_TYPE': 1, 'GPS_TYPE2': 0,
+PROFILE = {'AHRS_EKF_TYPE': 3, 'AHRS_OPTIONS': 0, 'EK3_ENABLE': 1, 'GPS_TYPE': 1, 'GPS_TYPE2': 0,
            'GPS_AUTO_SWITCH': 0, 'GPS_PRIMARY': 0, 'EK3_SRC_OPTIONS': 0, 'VISO_TYPE': 1,
            'EK3_OGN_HGT_MASK': 0}
 for slot in (1, 2, 3):

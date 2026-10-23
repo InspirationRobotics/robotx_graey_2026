@@ -38,8 +38,11 @@ class WaypointAPI:
         origin = (o['lat'], o['lon'], o['alt'])
         if relative:
             b=bridge['data'];fix=b.get('gps_observation') or {}
-            if not (b.get('local_navigation_ready') and (b.get('gps_admission') or {}).get('qualified')):
-                raise ValueError('Prepared local navigation and qualified GPS required')
+            if not b.get('local_navigation_ready'):
+                raise ValueError('Prepared local navigation required: '+(b.get('fault') or 'check fresh VN, DVL and calibrated depth'))
+            gps=b.get('gps_admission') or {}
+            if not gps.get('qualified'):
+                raise ValueError('Qualified GPS required: '+(gps.get('reason') or 'GPS admission unavailable'))
             return dict(local=local,origin=origin,session=nav['session'],relative=True,start_gps=(fix['lat'],fix['lon']))
         if math.dist(geo_to_ne(cube['lat'], cube['lon'], origin), local[:2]) > .75:
             raise ValueError('Cube global and local coordinates disagree')

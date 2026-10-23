@@ -43,6 +43,7 @@ class FirmwareProfileTests(unittest.TestCase):
         self.assertEqual(p.returncode,0,p.stderr)
         profile,limits=json.loads(p.stdout)
         self.assertEqual(profile['GPS1_TYPE'],1)
+        self.assertEqual(profile['AHRS_OPTIONS'],0)
         self.assertNotIn('GPS_TYPE',profile)
         self.assertEqual(limits,dict(WP_SPD_DN=.10,WP_SPD_UP=.15,WP_ACC_Z=.50))
 
