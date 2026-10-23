@@ -61,6 +61,24 @@ def simulate(offset=73., gps_jump=False, dropout=False, abort=False):
 
 
 class GeographicTests(unittest.TestCase):
+    def test_preflight_does_not_enter_guided_on_one_good_gps_sample(self):
+        run=GuidedSurfaceRun(dict(lat=33.,lon=-117.,mode='surface',map='geographic',alignment_corridor_confirmed=True),'r',0.)
+        o=dict(fresh=True,supervisor=dict(run_id='r',navigation_ready=True,reference_current=True,reference=dict(reference_id='ref')),
+               local=(0.,0.,0.),depth=0.,yaw=0.,mode=19,armed=True,surface_gps_current=True,
+               surface_measurement=dict(ready=False,reason='GPS accuracy 11.282 m'),**{'global':(33.,-117.)})
+        for i in range(50):
+            self.assertEqual(run.step((i+1)*.1,o),[])
+            self.assertEqual(run.stage,'WAIT_SURFACE')
+        o['surface_measurement']=dict(ready=True)
+        run.step(5.1,o)
+        self.assertEqual(run.stage,'GUIDED')
+        self.assertEqual(run.step(5.2,o),[('guided',None)])
+        o['mode']=4
+        self.assertEqual(run.step(5.3,o),[('stop',(0.,))])
+        actions=run.step(5.5,o)
+        self.assertEqual(run.stage,'CHECK_SURFACE')
+        self.assertEqual(actions[0][0],'target')
+
     def test_relative_imu_gap_requires_revalidation_before_north_exists(self):
         e=RelativeEstimator();e.imu(1.,(1,0,0,0),(0,0,0));e.initialized=True
         e.imu(2.,(1,0,0,0),(0,0,0))

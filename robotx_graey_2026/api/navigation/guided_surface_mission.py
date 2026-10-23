@@ -62,13 +62,17 @@ class GuidedSurfaceRun(WaypointRun):
             elif self.last_surface_gps is None or now-self.last_surface_gps>5.:
                 self.abort(now,'Surface GPS unavailable for five seconds');return self.abort_actions(now,o)
         if self.stage=='WAIT_SURFACE':
-            if s.get('navigation_ready') and s.get('reference_current') and o.get('surface_gps_current'):
+            measurement=o.get('surface_measurement') or {}
+            self.reason=measurement.get('reason','Waiting for five seconds of qualified surface measurements before GUIDED')
+            if s.get('navigation_ready') and s.get('reference_current') and o.get('surface_gps_current') and measurement.get('ready'):
                 self.reference_id=s['reference']['reference_id']
                 self.start=local;self.start_gps=o['global'];self.surface_down=local[2]-o['depth']
                 self.heading=o['yaw'];self.last_position=(now,local)
                 self.enter('GUIDED',now,'Requesting GUIDED with fixed local odometry')
         elif self.stage=='GUIDED':
-            if o.get('mode')==4:self.enter('ARM',now,'Waiting for deliberate mission arming')
+            if o.get('mode')==4:
+                self.enter('ARM',now,'Waiting for deliberate mission arming')
+                return self.command(now,'stop',(self.heading,),interval=.1)
             else:return self.command(now,'guided')
         elif self.stage=='ARM':
             if o.get('mode')!=4:
@@ -76,6 +80,7 @@ class GuidedSurfaceRun(WaypointRun):
             if o.get('armed'):
                 self.last_surface_gps=now
                 self.enter('CHECK_SURFACE',now,'Holding start while validating surface measurements')
+                return self.command(now,'target',(*self.start,self.heading),interval=.1)
             else:return self.command(now,'arm')
         elif self.stage=='CHECK_SURFACE':
             if (o.get('surface_measurement') or {}).get('ready'):

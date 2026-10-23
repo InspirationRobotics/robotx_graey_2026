@@ -214,10 +214,10 @@ class WaypointMission(Node):
             self.intent_pub.publish(String(data=json.dumps(dict(run_id=self.logic.run_id,
                 phase=self.logic.phase, sequence=self.sequence, target_gps=self.logic.plan))))
         o = self.observation(now)
-        if self.logic.stage=='CHECK_SURFACE' and getattr(self,'measurement_stage',None)!='CHECK_SURFACE':
+        if not isinstance(self.logic,GuidedSurfaceRun) and self.logic.stage=='CHECK_SURFACE' and getattr(self,'measurement_stage',None)!='CHECK_SURFACE':
             self.surface_measurement=SurfaceMeasurement(duration=5.,tolerated_gps_gap=4.,tolerated_sensor_gap=1.5)
         self.measurement_stage=self.logic.stage
-        if self.logic.stage in ('WAIT_SURFACE','CHECK_SURFACE'):
+        if self.logic.stage in ('WAIT_SURFACE','CHECK_SURFACE') or (isinstance(self.logic,GuidedSurfaceRun) and self.logic.stage in ('GUIDED','ARM')):
             b=self.bridge if 0<=now-self.bridge_time<.3 else {}
             self.surface_measurement_status=self.surface_measurement.update(now,b)
         o['surface_measurement']=self.surface_measurement_status
@@ -225,7 +225,11 @@ class WaypointMission(Node):
             self.logic.reason='Waiting for shallow waypoint vertical speed/acceleration limit readback'
         for action, payload in self.logic.step(now, o):
             if action in ('align_velocity','stop'):
-                v=(payload[0],payload[1],0.) if action=='align_velocity' else (0.,0.,0.)
+                # Alignment and braking need the same surface protection as transit.
+                # An abort with invalid depth must still be able to send a stop.
+                depth=o.get('depth')
+                down=surface_velocity((0.,0.),(0.,0.),(0.,0.),depth)[2] if o.get('fresh') and isinstance(depth,(int,float)) and math.isfinite(depth) else 0.
+                v=(payload[0],payload[1],down) if action=='align_velocity' else (0.,0.,down)
                 heading=payload[2] if action=='align_velocity' else payload[0]
                 self.link.surface_velocity(*v,heading)
                 self.sent_surface_velocity=v;self.sent_surface_heading=heading
