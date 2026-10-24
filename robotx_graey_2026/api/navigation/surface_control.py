@@ -95,3 +95,29 @@ def gentle_horizontal(command, previous, dt):
     delta=math.hypot(dx,dy);limit=.04*min(.2,max(0.,dt))
     if delta>limit and delta>0:x,y=previous[0]+dx*limit/delta,previous[1]+dy*limit/delta
     return x,y,z
+
+
+class StabilizeSurfaceControl:
+    """Local-XY velocity feedback to body pilot axes; neutral heave always."""
+    def __init__(self):
+        self.integral=[0.,0.]
+        self.output=[0.,0.]
+        self.last=None
+
+    def step(self, now, target, measured, yaw, desired_yaw, stopping=False):
+        if not all(math.isfinite(v) for v in (now,*target[:2],*measured[:2],yaw,desired_yaw)):
+            raise ValueError('Fresh finite horizontal motion and attitude required')
+        dt=min(.2,max(0.,now-self.last)) if self.last is not None else .1
+        self.last=now
+        c,s=math.cos(yaw),math.sin(yaw)
+        desired_body=(c*target[0]+s*target[1],-s*target[0]+c*target[1])
+        errors=(c*(target[0]-measured[0])+s*(target[1]-measured[1]),
+                -s*(target[0]-measured[0])+c*(target[1]-measured[1]))
+        for i,error in enumerate(errors):
+            self.integral[i]=0. if stopping else max(-100.,min(100.,self.integral[i]+120.*error*dt))
+            wanted=max(-150.,min(150.,(0. if stopping else 1000.*desired_body[i])+400.*error+self.integral[i]))
+            self.output[i]=wanted if stopping else self.output[i]+max(-40.*dt,min(40.*dt,wanted-self.output[i]))
+        error=(desired_yaw-yaw+math.pi)%(2*math.pi)-math.pi
+        # Center yaw near the target so Cube's own heading hold takes over.
+        turn=0 if abs(error)<math.radians(2.) else round(max(-100.,min(100.,8.*math.degrees(error))))
+        return round(self.output[0]),round(self.output[1]),500,turn

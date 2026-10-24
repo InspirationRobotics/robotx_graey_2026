@@ -106,7 +106,7 @@ def main():
                         if not result['stages'] or result['stages'][-1]!=m['stage']: result['stages'].append(m['stage'])
                         gps=streams.get('gps',{}).get('data',{})
                         if m['stage']=='CHECK_SURFACE':
-                            result['armed_guided_surface_hold_seen']=bool(m.get('cube_armed') and m.get('cube_mode_id')==4)
+                            result['armed_guided_surface_hold_seen']=bool(m.get('cube_armed') and m.get('cube_mode_id')==(4 if args.dive else 0))
                             if args.abort_during_hold and not abort_sent:
                                 api(dict(action='abort',run_id=run_id));abort_sent=True
                         if m['stage']=='TRANSIT':

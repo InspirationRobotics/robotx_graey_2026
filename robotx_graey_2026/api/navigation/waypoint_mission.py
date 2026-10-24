@@ -13,8 +13,8 @@ from robotx_graey_2026.api.navigation.waypoint_logic import WaypointRun
 from robotx_graey_2026.api.navigation.guided_surface_mission import GuidedSurfaceRun
 from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
 from robotx_graey_2026.api.navigation.surface_measurement import SurfaceMeasurement
-from robotx_graey_2026.api.navigation.surface_control import surface_velocity,SurfaceLeg,gentle_horizontal
-from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL
+from robotx_graey_2026.api.navigation.surface_control import surface_velocity,SurfaceLeg,gentle_horizontal,StabilizeSurfaceControl
+from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL, MODE_STABILIZE
 
 
 class WaypointMission(Node):
@@ -41,7 +41,7 @@ class WaypointMission(Node):
         plan=json.loads(cfg['plan_json'])
         self.logic = (GuidedSurfaceRun if plan.get('mode','surface')=='surface' else WaypointRun)(plan,cfg['run_id'],time.monotonic())
         self.result_file = cfg['result_file']
-        self.link = Link(cfg['mavlink'], 198, self.get_logger())
+        self.link = Link(cfg['mavlink'], 198, self.get_logger(),system=255 if isinstance(self.logic,GuidedSurfaceRun) else 1)
         self.view = NavigationView()
         self.supervisor, self.safety = {}, {}
         self.bridge = {}
@@ -56,6 +56,8 @@ class WaypointMission(Node):
         self.last_trace = -math.inf
         self.sent_target = None
         self.surface_leg=SurfaceLeg()
+        self.stabilize_control=StabilizeSurfaceControl()
+        self.pilot_override_active=False
         self.surface_measurement=(SurfaceMeasurement(duration=5.,tolerated_gps_gap=4.,tolerated_sensor_gap=1.5)
                                   if self.logic.plan['mode']=='surface' else SurfaceMeasurement())
         self.surface_measurement_status={}
@@ -86,6 +88,28 @@ class WaypointMission(Node):
                     and math.isfinite(value) and 0<value<=maximum+max(1e-7,abs(maximum)*1e-6)):
                 return False
         return True
+
+    def destroy_node(self):
+        self.release_surface_controls()
+        return super().destroy_node()
+
+    def release_surface_controls(self):
+        if self.pilot_override_active:
+            # Release only the first eight pilot channels, not RF kill/arm inputs.
+            self.link.send('rc_channels_override_send',1,1,*([0]*8))
+            self.pilot_override_active=False
+
+    def send_surface(self, now, velocity, heading, o, stopping=False):
+        if not isinstance(self.logic,GuidedSurfaceRun):
+            self.link.surface_velocity(*velocity,heading);return
+        if o.get('mode')!=MODE_STABILIZE or not o.get('armed') or o.get('failure'):
+            self.release_surface_controls();return
+        if not o.get('fresh') and not o.get('navigation_hold_safe'):
+            self.release_surface_controls();return
+        command=self.stabilize_control.step(now,velocity,o['velocity_ned'],o['yaw'],heading,stopping)
+        self.link.send('manual_control_send',1,*command,0)
+        self.pilot_override_active=True
+        self.last_manual_control=command
 
     def on_status(self, msg):
         try:
@@ -242,19 +266,19 @@ class WaypointMission(Node):
                 # Alignment and braking need the same surface protection as transit.
                 # An abort with invalid depth must still be able to send a stop.
                 depth=o.get('depth')
-                down=surface_velocity((0.,0.),(0.,0.),(0.,0.),depth)[2] if o.get('fresh') and isinstance(depth,(int,float)) and math.isfinite(depth) else 0.
+                down=0. if isinstance(self.logic,GuidedSurfaceRun) else surface_velocity((0.,0.),(0.,0.),(0.,0.),depth)[2] if o.get('fresh') and isinstance(depth,(int,float)) and math.isfinite(depth) else 0.
                 v=(payload[0],payload[1],down) if action=='align_velocity' else (0.,0.,down)
                 heading=payload[2] if action=='align_velocity' else payload[0]
                 if action!='stop':
                     if self.logic.navigation_wait_since is None:
                         v=gentle_horizontal(v,getattr(self,'sent_surface_velocity',(0.,0.,0.)),now-getattr(self,'surface_command_at',now-.1))
                 self.surface_command_at=now
-                self.link.surface_velocity(*v,heading)
+                self.send_surface(now,v,heading,o,stopping=action=='stop' or self.logic.navigation_wait_since is not None)
                 self.sent_surface_velocity=v;self.sent_surface_heading=heading
             elif action == 'target':
                 self.sent_target=payload
                 if self.logic.plan['mode']=='surface':
-                    if self.logic.stage=='TRANSIT' and self.logic.navigation_wait_since is None:
+                    if self.logic.stage=='TRANSIT' and self.logic.target is not None and self.logic.navigation_wait_since is None:
                         v,heading=self.surface_leg.step(now,self.logic.start,self.logic.target,
                             o['local'],o['velocity_ned'],o['depth'],o['yaw'])
                     else:
@@ -262,8 +286,9 @@ class WaypointMission(Node):
                         heading=payload[3]
                     if self.logic.navigation_wait_since is None:
                         v=gentle_horizontal(v,getattr(self,'sent_surface_velocity',(0.,0.,0.)),now-getattr(self,'surface_command_at',now-.1))
+                    if isinstance(self.logic,GuidedSurfaceRun):v=(*v[:2],0.)
                     self.surface_command_at=now
-                    self.link.surface_velocity(*v,heading)
+                    self.send_surface(now,v,heading,o,stopping=action=='stop' or self.logic.navigation_wait_since is not None)
                     self.sent_surface_velocity=v
                     self.sent_surface_heading=heading
                 else:
@@ -272,9 +297,14 @@ class WaypointMission(Node):
                 self.get_logger().warning('MISSION_MODE_REQUEST '+json.dumps(dict(
                     run_id=self.logic.run_id,action=action,stage=self.logic.stage,
                     reason=self.logic.reason,published_monotonic=now)))
-                self.link.set_mode(MODE_GUIDED if action == 'guided' else MODE_MANUAL)
+                if action=='guided' and isinstance(self.logic,GuidedSurfaceRun):
+                    self.link.send('manual_control_send',1,0,0,500,0,0)
+                    self.pilot_override_active=True
+                if action=='manual':self.release_surface_controls()
+                self.link.set_mode((MODE_STABILIZE if isinstance(self.logic,GuidedSurfaceRun) else MODE_GUIDED) if action=='guided' else MODE_MANUAL)
             elif action in ('arm', 'disarm'):
                 self.link.command(400, 1 if action == 'arm' else 0)
+        if self.logic.stage in self.logic.terminal:self.release_surface_controls()
         if self.logic.stage=='ABORTED' and self.logic.abort_context is None:
             self.logic.abort_context=dict(telemetry_fresh=bool(o['fresh']),
                 navigation_hold_safe=o.get('navigation_hold_safe'),
@@ -298,7 +328,7 @@ class WaypointMission(Node):
             self.last_pause=paused
             self.get_logger().warning('MISSION_NAVIGATION_PAUSE '+json.dumps(dict(
                 run_id=self.logic.run_id,published_monotonic=now,**status['navigation_pause'])))
-        status.update(simulation=self.sim, published_monotonic=now,
+        status.update(control_mode='STABILIZE' if isinstance(self.logic,GuidedSurfaceRun) else 'GUIDED', vertical_control='neutral pilot input' if isinstance(self.logic,GuidedSurfaceRun) else 'depth control',last_manual_control=getattr(self,'last_manual_control',None),simulation=self.sim, published_monotonic=now,
                       surface_leg=self.surface_leg.state,
                       last_sent_surface_heading_rad=getattr(self,'sent_surface_heading',None),
                       bridge_course_heading=self.bridge.get('course_heading'),
@@ -318,6 +348,7 @@ class WaypointMission(Node):
                 run_id=self.logic.run_id,stage=self.logic.stage,monotonic=now,
                 plan=self.logic.plan,target_ned=self.logic.target,
                 last_sent_target_ned_yaw=self.sent_target,
+                last_manual_control=getattr(self,'last_manual_control',None),
                 last_sent_surface_velocity_ned=getattr(self,'sent_surface_velocity',None),
                 surface_leg=self.surface_leg.state,
                 last_sent_surface_heading_rad=getattr(self,'sent_surface_heading',None),
@@ -345,7 +376,7 @@ class WaypointMission(Node):
             # Publish the terminal state long enough for the GUI. On a nav abort
             # continue requesting takeover until the Cube acknowledges leaving GUIDED.
             if now-self.logic.since > 3 and (self.logic.stage == 'COMPLETE'
-                    or o.get('mode') not in (None, 4) or self.logic.pilot_takeover
+                    or o.get('mode') not in (None, MODE_STABILIZE if isinstance(self.logic,GuidedSurfaceRun) else MODE_GUIDED) or self.logic.pilot_takeover
                     or not self.logic.takeover_requested):
                 raise SystemExit(0)
 

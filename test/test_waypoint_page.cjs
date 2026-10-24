@@ -82,7 +82,7 @@ async function render(data,options={}){
   assert(e.imageSources.some(s=>s==='/vendor/miramar/19-211332-91604.jpg'));
   e.map.onclick({clientX:450,clientY:300});assert(!e.start.disabled);
   e.alignmentCorridor.checked=false;e.alignmentCorridor.onchange();assert(e.start.disabled);
-  assert.match(e.readiness.textContent,/clear initial alignment corridor/);
+  assert.match(e.readiness.textContent,/clear sampling corridor/);
   e.alignmentCorridor.checked=true;e.alignmentCorridor.onchange();assert(!e.start.disabled);
   e.findLake.onclick();assert(e.imageSources.some(s=>s==='/vendor/miramar/16-26416-11450.jpg'));
   console.log('Waypoint map, desktop archive resolution, readiness, Start retry and estimate stats checks pass');

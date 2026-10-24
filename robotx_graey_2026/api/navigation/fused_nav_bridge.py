@@ -147,7 +147,7 @@ class FusedNavBridge(SteadyNode):
             if not 0<=now-m.get('published_monotonic',-math.inf)<.5 or not m.get('run_id'):return
             c=self.control_state
             if (self.control_received is None or not 0<=now-self.control_received<1.
-                    or not c.get('mission_claimed') or c.get('mode')!='GUIDED' or not c.get('armed')
+                    or not c.get('mission_claimed') or c.get('mode')!='STABILIZE' or not c.get('armed')
                     or c.get('sa_active') or not c.get('esc_commanded_on')):
                 if self.est.north_alignment.active:self.est.north_alignment.stop(False)
                 return
@@ -168,11 +168,12 @@ class FusedNavBridge(SteadyNode):
                         and (status.get('gps_admission') or {}).get('qualified')):
                     self.est.apply_segment_correction(now,(m['run_id'],m.get('segment_checks',0)))
             a=self.est.north_alignment
-            if m.get('stage')=='ALIGN_MOVE' and getattr(self,'motion_north_run',None)!=m['run_id']:
+            if m.get('stage')=='TRANSIT' and self.est.map.angle is None and getattr(self,'motion_north_run',None)!=m['run_id']:
                 self.motion_north_run=m['run_id'];a.begin()
             if getattr(self,'motion_north_run',None)!=m['run_id']:return
             self.motion_north_received=now
-            if m.get('stage')=='ALIGN_ACCEPT' and a.active and not a.approved:a.stop(True)
+            if (m.get('stage')=='TRANSIT_CHECK' and a.active and not a.approved
+                    and a.status().get('candidate_ready') and m.get('sample_check_ready') is True):a.stop(True)
             elif m.get('stage') in ('ABORTED','COMPLETE') and a.active:a.stop(False)
         except (ValueError,KeyError,TypeError):return
 

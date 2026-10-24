@@ -35,8 +35,8 @@ def simulate(offset=73., gps_jump=False, dropout=False, abort=False):
         if i==140:
             run=GuidedSurfaceRun(dict(lat=lat,lon=lon,map='geographic',mode='surface',alignment_corridor_confirmed=True),'run',t)
         if run is None:continue
-        if run.stage=='ALIGN_MOVE' and not begun:e.north_alignment.begin();begun=True
-        if run.stage=='ALIGN_ACCEPT' and e.north_alignment.active and not e.north_alignment.approved:e.north_alignment.stop(True)
+        if run.stage=='TRANSIT' and not begun:e.north_alignment.begin();begun=True
+        if run.stage=='TRANSIT_CHECK' and run.sample_check_ready and e.north_alignment.status().get('candidate_ready') and e.north_alignment.active and not e.north_alignment.approved:e.north_alignment.stop(True)
         s=dict(run_id='run',reference_current=True,reference=dict(reference_id='ref'),navigation_ready=b['healthy'],
             surfaced=True,fusion_policy='continuous',state='Ready')
         current=e.gps.status(t)['qualified'] and e.last_correction is not None and t-e.last_correction<.35
@@ -47,14 +47,14 @@ def simulate(offset=73., gps_jump=False, dropout=False, abort=False):
             **{'global':(glat,glon)})
         if run.stage!=previous:stages.append(run.stage);previous=run.stage
         for action,payload in run.step(t,o):
-            if action=='guided':mode=4
+            if action=='guided':mode=0
             elif action=='arm':armed=True
             elif action=='disarm':armed=False;cmd=(0.,0.,0.)
             elif action=='manual':mode=19;cmd=(0.,0.,0.)
             elif action=='align_velocity':cmd=(*payload[:2],0.);desired=payload[2]
             elif action=='stop':cmd=(0.,0.,0.);desired=payload[0]
             elif action=='target':
-                if run.stage=='TRANSIT':cmd,desired=leg.step(t,run.start,run.target,o['local'],o['velocity_ned'],0.,heading)
+                if run.stage=='TRANSIT' and run.target is not None:cmd,desired=leg.step(t,run.start,run.target,o['local'],o['velocity_ned'],0.,heading)
                 else:cmd=surface_velocity(payload,o['local'],o['velocity_ned'],0.);desired=payload[3]
         if run.stage in run.terminal:return run,e,p,stages
     return run,e,p,stages
@@ -96,7 +96,7 @@ class GeographicTests(unittest.TestCase):
         run.step(5.1,o)
         self.assertEqual(run.stage,'GUIDED')
         self.assertEqual(run.step(5.2,o),[('guided',None)])
-        o['mode']=4
+        o['mode']=0
         self.assertEqual(run.step(5.3,o),[('stop',(0.,))])
         actions=run.step(5.5,o)
         self.assertEqual(run.stage,'CHECK_SURFACE')
@@ -130,9 +130,8 @@ class GeographicTests(unittest.TestCase):
         for offset in (0.,73.,-120.):
             run,e,p,stages=simulate(offset)
             self.assertEqual(run.stage,'COMPLETE',(run.reason,stages,e.north_alignment.status()))
-            self.assertIn('ALIGN_MOVE',stages);self.assertIn('ALIGN_ACCEPT',stages)
+            self.assertIn('TRANSIT',stages);self.assertFalse(any(x.startswith('ALIGN_') for x in stages))
             self.assertLess(math.dist(rotation(p,offset),(10.,3.)),1.55)
-            self.assertIn('ALIGN_CHECK',stages)
             self.assertIn('TRANSIT_CHECK',stages)
             self.assertGreaterEqual(run.segment_checks,4)
             self.assertLess(abs((e.map.angle-offset+180)%360-180),2.)

@@ -21,7 +21,7 @@ class SegmentedBridgeTests(unittest.TestCase):
         e.status=Mock(return_value=dict(healthy=True,gps_admission=dict(qualified=True)))
         e.apply_segment_correction=Mock()
         node=NS(est=e,control_received=10.,segmented_course_run='r',control_state=dict(
-            mission_claimed=True,mode='GUIDED',armed=True,sa_active=False,esc_commanded_on=True))
+            mission_claimed=True,mode='STABILIZE',armed=True,sa_active=False,esc_commanded_on=True))
         message=dict(published_monotonic=10.,run_id='r',stage='TRANSIT_CHECK',segment_checks=2,
                      plan=dict(lat=33.,lon=-117.))
         def send():ns['mission_alignment_status'](node,NS(data=json.dumps(message)))
