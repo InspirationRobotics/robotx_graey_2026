@@ -7,6 +7,7 @@ nav_ekf_bridge and navigation_supervisor can be exercised end to end.
 """
 import json
 import math
+import os
 import time
 
 from geometry_msgs.msg import TwistWithCovarianceStamped
@@ -33,6 +34,12 @@ class SitlSensorSim(Node):
         self.declare_parameter('mavlink', 'udpout:127.0.0.1:14558')
         self.declare_parameter('truth_only', False)
         self.declare_parameter('relative_yaw_offset_deg', 0.)
+        self.declare_parameter('control_fixture',False)
+        self.control_fixture=self.get_parameter('control_fixture').value
+        if self.control_fixture and not (os.environ.get('GRAEY_RUNTIME_SCOPE')=='sitl'
+                and os.environ.get('ROS_DOMAIN_ID')=='73' and os.environ.get('ROS_LOCALHOST_ONLY')=='1'
+                and self.get_parameter('mavlink').value=='udpout:127.0.0.1:14558'):
+            raise ValueError('Control fixture requires isolated localhost SITL')
         self.relative_yaw_offset = self.get_parameter('relative_yaw_offset_deg').value
         self.truth_only = self.get_parameter('truth_only').value
         self.link = Link(self.get_parameter('mavlink').value, 201, self.get_logger())
@@ -41,6 +48,9 @@ class SitlSensorSim(Node):
         self.vel_pub = self.create_publisher(TwistWithCovarianceStamped, '/graey/dvl/velocity', 20)
         self.valid_pub = self.create_publisher(Bool, '/graey/dvl/valid', 10)
         self.depth_pub = self.create_publisher(Float32, '/graey/sitl/depth_m', 10)
+        self.control_pub = self.create_publisher(String, '/graey/control_watchdog/status', 10)
+        self.claimed=False
+        self.create_subscription(Bool, '/graey/autonomy_active', self.claim, 10)
         self.latest = {}
         self.truth_previous = None
         self.truth_surface_alt = None
@@ -50,6 +60,9 @@ class SitlSensorSim(Node):
         self.last_request = 0.0
         self.create_timer(.01, self.tick)
 
+    def claim(self,msg):
+        self.claimed=msg.data
+
     def tick(self):
         now = time.monotonic()
         if now-self.last_request > 2:
@@ -57,6 +70,13 @@ class SitlSensorSim(Node):
                 self.link.command(511, msg_id, 50000)
             self.last_request = now
         self.link.drain(self.consume)
+        heartbeat=self.latest.get('heartbeat')
+        if getattr(self,'control_fixture',False) and heartbeat and now-heartbeat['received']<1.:
+            armed=heartbeat['armed']
+            self.control_pub.publish(String(data=json.dumps(dict(
+                session='isolated-sitl',vehicle_fresh=True,online=True,
+                mode=heartbeat['mode'],armed=armed,sa_active=not armed,
+                esc_commanded_on=armed,mission_claimed=self.claimed,autonomous=False,inhibit=''))))
         attitude, local = self.latest.get('attitude'), self.latest.get('local')
         if (not attitude or not 0 <= now-attitude['received'] < .5
                 or now-self.last_publish < .05):
@@ -97,6 +117,9 @@ class SitlSensorSim(Node):
     def consume(self, kind, msg):
         if msg.get_srcSystem() != 1 or msg.get_srcComponent() != 1:
             return
+        if kind=='HEARTBEAT':
+            self.latest['heartbeat']=dict(received=time.monotonic(),
+                armed=bool(msg.base_mode & 128),mode={19:'MANUAL',4:'GUIDED',0:'STABILIZE'}.get(msg.custom_mode,'OTHER'))
         if kind == 'SIM_STATE' and self.truth_only:
             q = (msg.q1, msg.q2, msg.q3, msg.q4)
             self.latest['attitude'] = dict(q=q, rates=(msg.xgyro, msg.ygyro, msg.zgyro), received=time.monotonic())

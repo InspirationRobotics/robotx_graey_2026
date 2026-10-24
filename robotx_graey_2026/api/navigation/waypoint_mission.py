@@ -10,8 +10,10 @@ from std_msgs.msg import Bool, String
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.gui.navigation_view import NavigationView
 from robotx_graey_2026.api.navigation.waypoint_logic import WaypointRun
+from robotx_graey_2026.api.navigation.guided_surface_mission import GuidedSurfaceRun
+from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
 from robotx_graey_2026.api.navigation.surface_measurement import SurfaceMeasurement
-from robotx_graey_2026.api.navigation.surface_control import surface_velocity,SurfaceLeg
+from robotx_graey_2026.api.navigation.surface_control import surface_velocity,SurfaceLeg,gentle_horizontal
 from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL
 
 
@@ -21,6 +23,8 @@ class WaypointMission(Node):
 
     def __init__(self):
         super().__init__('waypoint_mission')
+        from .odometry_profile import SHALLOW_LIMITS
+        self.SHALLOW_LIMITS=SHALLOW_LIMITS.copy()
         for key, value in dict(plan_json='', run_id='', commissioned=False, simulation=False,
                               mavlink='udpout:127.0.0.1:14553', result_file='').items():
             self.declare_parameter(key, value)
@@ -34,7 +38,8 @@ class WaypointMission(Node):
             raise ValueError('Simulation requires isolated localhost SITL domain and endpoint')
         if not cfg['run_id'] or (not self.sim and not cfg['commissioned']):
             raise ValueError('Mission run ID and commissioned live configuration required')
-        self.logic = WaypointRun(json.loads(cfg['plan_json']), cfg['run_id'], time.monotonic())
+        plan=json.loads(cfg['plan_json'])
+        self.logic = (GuidedSurfaceRun if plan.get('mode','surface')=='surface' else WaypointRun)(plan,cfg['run_id'],time.monotonic())
         self.result_file = cfg['result_file']
         self.link = Link(cfg['mavlink'], 198, self.get_logger())
         self.view = NavigationView()
@@ -78,7 +83,7 @@ class WaypointMission(Node):
         for name,maximum in self.SHALLOW_LIMITS.items():
             stamp,value=getattr(self,'nav_limits',{}).get(name,(-math.inf,None))
             if not (0<=now-stamp<12 and isinstance(value,(int,float))
-                    and math.isfinite(value) and 0<value<=maximum):
+                    and math.isfinite(value) and 0<value<=maximum+max(1e-7,abs(maximum)*1e-6)):
                 return False
         return True
 
@@ -160,18 +165,30 @@ class WaypointMission(Node):
                 # DDS subscriptions can take a moment to match at startup.
                 # Wait disarmed for the first status, without granting readiness.
                 if not (self.safety_time == -math.inf and self.logic.stage == 'WAIT_SURFACE'
-                        and now-self.logic.since < 2):
+                        and now-self.logic.since < 5):
                     failure = 'Control watchdog or ESC permission unavailable'
         b=getattr(self,'bridge',{})
         cube_fresh=bool(hb and local and att and origin and self.view.position_healthy()
             and ned and velocity and depth is not None
             and all(isinstance(v,(int,float)) and math.isfinite(v)
                     for v in (*ned,*velocity,*att.get('rpy',[None]),depth)))
+        continuity=b.get('dvl_continuity') or {}
+        # Brief DVL loss permits bounded hold, never continued travel.
+        dvl_hold=bool(continuity.get('recovering') is True
+            and continuity.get('state')=='COASTING'
+            and 0<=continuity.get('gap_age_s',math.inf)<1.5
+            and 0<=continuity.get('position_sigma_m',math.inf)<=5.
+            and not continuity.get('requires_position_revalidation',True)
+            and b.get('initialized') is True and b.get('enabled') is True
+            and not b.get('heading_continuity_lost',True)
+            and (b.get('inputs') or {}).get('vn') is True
+            and 0<=now-(b.get('pressure_sample') or {}).get('received',-math.inf)<.5)
         hold_safe=bool(cube_fresh and not failure
             and 0<=now-getattr(self,'bridge_time',-math.inf)<.3
             and 0<=now-b.get('published_monotonic',-math.inf)<.3
-            and b.get('healthy') is True and b.get('navigation_valid') is True
-            and b.get('transmitting') is True and b.get('configuration_verified') is True
+            and ((b.get('healthy') is True and b.get('navigation_valid') is True
+                  and b.get('transmitting') is True) or dvl_hold)
+            and b.get('configuration_verified') is True
             and not b.get('fault'))
         gps=b.get('gps_admission') or {}
         fix=b.get('gps_observation') or {}
@@ -186,7 +203,11 @@ class WaypointMission(Node):
                     (self.logic.plan['lat'],self.logic.plan['lon'])),(0.,0.))<=1.5)
             except (KeyError,ValueError,TypeError):
                 pass
-        return dict(fresh=fresh, failure=failure, abort=self.aborted,
+        geographic=(glob['lat'],glob['lon']) if glob.get('valid') else None
+        if b.get('coordinate_frame')=='fixed_local':
+            frame=GeographicFrame.restore(b.get('map_transform'))
+            geographic=frame.to_geo(ned) if frame.angle is not None and ned else ((fix['lat'],fix['lon']) if gps_current else None)
+        return dict(fresh=fresh, failure=failure, abort=self.aborted,bridge=b,
             surface_gps_current=gps_current,surface_gps_at_target=gps_at_target,
             dvl_continuity=b.get('dvl_continuity') if 0<=now-getattr(self,'bridge_time',-math.inf)<.3 else {},
             vertical_limits_verified=limits_ready,
@@ -197,7 +218,7 @@ class WaypointMission(Node):
             yaw=math.radians(att['rpy'][2]) if att and att['rpy'][2] is not None else None,
             depth=depth, origin=(origin['lat'], origin['lon'], origin['alt']) if origin else None,
             global_healthy=glob.get('valid'),
-            **{'global': (glob['lat'], glob['lon']) if glob.get('valid') else None})
+            **{'global': geographic})
 
     def tick(self):
         now = time.monotonic()
@@ -207,17 +228,30 @@ class WaypointMission(Node):
             self.intent_pub.publish(String(data=json.dumps(dict(run_id=self.logic.run_id,
                 phase=self.logic.phase, sequence=self.sequence, target_gps=self.logic.plan))))
         o = self.observation(now)
-        if self.logic.stage=='CHECK_SURFACE' and getattr(self,'measurement_stage',None)!='CHECK_SURFACE':
+        if not isinstance(self.logic,GuidedSurfaceRun) and self.logic.stage=='CHECK_SURFACE' and getattr(self,'measurement_stage',None)!='CHECK_SURFACE':
             self.surface_measurement=SurfaceMeasurement(duration=5.,tolerated_gps_gap=4.,tolerated_sensor_gap=1.5)
         self.measurement_stage=self.logic.stage
-        if self.logic.stage in ('WAIT_SURFACE','CHECK_SURFACE'):
+        if self.logic.stage in ('WAIT_SURFACE','CHECK_SURFACE') or (isinstance(self.logic,GuidedSurfaceRun) and self.logic.stage in ('GUIDED','ARM')):
             b=self.bridge if 0<=now-self.bridge_time<.3 else {}
             self.surface_measurement_status=self.surface_measurement.update(now,b)
         o['surface_measurement']=self.surface_measurement_status
         if self.logic.stage=='WAIT_SURFACE' and not o['vertical_limits_verified']:
             self.logic.reason='Waiting for shallow waypoint vertical speed/acceleration limit readback'
         for action, payload in self.logic.step(now, o):
-            if action == 'target':
+            if action in ('align_velocity','stop'):
+                # Alignment and braking need the same surface protection as transit.
+                # An abort with invalid depth must still be able to send a stop.
+                depth=o.get('depth')
+                down=surface_velocity((0.,0.),(0.,0.),(0.,0.),depth)[2] if o.get('fresh') and isinstance(depth,(int,float)) and math.isfinite(depth) else 0.
+                v=(payload[0],payload[1],down) if action=='align_velocity' else (0.,0.,down)
+                heading=payload[2] if action=='align_velocity' else payload[0]
+                if action!='stop':
+                    if self.logic.navigation_wait_since is None:
+                        v=gentle_horizontal(v,getattr(self,'sent_surface_velocity',(0.,0.,0.)),now-getattr(self,'surface_command_at',now-.1))
+                self.surface_command_at=now
+                self.link.surface_velocity(*v,heading)
+                self.sent_surface_velocity=v;self.sent_surface_heading=heading
+            elif action == 'target':
                 self.sent_target=payload
                 if self.logic.plan['mode']=='surface':
                     if self.logic.stage=='TRANSIT' and self.logic.navigation_wait_since is None:
@@ -226,6 +260,9 @@ class WaypointMission(Node):
                     else:
                         v=surface_velocity(payload,o['local'],o['velocity_ned'],o['depth'])
                         heading=payload[3]
+                    if self.logic.navigation_wait_since is None:
+                        v=gentle_horizontal(v,getattr(self,'sent_surface_velocity',(0.,0.,0.)),now-getattr(self,'surface_command_at',now-.1))
+                    self.surface_command_at=now
                     self.link.surface_velocity(*v,heading)
                     self.sent_surface_velocity=v
                     self.sent_surface_heading=heading

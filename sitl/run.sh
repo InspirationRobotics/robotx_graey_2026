@@ -48,10 +48,10 @@ CLOCK_ARGS=()
 PARAM_FILE="$RUN_DIR/continuous.parm"
   python3 - "$PARAM_FILE" <<'PY'
 import sys
-from robotx_graey_2026.api.navigation.odometry_profile import PROFILE
+from robotx_graey_2026.api.navigation.odometry_profile import PROFILE, SHALLOW_LIMITS
 p=dict(PROFILE, SYSID_THISMAV=1, EK2_ENABLE=0, SCR_ENABLE=0, SIM_GPS_DISABLE=0, LOG_DISARMED=1,
        SIM_BARO_RND=0, SIM_BARO_DRIFT=0,
-       WPNAV_SPEED_DN=10, WPNAV_SPEED_UP=15, WPNAV_ACCEL_Z=50)
+       **SHALLOW_LIMITS)
 open(sys.argv[1],'w').write('\n'.join(f'{k} {v}' for k,v in p.items()))
 PY
 # Preserve prior evidence, but never mistake yesterday's result for this run.
@@ -129,6 +129,7 @@ print('SITL runtime source and GUI assets verified',flush=True)
 PY
 ros2 launch "$ROOT/launch/sitl.launch.py" \
   interactive_waypoint:="${WAYPOINT_INTERACTIVE:-false}" \
+  control_fixture:="${SITL_CONTROL_FIXTURE:-false}" \
   continuous_fusion:="true" \
   auto_north_alignment:="${AUTO_NORTH_ALIGNMENT:-false}" \
   relative_yaw_offset_deg:="${RELATIVE_YAW_OFFSET_DEG:-0.0}" \

@@ -4,6 +4,15 @@ from robotx_graey_2026.api.navigation.course_heading import CourseHeading
 
 
 class CourseHeadingTests(unittest.TestCase):
+    def test_segment_stop_preserves_long_baseline_but_turning_discards_it(self):
+        a=CourseHeading();a.preserve_stationary_anchor=True
+        a.anchor=(0.,(33.,-117.),(0.,0.),0.,1.2)
+        anchor=a.anchor
+        self.assertEqual(a.observe(2.,self.fix(),self.sample(),(0.,0.,0.)),0.)
+        self.assertEqual(a.anchor,anchor)
+        a.observe(3.,self.fix(),self.sample(rates=(0.,0.,.2)),(0.,0.,0.))
+        self.assertIsNone(a.anchor)
+
     def sample(self,velocity=(.2,0.,0.),rates=(0.,0.,0.)):
         return dict(raw_velocity=velocity,rates=rates)
 

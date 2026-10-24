@@ -16,6 +16,7 @@ def generate_launch_description():
     result_file = str(Path(__file__).resolve().parents[1] / 'sitl' / 'logs' / 'scenario-result.json')
     return LaunchDescription([
         DeclareLaunchArgument('interactive_waypoint', default_value='false'),
+        DeclareLaunchArgument('control_fixture', default_value='false'),
         DeclareLaunchArgument('continuous_fusion', default_value='true'),
         DeclareLaunchArgument('auto_north_alignment', default_value='false'),
         DeclareLaunchArgument('relative_yaw_offset_deg', default_value='0.0'),
@@ -41,7 +42,7 @@ def generate_launch_description():
                  'mavlink': LaunchConfiguration('supervisor_mavlink'),
                                   'reference_file': '/tmp/graey-sitl-navigation-reference.json'}], output='screen'),
         Node(package='robotx_graey_2026', executable='sitl_sensor_sim',
-             parameters=[{'truth_only': True, 'relative_yaw_offset_deg': ParameterValue(
+             parameters=[{'truth_only': True, 'control_fixture': ParameterValue(LaunchConfiguration('control_fixture'), value_type=bool), 'relative_yaw_offset_deg': ParameterValue(
                  LaunchConfiguration('relative_yaw_offset_deg'), value_type=float)}],
              name='sitl_sensor_sim', output='screen'),
         Node(package='robotx_graey_2026', executable='sitl_mission',

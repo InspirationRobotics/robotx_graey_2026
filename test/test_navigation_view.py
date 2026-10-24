@@ -11,6 +11,22 @@ spec.loader.exec_module(module)
 
 
 class NavigationTests(unittest.TestCase):
+    def test_fixed_local_projection_does_not_use_cube_global_heading(self):
+        from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
+        f=GeographicFrame();f.align(33.,-117.,(0,0),90.)
+        self.gps()
+        self.view.put('local',dict(ned=[1,0,0],velocity=[0,0,0]))
+        self.view.put('attitude',dict(rpy=[0,0,20]))
+        self.view.put('ekf',dict(flags=831,horizontal_variance=.1,velocity_variance=.1))
+        self.view.put('bridge',dict(coordinate_frame='fixed_local',instance='a',map_transform=f.snapshot()))
+        c=self.view.snapshot()['cube_estimate']
+        self.assertTrue(c['valid']);self.assertEqual(c['heading_deg'],110.)
+        self.assertAlmostEqual(c['map_ne'][0],0.);self.assertAlmostEqual(c['map_ne'][1],1.)
+        self.view.put('bridge',dict(coordinate_frame='fixed_local',instance='a',map_transform={}))
+        c=self.view.snapshot()['cube_estimate']
+        self.assertFalse(c['valid']);self.assertTrue(c['local_valid'])
+        self.assertIsNone(c['heading_deg'])
+
     def setUp(self):
         self.now = 10
         self.view = module.NavigationView(lambda: self.now)

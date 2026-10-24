@@ -198,6 +198,30 @@ class NavigationView:
                         heading_deg=a.get('data', {}).get('rpy', [None]*3)[2] if a.get('fresh') else None,
                         source='Cube GLOBAL_POSITION_INT / ATTITUDE',
                         depth_m=supervisor.get('data', {}).get('depth_m') if supervisor.get('fresh') else None)
+            bridge=streams.get('bridge',{})
+            if bridge.get('data',{}).get('coordinate_frame')=='fixed_local':
+                from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
+                local=streams.get('local',{})
+                local_valid=bool(bridge.get('age',math.inf)<.5 and local.get('age',math.inf)<.5
+                    and a.get('age',math.inf)<.5 and self.position_healthy())
+                frame=GeographicFrame.restore(bridge['data'].get('map_transform'))
+                cube.update(valid=local_valid and frame.angle is not None,local_valid=local_valid,
+                    lat=None,lon=None,heading_deg=None,map_ne=None,
+                    source='Cube fixed local XY transformed to Jetson north/east map')
+                if cube['valid']:
+                    xy=local['data']['ned'];lat,lon=frame.to_geo(xy)
+                    cube.update(lat=lat,lon=lon,map_ne=frame.to_map(xy),
+                        heading_deg=(a['data']['rpy'][2]+frame.angle)%360)
+                # Raw Cube global messages have arbitrary yaw in this profile.
+                # Never present their trail as geographic ground truth.
+                streams.pop('global',None)
+                if getattr(self,'mapped_instance',None)!=bridge['data'].get('instance'):
+                    self.mapped_instance=bridge['data'].get('instance');self.mapped_trail=[]
+                trail=getattr(self,'mapped_trail',[])
+                if cube['valid'] and self.origin and (not trail or now-trail[-1][3]>=.5):
+                    p=offset(cube['lat'],cube['lon'],self.origin[2],self.origin)
+                    trail.append([*p,now,cube['lat'],cube['lon']]);self.mapped_trail=trail[-1000:]
+                self.trails['global']=list(getattr(self,'mapped_trail',[]))
             return {'streams': streams, 'origin': copy.deepcopy(self.origin), 'session': self.session,
                     'cube_estimate': cube,
                     'mission_reference': reference,

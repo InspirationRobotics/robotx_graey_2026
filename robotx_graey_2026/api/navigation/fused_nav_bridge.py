@@ -24,6 +24,7 @@ from .maintenance_safety import require_maintenance
 from .automatic_recovery import AutomaticRecovery
 from .land_north import LandNorth
 from .track_north import TrackNorth
+from .relative_estimator import RelativeEstimator
 
 
 class FusedNavBridge(SteadyNode):
@@ -34,6 +35,7 @@ class FusedNavBridge(SteadyNode):
                         pressure_message='SCALED_PRESSURE3',
                         sitl_depth_topic='',
                         auto_north_alignment=False,
+                        fixed_local_navigation=True,
                         require_disarmed_start=False,
                         heading_reference_validated=False)
         for name, value in defaults.items():
@@ -47,6 +49,8 @@ class FusedNavBridge(SteadyNode):
                                    self.settings['auto_north_alignment'])
         if self.est.north_alignment is not None:
             self.est.north_alignment = TrackNorth()
+        if self.settings['fixed_local_navigation']:
+            self.est=RelativeEstimator()
         self.land_north = LandNorth()
         self.raw_gps_health=None
         self.link = Link(self.settings['mavlink'], 197, self.get_logger())
@@ -76,6 +80,7 @@ class FusedNavBridge(SteadyNode):
         self.create_service(Trigger, '/graey/navigation/forget_land', self.forget_land)
         self.create_service(Trigger, '/graey/navigation/begin_motion_north', self.begin_motion_north)
         self.create_subscription(String, '/graey/navigation/north_maneuver', self.motion_north_status, 10)
+        self.create_subscription(String, '/graey/waypoint/status', self.mission_alignment_status, 10)
         if self.settings['sitl_depth_topic']:
             self.create_subscription(Float32, self.settings['sitl_depth_topic'],
                 self.sitl_depth, 20)
@@ -83,6 +88,7 @@ class FusedNavBridge(SteadyNode):
         # ODOMETRY/status at 20 Hz separately below.
         self.create_timer(.01, self.tick)
         self.create_timer(1., self.request)
+        self.create_timer(.2, self.request_parameters)
         self.create_timer(.2, self.sync_clock)
 
     def sitl_depth(self, msg):
@@ -115,6 +121,8 @@ class FusedNavBridge(SteadyNode):
 
     def begin_motion_north(self, request, response):
         try:
+            if isinstance(self.est,RelativeEstimator):
+                raise ValueError('North alignment is part of the GUIDED waypoint mission')
             require_maintenance(lambda c: '' if c.get('online') is True and c.get('vehicle_fresh') is True and c.get('mode')=='MANUAL' and c.get('armed') is True and c.get('sa_active') is False and c.get('esc_commanded_on') is True and c.get('mission_claimed') is False and c.get('autonomous') is False and not c.get('inhibit') else 'Enable propulsion in MANUAL with no mission before alignment')
             now=time.monotonic()
             if not self.output_permitted or not self.configured(now) or self.est.fault or self.est.heading_validated:
@@ -131,6 +139,42 @@ class FusedNavBridge(SteadyNode):
         except (ValueError,OSError) as error:
             response.success,response.message=False,str(error)
         return response
+
+    def mission_alignment_status(self, msg):
+        if not isinstance(self.est,RelativeEstimator):return
+        try:
+            m=json.loads(msg.data);now=time.monotonic()
+            if not 0<=now-m.get('published_monotonic',-math.inf)<.5 or not m.get('run_id'):return
+            c=self.control_state
+            if (self.control_received is None or not 0<=now-self.control_received<1.
+                    or not c.get('mission_claimed') or c.get('mode')!='GUIDED' or not c.get('armed')
+                    or c.get('sa_active') or not c.get('esc_commanded_on')):
+                if self.est.north_alignment.active:self.est.north_alignment.stop(False)
+                return
+            plan=m.get('plan') or {}
+            self.est.target_gps=(plan['lat'],plan['lon'])
+            if getattr(self,'segmented_course_run',None)!=m['run_id']:
+                self.segmented_course_run=m['run_id']
+                self.est.pending_course_step=None
+                self.est.last_segment_correction=None
+                self.est.course_heading.reset_window('New segmented mission; collect fresh correction evidence')
+            if m.get('stage')=='TRANSIT_CHECK':
+                status=self.est.status(now)
+                v=self.est.velocity()
+                # Never turn a queued correction into a stale-motion update.
+                if (status.get('healthy') and self.est.motion_valid and self.est.fresh(self.est.motion_at,now)
+                        and len(v)==3 and math.sqrt(sum(x*x for x in v))<=.08
+                        and abs(math.degrees(self.est.rates[2]))<=3.
+                        and (status.get('gps_admission') or {}).get('qualified')):
+                    self.est.apply_segment_correction(now,(m['run_id'],m.get('segment_checks',0)))
+            a=self.est.north_alignment
+            if m.get('stage')=='ALIGN_MOVE' and getattr(self,'motion_north_run',None)!=m['run_id']:
+                self.motion_north_run=m['run_id'];a.begin()
+            if getattr(self,'motion_north_run',None)!=m['run_id']:return
+            self.motion_north_received=now
+            if m.get('stage')=='ALIGN_ACCEPT' and a.active and not a.approved:a.stop(True)
+            elif m.get('stage') in ('ABORTED','COMPLETE') and a.active:a.stop(False)
+        except (ValueError,KeyError,TypeError):return
 
     def motion_north_status(self, msg):
         try:
@@ -159,6 +203,8 @@ class FusedNavBridge(SteadyNode):
 
     def align_land(self, request, response):
         try:
+            if isinstance(self.est,RelativeEstimator):
+                raise ValueError('North is learned inside the GUIDED mission; Cube local frame stays fixed')
             require_maintenance()
             if self.output_permitted:
                 raise ValueError('Pause navigation before capturing land north')
@@ -180,6 +226,8 @@ class FusedNavBridge(SteadyNode):
 
     def align_heading(self, request, response):
         try:
+            if isinstance(self.est,RelativeEstimator):
+                raise ValueError('North is learned inside the GUIDED mission; Cube local frame stays fixed')
             require_maintenance()
             if not self.output_permitted:
                 raise ValueError('Run Prepare before capturing north')
@@ -245,13 +293,16 @@ class FusedNavBridge(SteadyNode):
             self.output_permitted = False
             self.est = BridgeEstimator(auto_north_alignment=True)
             self.est.north_alignment = TrackNorth()
+            if self.settings.get('fixed_local_navigation'):
+                self.est=RelativeEstimator()
+                retained_north=None
             if retained_north is not None:
                 self.est.north_alignment = retained_north
                 self.est.north_offset = retained_offset
                 self.est.heading_bias = retained_bias
                 self.est.heading_validated = True
             reference=self.land_north.current(now) if hasattr(self,'land_north') else None
-            if reference:
+            if reference and not isinstance(self.est,RelativeEstimator):
                 self.est.north_offset=reference['offset_deg']
                 self.est.heading_validated=True
                 self.est.north_alignment.offset=reference['offset_deg']
@@ -319,14 +370,16 @@ class FusedNavBridge(SteadyNode):
         pressure_id={'SCALED_PRESSURE':29,'SCALED_PRESSURE2':137,'SCALED_PRESSURE3':143}[self.settings.get('pressure_message','SCALED_PRESSURE3')]
         for mid in (24,pressure_id,49):
             self.link.command(511, mid, 100000)
+
+    def request_parameters(self):
         names=list(PROFILE)
         names.append('COMPASS_LEARN')  # Reject an interrupted legacy calibration; never start one.
-        # Cube's parameter reply queue is bounded. A single 29-name burst can
-        # indefinitely starve its tail. At most 16 requests per one-second tick
-        # covers either profile in two ticks, inside the three-second age gate.
+        # Spread reads across the bounded Cube reply queue. Four every 200 ms
+        # refresh the full profile in 1.4 s without competing in large bursts
+        # with stream requests. Keep the three-second verification age gate.
         if getattr(self,'parameter_schema',None)!=tuple(names):
             self.parameter_schema=tuple(names);self.parameter_cursor=0
-        first=self.parameter_cursor;last=min(first+16,len(names))
+        first=self.parameter_cursor;last=min(first+4,len(names))
         for name in names[first:last]:
             self.link.send('param_request_read_send',1,1,name.encode(),-1)
         self.parameter_cursor=0 if last==len(names) else last
@@ -385,6 +438,10 @@ class FusedNavBridge(SteadyNode):
                        speed_accuracy_mps=getattr(m, 'vel_acc', 0)/1000 or None)
             previous = self.est.gps.last_fix
             self.est.observe_gps(now, fix)
+            clock=self.est.gps.clock
+            self.est.event.update(clock_offset=clock.offset,clock_uncertainty=clock.uncertainty,
+                clock_age_s=now-clock.updated if clock.updated is not None else None,
+                signed_fix_age_s=now-(m.time_usec/1e6+clock.offset) if clock.offset is not None else None)
             if previous != m.time_usec:
                 self.get_logger().info('GPS_DECISION '+json.dumps(self.est.event, allow_nan=False))
 

@@ -9,8 +9,9 @@ def commission_reason(controller, bridge, cube_healthy, pose, heading, surface, 
         return 'Fresh disarmed vehicle, kill engaged, ESC off and no mission required'
     if intent:
         return 'Mission intent is active; cannot commission during a run'
+    local_frame=bridge.get('coordinate_frame')=='fixed_local' and bridge.get('local_navigation_ready') is True
     if not all(bridge.get(k) is True for k in ('healthy', 'navigation_valid',
-            'configuration_verified', 'transmitting', 'heading_reference_validated')):
+            'configuration_verified', 'transmitting')) or not (local_frame or bridge.get('heading_reference_validated') is True):
         return 'Healthy aligned odometry output and verified Cube profile required'
     if (bridge.get('gps_admission') or {}).get('qualified') is not True:
         return 'Qualified surface GPS required'

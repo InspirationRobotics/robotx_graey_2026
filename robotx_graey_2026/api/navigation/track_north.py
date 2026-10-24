@@ -9,7 +9,9 @@ from .north_alignment import wrap
 
 
 class TrackNorth:
-    def __init__(self):
+    def __init__(self, maximum_uncertainty_deg=25., maximum_gap_s=1.5):
+        self.maximum_uncertainty_deg=maximum_uncertainty_deg
+        self.maximum_gap_s=maximum_gap_s
         self.offset = self.reference = self.candidate = None
         self.method = 'GPS coordinate track / relative DVL displacement'
         self.rows = []
@@ -18,7 +20,7 @@ class TrackNorth:
         self.reason = 'Prepare surface sensors, then explicitly start the 5 m alignment run'
 
     def begin(self):
-        self.__init__()
+        self.__init__(self.maximum_uncertainty_deg,self.maximum_gap_s)
         self.active = True
         self.reason = 'Recording GPS coordinates and time-matched relative DVL positions'
 
@@ -60,7 +62,7 @@ class TrackNorth:
             return self.reject('Time-matched DVL/VN track unavailable', reset=True)
         if max(abs(math.degrees(r)) for r in rates) > 5 or 1-2*(q[1]**2+q[2]**2) < math.cos(math.radians(15)):
             return self.reject('Keep level and straight during track capture')
-        if self.rows and now-self.rows[-1][0] > 1.5:
+        if self.rows and now-self.rows[-1][0] > self.maximum_gap_s:
             return self.reject('GPS track continuity interrupted; retry run', reset=True)
         self.rows.append((now, fix['lat'], fix['lon'], *position[:2], fix['accuracy'], stamp))
         self.rows = self.rows[-600:]
@@ -89,7 +91,7 @@ class TrackNorth:
         # DVL sets metric distance; GPS contributes direction, never a scale
         # correction. Tolerate ordinary metre-level GNSS disagreement over 5 m,
         # while retaining explicit gross-fit and angular-quality limits.
-        if not .5 <= scale <= 1.5 or residual > 2. or uncertainty > 25:
+        if not .5 <= scale <= 1.5 or residual > 2. or uncertainty > self.maximum_uncertainty_deg:
             self.candidate = None
             return self.reject(f'Track rejected: scale {scale:.2f}, residual {residual:.2f} m, heading uncertainty {uncertainty:.1f} deg')
         self.candidate = dict(offset_deg=wrap(math.degrees(angle)), baseline_m=travel,

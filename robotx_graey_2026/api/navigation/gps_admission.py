@@ -13,6 +13,7 @@ class CubeClock:
         self.offset = None
         self.uncertainty = None
         self.updated = None
+        self.offset_samples = []
 
     def request(self, now_ns):
         self.pending = now_ns
@@ -28,8 +29,16 @@ class CubeClock:
         offset = (echoed_ns+now_ns)/2e9-cube_ns/1e9
         if self.offset is not None and abs(offset-self.offset) > .1:
             self.offset = self.updated = self.uncertainty = None
+            self.offset_samples.clear()
             return False
-        self.offset, self.updated, self.uncertainty = offset, now_ns/1e9, rtt/2
+        now=now_ns/1e9
+        self.offset_samples=[s for s in self.offset_samples if now-s[0]<=3.]
+        self.offset_samples.append((now,offset,rtt/2))
+        # RTT alone understates observed clock mapping jitter. Carry the full
+        # recent offset envelope into the freshness bound, rather than calling
+        # an otherwise fresh fix stale whenever TIMESYNC moves a few ms.
+        uncertainty=max(abs(offset-s[1])+s[2] for s in self.offset_samples)
+        self.offset, self.updated, self.uncertainty = offset, now, uncertainty
         return True
 
     def age(self, fix_us, now):
