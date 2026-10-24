@@ -85,5 +85,17 @@ async function render(data,options={}){
   assert.match(e.readiness.textContent,/clear sampling corridor/);
   e.alignmentCorridor.checked=true;e.alignmentCorridor.onchange();assert(!e.start.disabled);
   e.findLake.onclick();assert(e.imageSources.some(s=>s==='/vendor/miramar/16-26416-11450.jpg'));
+  e=await render(ready);
+  e.targetLat.value='32.92357';e.targetLon.value='-117.03855';e.useCoordinates.onclick();
+  assert.match(e.target.textContent,/32.9235700, -117.0385500/);assert.equal(e.posts.length,0);
+  e.targetLat.value='';e.useCoordinates.onclick();assert.match(e.message.textContent,/Enter latitude/);
+  e.targetLat.value='91';e.useCoordinates.onclick();assert.match(e.message.textContent,/Enter latitude/);
+  assert(e.recordGPS.disabled);e.recordGPS.onclick();assert.match(e.gpsRecord.textContent,/fresh valid raw GPS/);
+  const gpsData={...ready,navigation:{...ready.navigation,streams:{...ready.navigation.streams,gps:{fresh:true,data:{valid:true,lat:32.92357,lon:-117.03855,accuracy:1.2}}}}};
+  e=await render(gpsData);assert(!e.recordGPS.disabled);e.recordGPS.onclick();
+  assert.equal(e.targetLat.value,'32.9235700');assert.equal(e.targetLon.value,'-117.0385500');
+  assert.match(e.gpsRecord.textContent,/1.20 m/);assert.equal(e.posts.length,0);assert(e.start.disabled);
+  e.useCoordinates.onclick();assert(!e.start.disabled);
+  e=await render({...gpsData,navigation:{...gpsData.navigation,streams:{...gpsData.navigation.streams,gps:{fresh:false,data:gpsData.navigation.streams.gps.data}}}});assert(e.recordGPS.disabled);
   console.log('Waypoint map, desktop archive resolution, readiness, Start retry and estimate stats checks pass');
 })().catch(e=>{console.error(e);process.exit(1)});
