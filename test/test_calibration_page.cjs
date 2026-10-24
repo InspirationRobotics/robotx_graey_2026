@@ -19,6 +19,6 @@ async function page(state){
  await p.e.prepare.onclick();assert.equal(p.posts[0].alignment_mode,'gps');assert(p.posts[0].surface_confirmed);
  p.expire();assert(p.e.prepare.disabled);
  assert(!html.includes('id="alignAuto"'));
- assert(html.includes('inside the GUIDED waypoint mission'));
+ assert(html.includes('inside the STABILIZE waypoint mission'));
  console.log('GPS track calibration GUI tests passed');
 })().catch(e=>{console.error(e);process.exit(1)});

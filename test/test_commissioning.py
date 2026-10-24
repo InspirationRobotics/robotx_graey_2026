@@ -1,4 +1,5 @@
 import unittest
+import time
 from robotx_graey_2026.api.navigation.commissioning import commission_reason
 
 
@@ -33,3 +34,15 @@ class CommissionTests(unittest.TestCase):
                 dict(bridge=dict(self.bridge, depth_m=.5)),
                 dict(bridge=dict(self.bridge, gps_admission=dict(qualified=False)))):
             self.assertTrue(self.reason(**overrides))
+
+    def test_local_prepare_allows_drift_without_gps_qualification(self):
+        bridge=dict(self.bridge,coordinate_frame='fixed_local',local_navigation_ready=True,
+                    heading_reference_validated=False,depth_m=.25,gps_admission=dict(qualified=False),
+                    gps_observation=dict(received=time.monotonic(),fix=3,lat=32.,lon=-117.))
+        self.assertEqual(self.reason(bridge=bridge), '')
+        for key in ('healthy','navigation_valid','configuration_verified','transmitting'):
+            self.assertTrue(self.reason(bridge=dict(bridge,**{key:False})))
+        self.assertTrue(self.reason(bridge=dict(bridge,depth_m=float('nan'))))
+        self.assertTrue(self.reason(bridge=bridge,cube_healthy=False))
+        self.assertTrue(self.reason(bridge=bridge,surface=False))
+        self.assertTrue(self.reason(bridge=dict(bridge,gps_observation={})))

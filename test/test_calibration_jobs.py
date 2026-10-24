@@ -44,7 +44,7 @@ class CalibrationJobsTests(unittest.TestCase):
         self.job.maneuver.assert_called_with('abort',None)
 
     def test_dvl_recovery_requires_surface_confirmation_and_safe_controller(self):
-        with self.assertRaisesRegex(ValueError,'floating stationary'):
+        with self.assertRaisesRegex(ValueError,'floating at the water surface'):
             self.job.request(dict(action='recover_dvl',confirmed=True))
         self.c['armed']=True
         with self.assertRaisesRegex(ValueError,'disarmed'):

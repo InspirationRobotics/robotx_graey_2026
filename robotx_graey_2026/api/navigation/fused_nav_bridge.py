@@ -284,8 +284,8 @@ class FusedNavBridge(SteadyNode):
             if not self.configured(now):
                 raise ValueError('Cube external-navigation profile unavailable or mismatched')
             base = statistics.median(r[1] for r in rows)
-            if max(r[1] for r in rows)-min(r[1] for r in rows) > 8.:
-                raise ValueError('Pressure changing too much; hold stationary at the surface and retry')
+            # Surface confirmation establishes zero; median samples tolerate wave bobbing.
+            # Do not require a motionless vehicle for local odometry preparation.
             clock, origin = self.est.gps.clock, self.est.origin
             retained_north = (self.est.north_alignment if self.est.heading_validated
                 and not self.est.heading_continuity_lost and self.est.fresh(self.est.imu_at,now) else None)

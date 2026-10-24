@@ -132,7 +132,7 @@ class CalibrationJobs:
         if body.get('confirmed') is not True:
             raise ValueError('Confirm that you read the instructions and maintained kill/disarm')
         if action in ('prepare','recover_dvl') and body.get('surface_confirmed') is not True:
-            raise ValueError('Confirm floating stationary at the water surface before pressure calibration')
+            raise ValueError('Confirm floating at the water surface before pressure calibration')
         mode=body.get('alignment_mode','gps')
         heading=body.get('true_heading_deg')
         if action in ('prepare','align_land'):
@@ -287,7 +287,7 @@ class CalibrationJobs:
                 if s.get('state') == 'Fault':
                     raise ValueError(s.get('reason','Navigation fault'))
                 if a.get('aligned') or relative:
-                    self.update(phase='verify',message='Stay stopped, disarmed and killed; checking Cube local fusion. Geographic alignment runs inside Start Mission.')
+                    self.update(phase='verify',message='Remain disarmed and killed; checking healthy Cube local fusion. Drifting is allowed. Geographic alignment runs inside Start Mission.')
                     if not maintenance_reason(self.controller()):
                         try:
                             message = self.service('commission')
