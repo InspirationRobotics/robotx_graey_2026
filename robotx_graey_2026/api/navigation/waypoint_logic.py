@@ -103,7 +103,7 @@ class WaypointRun:
         if self.navigation_wait_since is None:
             self.navigation_wait_since=now
             self.navigation_hold=tuple(o['local'])
-            self.navigation_wait_limit=1.5 if dvl else .7
+            self.navigation_wait_limit=5.0 if dvl else .7
         if now-self.navigation_wait_since >= self.navigation_wait_limit:
             return None
         self.navigation_wait_reason=reason

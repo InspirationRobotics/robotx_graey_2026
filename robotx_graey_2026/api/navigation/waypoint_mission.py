@@ -200,7 +200,7 @@ class WaypointMission(Node):
         # Brief DVL loss permits bounded hold, never continued travel.
         dvl_hold=bool(continuity.get('recovering') is True
             and continuity.get('state')=='COASTING'
-            and 0<=continuity.get('gap_age_s',math.inf)<1.5
+            and 0<=continuity.get('gap_age_s',math.inf)<5.0
             and 0<=continuity.get('position_sigma_m',math.inf)<=5.
             and not continuity.get('requires_position_revalidation',True)
             and b.get('initialized') is True and b.get('enabled') is True

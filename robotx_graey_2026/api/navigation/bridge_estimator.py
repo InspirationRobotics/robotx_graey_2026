@@ -38,7 +38,7 @@ def rotate(q, v, inverse=False):
 
 
 class BridgeEstimator:
-    DVL_PREDICTION_LIMIT_S = 1.5
+    DVL_PREDICTION_LIMIT_S = 5.0
     def __init__(self, heading_validated=False, auto_north_alignment=False):
         self.gps = GPSAdmission()
         self.heading_validated = heading_validated
@@ -236,7 +236,7 @@ class BridgeEstimator:
     def coast(self, now):
         """Bounded constant earth-velocity prediction, never a DVL measurement.
 
-        Provisional envelope: 1.5 seconds, 0.2 m/s velocity error and 1 m/s²
+        Provisional envelope: up to 5 seconds (uncertainty may stop it earlier), 0.2 m/s velocity error and 1 m/s²
         unobserved acceleration. Position uncertainty survives reacquisition;
         good velocity cannot erase unobserved displacement. After the horizon
         stop extrapolating and withhold output until measured motion returns.
