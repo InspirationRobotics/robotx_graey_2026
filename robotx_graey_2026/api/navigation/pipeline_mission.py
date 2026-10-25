@@ -64,18 +64,32 @@ from blob_sweeps of its sweeps. One stop only ever gives a bunch: each sweep is 
 slice across the sub, so at one heading every sweep cuts the pipe at the same point.
 So a promising stop gets a closer look - more stops look_step_deg apart, out to
 look_span_deg either side - each cutting the pipe somewhere else, so the dots draw
-a line; a shape scoring look_min_score near the bunch passes. Then the sonar goes
-over the shape's densest spot facing along it (step 1) and walks align_walk_m that
-way looking straight down, sliding sideways to keep the pipe under the sonar (step
-2): how far the pipe drifts sideways on the walk is how far off step 1 was (sim:
-30 and 50 deg off came out 33 and 51). Turned by that much, it follows. A turn on
-the spot can't do step 2: its slices cross the pipe within ~0.2 m of each other
-(Oct 23). No pass in the whole turn: surface.
+a line; a shape scoring look_min_score near the bunch passes. Then, looking straight
+down (Oct 25), the sonar goes over the shape's densest spot facing along it (step 1),
+checks the pipe is under it (sliding across if not), and walks straight that way
+(step 2): the pipe drifting sideways says how far off step 1 was. Once it is
+align_turn_m off the sonar's middle, or after align_walk_m, it turns by that much,
+the sonar over the pipe where it has got to, and follows. A turn on the spot can't
+do step 2: its slices cross the pipe within ~0.2 m of each other (Oct 23). No pass in
+the whole turn: surface.
 
 LOST (follow_searches, Ruth, Oct 23). No pipe for follow_lost_s mid-follow: back over
 where it was last seen and the same search from there, leaving out the part already
 followed, then follow on. follow_searches searches at one spot (within SAME_SPOT_M)
 that find nothing or lose it there again: its end, as before.
+
+ALTITUDE (pool_alt_m, Ruth, Oct 24). Depth from the bottom, not from the start: the dive
+goes down until the DVL reads pool_alt_m to the bottom (none if it already does), and
+pool_depth and pool_max_depth are not used - the only depth limit is ALT_MAX_DEPTH_M below
+the start, for a DVL fault. While searching it never gets closer than SEARCH_MIN_ALT_M to
+the bottom (it rises), so it stays above a pipe standing up to 2 m. A search after the
+pipe is lost mid-follow goes back up to pool_alt_m first.
+
+DOWN TO THE PIPE (Ruth, Oct 24). Over the pipe before the align walk, it goes down until
+the pipe (its height from the search) is WALK_PIPE_BELOW_M under the sonar: from the
+search's height the walk's echoes were too weak and the floor out of its range (lake,
+Oct 24). A walk that fails goes back up to the search's depth. The walk itself waits for
+ALIGN_SWEEPS finished sweeps on the way, however long a sweep takes (lake: ~6 s).
 
 start_with:=follow skips the scan: the pilot leaves the sub over the pipe, facing
 along it, and following starts there (after the align walk).
@@ -129,6 +143,78 @@ from robotx_graey_2026.api.navigation.mission_base import MissionBase, S
 from robotx_graey_2026.api.sonar import outlines
 from robotx_graey_2026.api.vision import led_boxes
 
+# =====================================================================================
+#  SETTINGS - the numbers worth changing (lake / competition). Ruth, Oct 24.
+#
+#  Run a part of the mission with ONE word, on Graey (tools/task2.sh):
+#      task2 search      task2 follow      task2 survey      task2 repair      task2 full
+#  and add 'dry' to rehearse it without moving the sub:   task2 survey dry
+#
+#  Every run uses the numbers below. To try a different number for ONE run, add
+#  -p name:=value after the word (decimals keep their dot):  task2 search -p pool_alt_m:=3.5
+#  'pool_...' settings are the SEARCH view, 'follow_...' the WALK AND FOLLOW view.
+# =====================================================================================
+SETTINGS = {
+    # ---- depth ----------------------------------------------------------------------
+    'pool_alt_m':          4.0,        # dive until the bottom is this far below the sub (m)
+                                       #   (no dive if it already is)
+    'follow_pipe_below_m': 0.7,        # while following, keep the pipe this far below the sonar (m)
+    'follow_pipe_tol_m':   0.15,       # ... give or take this much before changing depth (m)
+
+    # ---- search: the sonar looks down, both sides ----------------------------------------
+    'pool_range':          7.0,        # how far the sonar listens (m); 4 m above the bottom, the bottom
+                                       #   at the sweep's edge (45 deg) is ~6 m away
+    'pool_sector':         '225 315',  # the sonar's sweep (deg): 270 is straight down, so this is
+                                       #   45 deg either side of straight down
+    'pool_far_m':          7.0,        # ignore echoes farther from the sonar than this (m, along the beam)
+    'scan_turn_deg':       180.0,      # total turn (deg); looking both ways, 180 covers every direction
+    'search_step_deg':     25.0,       # turn between stops (deg, rounded to divide the turn evenly)
+    'sweeps_per_stop':     2,          # sonar sweeps held still at each stop
+    'floor_filter':        '0.75 2.25',  # keep only echoes this high above the bottom (m, low high)
+    'look_min_score':      0.2,        # how pipe-like the closer look's shape must be to pass (0-1)
+
+    # ---- walk and follow: the sonar looks straight down ----------------------------------
+    'follow_range':        6.0,        # how far the sonar listens (m); must reach past the bottom
+    'follow_speed':        0.08,       # top speed along the pipe (m/s)
+    'align_walk_m':        0.6,        # the line-up walk: at most this far straight along the pipe (m) ...
+    'align_turn_m':        0.4,        # ... turning as soon as the pipe is this far off the sonar's middle (m)
+    'follow_searches':     2,          # pipe lost: search again this many times at one spot, then it's the end
+    'follow_max_m':        40.0,       # stop after following this far (m)
+    'follow_time_s':       1200.0,     # ... or after this long (s)
+
+    # ---- survey and repair ---------------------------------------------------------------
+    'light_detector':      'contrast', # how the down camera finds lights: 'contrast' = a round patch much
+                                       #   brighter than the water around it, colour from its glow (Oct 25:
+                                       #   no false GREEN on the Oct 24 lake video, pool LEDs as before);
+                                       #   'hsv' = the old fixed colour test (82% of the lake picture 'green');
+                                       #   'yolo' = a trained model (light_model; contrast if it won't load)
+    'light_model':         '/root/robotx_ws/src/robotx_graey_2026/models/lights.pt',   # the yolo model
+    'light_above_floor_m': 1.6,        # the light box's top above the bottom (m): sets the repair's first step down
+    'centre_max_down_m':   0.65,       # repair: never more than this below where centring began (m)
+
+    # ---- time -----------------------------------------------------------------------------
+    'phase_timeout':       1200.0,     # give up on any one step after this long (s)
+}
+
+# What each word runs. These switch parts of the mission on and off - not numbers to tune.
+PARTS = {
+    'search': ('dive, find the pipe, go over it and line up; hold 5 s, surface',
+               {'stop_after': 'align'}),
+    'follow': ('the pilot leaves the sub over the pipe: line up, follow it; hand back in POSHOLD',
+               {'start_with': 'follow'}),
+    'survey': ('dive, find the pipe, follow it to the buoy end, then the whole pipe logging each '
+               'light; 5 s over RED; hand back in POSHOLD',
+               {'follow_mode': 'survey', 'repair_hold_s': 5.0}),
+    'repair': ('the survey, centring the magnet on the RED light until it turns GREEN; hand back in POSHOLD',
+               {'follow_mode': 'survey', 'repair_centre': True}),
+    'full':   ('the competition run: the repair survey, then surface',
+               {'follow_mode': 'survey', 'repair_centre': True, 'follow_end': 'surface'}),
+}
+
+# Lake and competition: how the code is set up there. Not for changing.
+FIXED = {'plan': 'pool', 'scan_mode': 'search', 'pool_band': 'none', 'pool_compact': False,
+         'survey_buoy': 'start', 'pool_max_pick_m': 0.0, 'follow_near_m': 0.45}
+
 # The simulator never left the surface with unchanged targets re-sent every 3 s
 # (sim/README.md). Here a target changes when the plan does, and is otherwise
 # only re-sent as insurance.
@@ -146,6 +232,10 @@ CENTRE_GAIN = 0.3       # repair centring: each picture's guess of the lined-up 
 GREEN_DONE = 0.05       # repair: the light has turned GREEN once green fills this share of the picture
 RED_SEEN = 0.02         # ... and is still the RED light while red fills at least this share
 WATCH_MIN_SHARE = 0.02  # watching the colours: less of any colour than this is 'off'
+C_GREEN_FRAMES = 3      # light_detector:=contrast: GREEN once this many pictures running say so
+END_SEEN_S = 3.0        # light_detector:=yolo: a pipe end the camera saw this recently ...
+END_MID_X = 0.6         # ... this near the picture's middle across (-1 to 1) ...
+END_BEHIND_Y = 0.3      # ... and no further back in it than this (-1 top/ahead to 1 bottom/behind): the end is here
 LOOK_NEAR_M = 0.5       # search: the closer look's shape passes this close to the promising bunch
 DENSE_M = 0.15          # ... its densest spot: the dot with the most others this close
 PATH_M = 0.35           # lost search: dots this close to where the sonar went are the part already followed
@@ -156,10 +246,19 @@ ALIGN_FIRST_M = 0.6     # ... this far until it is first seen: the side-looking 
 ALIGN_UP_M = 0.12       # ... and this far above or below its height (a light box on it is ~0.15 higher)
 ALIGN_SWEEPS = 5        # ... walked slowly enough for about this many sweeps
 ALIGN_MIN_SPAN_M = 0.25 # ... and the dots fitted spread at least this far along it
+ALIGN_EDGE_M = 0.55     # ... the pipe this far off the middle (1 m down, the +-30 deg view is +-0.58): turn now
 BUOY_END_M = 3.0        # survey, on the way to the buoy: the pipe lost this close to the buoy is that end (no search)
 DZ_SPEED = 0.05         # follow depth (follow_pipe_below_m): the held depth moves no faster than this, m/s,
 DZ_MAX_M = 1.5          # ... never more than this from where following began,
 DZ_MIN_ALT_M = 0.5      # ... nor this close to the floor (DVL)
+ALT_DZ_SPEED = 0.1      # pool_alt_m's dive, the search's rise and the step down to the pipe: m/s
+SEARCH_MIN_ALT_M = 2.5  # pool_alt_m: while searching, never closer to the bottom than this (DVL)
+ALT_DIVE_WAIT_S = 20.0  # ... no DVL altitude on the dive this long: search from where it is
+ALT_MAX_DEPTH_M = 6.0   # ... and never deeper than this below the start: a DVL reading wrong (Ruth, Oct 25)
+WALK_PIPE_BELOW_M = 1.0 # over the pipe before the walk: down until it is this far under the sonar
+OVER_CHECK_SWEEPS = 2   # over the picked spot: look straight down for this many sweeps ...
+OVER_CHECK_M = 1.0      # ... for the pipe this far either side of the sonar ...
+OVER_SLIDE_M = 0.15     # ... and slide over it when it is at least this far to one side
 BOX_H_M = 0.15          # a light box on the pipe: its top this far above the pipe's
 MAGNET_BELOW_M = 0.15   # the magnet's bottom under the down camera (and the sonar/DVL level; Ruth's ruler, Oct 22)
 
@@ -237,6 +336,15 @@ class PipelineMission(MissionBase):
         self.aligned = False                # the align walk is done for this approach
         self.align_rev = False              # ... and has been tried the other way too
         self.a_up = None                    # the pipe's height (map 'up') as the search saw it
+        self.a_up_z = None                  # ... and the depth it was seen from
+        self.low_for_walk = False           # gone down over the pipe for the walk (no search guard)
+        self.back_z = None                  # search back: the depth to go back to, if any
+        self.dive_wait_t, self.dive_logged = None, False   # pool_alt_m's dive
+        self.guard_on = False               # pool_alt_m: rising, too close to the bottom while searching
+        self.wd = None                      # down to the pipe: {'want', 'z0'}
+        self.over_checked = False           # looked straight down once over the picked spot
+        self.cam_ends_only = False          # the camera runs for pipe ends only (no lights counted yet)
+        self.end_said = None                # the pipe end the log last mentioned
         self.f_path = []                    # where the sonar went while following, NED
         self.last_t = 0.0
         self.step_z = None                  # DESCEND's current target
@@ -255,8 +363,77 @@ class PipelineMission(MissionBase):
             return None
         return self.altitude[0]
 
+    def alt_now(self, span=3.0):
+        """The DVL's altitude, the median of the last span s (it jumps +-0.3 m over a sloping
+        bottom, lake Oct 24), or None without a lock now."""
+        if self.floor_clearance() is None:
+            return None
+        h = [a for t, a in getattr(self, 'alt_hist', []) if self.now() - t <= span]
+        return float(np.median(h)) if h else None
+
+    def ramp(self, z, want, rate):
+        """z moved toward want at no more than rate m/s since the last call."""
+        now = self.now()
+        dt, self.ramp_t = min(now - getattr(self, 'ramp_t', now), 0.5), now
+        return z + max(-rate * dt, min(rate * dt, want - z))
+
+    def a_up_now(self):
+        """The search's (or the walk's) pipe height from the sonar, moved by how far the sub has
+        gone down since it was measured: dots are placed relative to the sub at their ping."""
+        if self.a_up is None:
+            return None
+        z = self.cur[2] if self.cur else self.hold[2]
+        return self.a_up + (z - (self.a_up_z if self.a_up_z is not None else z))
+
+    def reached_depth(self):
+        """pool_alt_m's dive: down (ALT_DZ_SPEED, over where it started) until the DVL reads
+        pool_alt_m to the bottom - none if it already does. MissionBase's DIVE sends self.depth."""
+        if self.pool_alt <= 0:
+            return super().reached_depth()
+        if self.dry:
+            if not self.dive_logged:
+                self.dive_logged = True
+                self.get_logger().info(f'    [dry] dive: down until the DVL reads {self.pool_alt:.2f} m to the bottom')
+            return super().reached_depth()
+        if self.cur is None:
+            return False
+        alt, below = self.alt_now(), self.cur[2] - self.z_surf
+        if alt is None:
+            if self.dive_wait_t is None:
+                self.dive_wait_t = self.now()
+                self.get_logger().warn(f'dive: no DVL altitude - holding at {below:.2f} m down '
+                                       f'(searching from here after {ALT_DIVE_WAIT_S:.0f} s without it)')
+            self.depth = max(0.0, min(self.depth, below))           # stop going down
+            if self.now() - self.dive_wait_t > ALT_DIVE_WAIT_S:
+                self.get_logger().warn(f'dive: still no DVL altitude - searching from {below:.2f} m down')
+                self.depth = below
+                return True
+            return False
+        self.dive_wait_t = None
+        want = min(max(0.0, below + alt - self.pool_alt), self.max_depth)
+        if not self.dive_logged:
+            self.dive_logged = True
+            self.get_logger().info(f'dive: the DVL reads {alt:.2f} m to the bottom - ' + (
+                f'down to {self.pool_alt:.2f} m above it, about {want:.2f} m below the start' if want > 0.05
+                else f'already within {self.pool_alt:.2f} m of it: searching from here'))
+        self.depth = self.ramp(self.depth, want, ALT_DZ_SPEED)
+        if abs(self.depth - want) < 0.05 and abs(below - self.depth) < 0.1:
+            if want >= self.max_depth - 0.01 and alt > self.pool_alt + 0.15:
+                self.get_logger().warn(f'dive: at the depth limit ({self.max_depth:.1f} m below the start), still '
+                                       f'{alt:.2f} m off the bottom - searching from here')
+            else:
+                self.get_logger().info(f'dive: {alt:.2f} m above the bottom at {below:.2f} m down')
+            return True
+        return False
+
     def declare_extra_parameters(self):
-        p = self.declare_parameter
+        # part:=search|follow|survey|repair|full (tools/task2.sh): SETTINGS, FIXED and the part's
+        # switches become the defaults; a -p on the command line still wins. No part: the defaults below
+        self.part = self.declare_parameter('part', '').value.strip().lower()
+        if self.part and self.part not in PARTS:
+            raise ValueError(f"part must be one of {', '.join(PARTS)}, not {self.part!r}")
+        preset = {**SETTINGS, **FIXED, **PARTS[self.part][1]} if self.part else {}
+        p = lambda name, default: self.declare_parameter(name, preset.get(name, default))
         p('map_url', 'http://127.0.0.1:8095')
         p('far_depth', 3.0)                 # Ruth: 3 m at the buoy
         p('far_range', 15.0)                # m, the map's range on the far scan
@@ -278,6 +455,8 @@ class PipelineMission(MissionBase):
         p('plan', 'harbor')                 # or 'pool': one sideways scan, then approach
         p('pool_depth', 0.3)                # m below the surface (the pool is 0.9 m)
         p('pool_max_depth', 0.6)            # m; no pool target ever goes deeper
+        p('pool_alt_m', 0.0)                # > 0 (Ruth, Oct 24): dive until the DVL reads this far to the
+                                            # bottom; then pool_depth and pool_max_depth are not used
         p('pool_range', 6.0)
         p('pool_sector', '140 210')         # Ruth, Oct 14: the left side, a little up and down
         p('pool_side', 'left')              # where the sonar looks: 'left' or 'right'
@@ -344,8 +523,11 @@ class PipelineMission(MissionBase):
         p('follow_lost_s', 30.0)            # no pipe under the sonar this long: lost or ended
         p('follow_searches', 2)             # lost mid-follow: search for it from there (Ruth, Oct 23); this many
                                             # searches at one spot that don't get past it: its end (0 = no search)
-        p('align_walk_m', 0.6)              # over the pipe before following: walk this far along it looking down,
-                                            # then turn by how far it drifted sideways (Ruth, Oct 23; 0 = off)
+        p('align_walk_m', 0.6)              # over the pipe before following: walk at most this far straight along
+                                            # it looking down, then turn by how far it drifted sideways (Ruth,
+                                            # Oct 23; 0 = off) ...
+        p('align_turn_m', 0.4)              # ... turning as soon as the pipe is this far off the sonar's middle
+                                            # (Ruth, Oct 25), before it can leave the +-30 deg view
         p('follow_pipe_below_m', 0.7)       # while following, change depth to keep the pipe this far under the
         p('follow_pipe_tol_m', 0.15)        # sonar, give or take this (Ruth, Oct 24: the comp pipe isn't level;
                                             # too high loses it, too low bumps it). 0 = hold the depth
@@ -415,6 +597,11 @@ class PipelineMission(MissionBase):
         p('light_min_share', 0.10)          # a new light must once be seen whole (clear of the picture's
                                             # edge) or fill this share of it: glimpses at the edge (5-8%)
                                             # sat in the wrong place and were counted twice (Oct 16-17)
+        p('light_detector', 'hsv')          # 'hsv': a light is any pixel past the fixed HSV thresholds below;
+                                            # 'contrast' (Oct 25): a round patch much brighter than the water
+                                            # around it, its colour from its glow (led_boxes.contrast_lights)
+        p('light_model', '')                # light_detector:=yolo: the trained model (.pt, ultralytics) ...
+        p('light_conf', 0.4)                # ... and the confidence a box needs
         p('light_min_frac', 0.02)           # smallest blob that counts: 0.02 in the pool (camera close,
                                             # the glow breaks into pieces); ~0.0005 at the lake, where a
                                             # ring ~1 m below is 0.05-6% of the picture (Oct 18)
@@ -426,6 +613,8 @@ class PipelineMission(MissionBase):
 
     def read_extra_parameters(self):
         g = lambda n: self.get_parameter(n).value
+        if self.part:
+            self.get_logger().info(f'task2 {self.part}: {PARTS[self.part][0]}')
         self.map_url = g('map_url')
         self.depth = g('far_depth')         # MissionBase dives to self.depth
         self.gate_f = 0.0                   # no gate: hold where we dived
@@ -463,6 +652,7 @@ class PipelineMission(MissionBase):
         self.follow_gate, self.follow_gate_up = float(g('follow_gate_m')), float(g('follow_gate_up_m'))
         self.follow_start_gate = float(g('follow_start_gate_m'))
         self.follow_searches, self.align_walk = max(0, int(g('follow_searches'))), max(0.0, float(g('align_walk_m')))
+        self.align_turn = max(0.1, float(g('align_turn_m')))
         self.follow_below, self.follow_below_tol = max(0.0, float(g('follow_pipe_below_m'))), float(g('follow_pipe_tol_m'))
         self.follow_threshold = int(g('follow_threshold'))
         self.f_up, self.f_up_z = None, None
@@ -517,6 +707,11 @@ class PipelineMission(MissionBase):
         self.watch_rise, self.watch_s = float(g('watch_rise_m')), float(g('watch_s'))
         self.light_min_share = float(g('light_min_share'))
         self.light_min_frac = float(g('light_min_frac'))
+        self.light_detector = g('light_detector').strip().lower()
+        if self.light_detector not in ('hsv', 'contrast', 'yolo'):
+            raise ValueError(f"light_detector must be hsv, contrast or yolo, not {self.light_detector!r}")
+        self.light_model, self.light_conf = g('light_model').strip(), float(g('light_conf'))
+        self.yolo = None                    # the loaded model (light_detector:=yolo), once it is needed
         led_boxes.V_MIN, led_boxes.S_MIN = int(g('light_v_min')), int(g('light_s_min'))
         self.survey_backup = float(g('survey_backup_m'))
         self.survey_dir = g('survey_dir')
@@ -546,9 +741,16 @@ class PipelineMission(MissionBase):
         self.look_min_score = float(g('look_min_score'))
         self.record_scan = bool(g('record_scan'))
         self.pool_max_pick = float(g('pool_max_pick_m'))
+        self.pool_alt = max(0.0, float(g('pool_alt_m'))) if self.plan == 'pool' else 0.0
         if self.plan == 'pool':
             self.depth = g('pool_depth')
             self.max_depth = g('pool_max_depth')
+        if self.pool_alt > 0:
+            self.depth, self.max_depth = 0.0, ALT_MAX_DEPTH_M     # the dive sets the depth
+            self.guard_alt = min(SEARCH_MIN_ALT_M, self.pool_alt - 0.5)
+            if self.guard_alt < SEARCH_MIN_ALT_M:
+                self.get_logger().warn(f'pool_alt_m {self.pool_alt:.2f}: the search keeps only {self.guard_alt:.2f} m '
+                                       f'off the bottom (not {SEARCH_MIN_ALT_M:.1f})')
         self.scans = {
             'far': (self.far_range, self.scan_sector, self.far_threshold, self.floor_cut),
             'close': (self.close_range, self.scan_sector, self.scan_threshold, self.floor_cut),
@@ -678,6 +880,8 @@ class PipelineMission(MissionBase):
                 return
             self.start_scan('pool' if self.plan == 'pool' else 'far')
         ph = self.phase.split(': ')[-1]
+        if self.pool_alt > 0:
+            self.alt_guard(ph)
 
         if ph == 'map setup':
             # range first: changing it restarts the sweep
@@ -825,6 +1029,12 @@ class PipelineMission(MissionBase):
 
         elif ph == 'search back':
             self.search_back_step()
+
+        elif ph == 'over check':
+            self.over_check_step(self.map_get())
+
+        elif ph == 'down to pipe':
+            self.walk_down_step()
 
         elif ph == 'anchor':
             self.anchor_step()
@@ -1108,7 +1318,11 @@ class PipelineMission(MissionBase):
             self.stop_here('over')
             return
         if self.align_walk > 0 and not self.aligned:
-            self.align_begin()                      # step 2, then back here lined up
+            if not self.over_checked and not self.align_rev:
+                self.over_check_begin()             # is the pipe really under the sonar? slide over it
+                return
+            if not self.walk_down_begin():          # down to the pipe first, if it is far below
+                self.align_begin()                  # step 2, then following
             return
         if self.stop_after == 'align':
             self.stop_here('align')
@@ -1119,6 +1333,133 @@ class PipelineMission(MissionBase):
                 return
             self.srch = None                        # the search is over: following from here
         self.follow_map()
+
+    def over_check_begin(self):
+        """Over the picked spot, looking straight down (Ruth, Oct 25): hold for OVER_CHECK_SWEEPS sweeps. The
+        pipe at its height to one side: slide across over it first (the side-looking search places it up
+        to ~0.5 m off). Its height measured straight down replaces the search's."""
+        here = self.cur if self.cur else self.carrot
+        self.oc = {'known': set(), 'pts': [], 'sweep': None, 'sweep_t': None, 'n_sw': 0, 'period': 6.0,
+                   't0': self.now(), 'at': (here[0], here[1])}
+        self.to_phase('over check')
+
+    def over_check_step(self, m):
+        O, now = self.oc, self.now()
+        n, e = O['at']
+        self.stream_posvel(n, e, self.hold[2], 0.0, 0.0, 0.0, 'looking down')
+        sw = m.get('sweep', 0)
+        if sw != O['sweep']:
+            if O['sweep_t'] is not None and 0.5 < now - O['sweep_t'] < 60:
+                O['period'] = 0.6 * O['period'] + 0.4 * (now - O['sweep_t'])
+            O['n_sw'] += O['sweep'] is not None
+            O['sweep'], O['sweep_t'] = sw, now
+        here = self.cur if self.cur else (n, e)
+        h = self.cur_yaw if self.cur_yaw is not None else math.atan2(self.f_dir[1], self.f_dir[0])
+        ahead = sonar_settings.SONAR_FWD_M
+        sonar = np.array([here[0] + ahead * math.cos(h), here[1] + ahead * math.sin(h)])
+        d = self.f_dir / max(np.linalg.norm(self.f_dir), 1e-6)
+        right = np.array([-d[1], d[0]])
+        up = self.a_up_now()
+        for x, y, z in (np.array(m['crumbs'], float)[:, [0, 1, 4]] if m.get('crumbs') else []):
+            key = (round(x, 2), round(y, 2), round(z, 2))
+            if key in O['known']:
+                continue
+            O['known'].add(key)
+            rel = np.array(self.map_to_ned(x, y)) - sonar
+            along, across = float(rel @ d), float(rel @ right)
+            if abs(along) <= 0.6 and abs(across) <= OVER_CHECK_M and (up is None or abs(z - up) <= 0.3):
+                O['pts'].append((across, z))
+        if not (O['n_sw'] >= OVER_CHECK_SWEEPS or now - O['t0'] > 3 * O['period'] + 10
+                or (self.dry and now - O['t0'] > 5)):
+            return
+        self.over_checked = True
+        if len(O['pts']) >= 2:
+            lat, zm = float(np.median([p[0] for p in O['pts']])), float(np.median([p[1] for p in O['pts']]))
+            self.a_up, self.a_up_z = zm, (self.cur[2] if self.cur else self.hold[2])
+            if abs(lat) >= OVER_SLIDE_M:
+                msg = (f'looking down: the pipe {abs(lat):.2f} m {"right" if lat > 0 else "left"} of the sonar, '
+                       f'{-zm:.2f} m under it ({len(O["pts"])} dots) - sliding over it')
+                self.over_pt = (float(sonar[0] + lat * right[0]), float(sonar[1] + lat * right[1]))
+                self.get_logger().info(msg)
+                self.mark(msg)
+                self.carrot, self.last_t = (here[0], here[1]), now
+                self.to_phase('to pipe')
+                return
+            self.get_logger().info(f'    looking down: the pipe under the sonar ({lat:+.2f} m), {-zm:.2f} m under it '
+                                   f'({len(O["pts"])} dots)')
+        else:
+            self.get_logger().info(f'    looking down: no pipe under the sonar in {O["n_sw"]} sweeps - the walk decides')
+        if not self.walk_down_begin():
+            self.align_begin()
+
+    def alt_guard(self, ph):
+        """pool_alt_m, while searching (the stops, the way back to them, over to the pipe before
+        going down): closer to the bottom than guard_alt, the held depth rises until it isn't."""
+        searching = (self.phase.startswith('pool scan') or ph in ('search back', 'over check')
+                     or (ph == 'to pipe' and not self.low_for_walk))
+        alt = self.alt_now(1.5) if searching and self.hold is not None else None
+        if alt is None or alt >= self.guard_alt + (0.1 if self.guard_on else 0.0):
+            if self.guard_on:
+                self.guard_on = False
+                self.get_logger().info(f'    search guard: {alt if alt is not None else float("nan"):.2f} m '
+                                       f'above the bottom again')
+            self.guard_t = self.now()
+            return
+        if not self.guard_on:
+            self.guard_on = True
+            self.get_logger().warn(f'search guard: only {alt:.2f} m above the bottom (at least '
+                                   f'{self.guard_alt:.2f} while searching) - going up')
+        dt, self.guard_t = min(self.now() - getattr(self, 'guard_t', self.now()), 0.5), self.now()
+        n, e, z, yaw = self.hold
+        self.hold = (n, e, max(self.z_surf, z - ALT_DZ_SPEED * dt), yaw)
+
+    def walk_down_begin(self):
+        """Over the pipe, before the walk: if it lies more than WALK_PIPE_BELOW_M (+0.2) under the
+        sonar, go down until it doesn't - straight down over where the sub is. False: no need."""
+        up = self.a_up_now()
+        if up is None or -up <= WALK_PIPE_BELOW_M + 0.2:
+            return False
+        here = self.cur if self.cur else self.hold
+        h = self.cur_yaw if self.cur_yaw is not None else math.atan2(self.f_dir[1], self.f_dir[0])
+        z = here[2] if len(here) > 2 else self.hold[2]
+        want = min(z + (-up - WALK_PIPE_BELOW_M), self.z_surf + self.max_depth)
+        self.hold = (self.carrot[0], self.carrot[1], z, h)
+        self.wd = {'want': want, 'z0': z}
+        msg = (f'over the pipe: it is {-up:.2f} m under the sonar - down {want - z:.2f} m, to '
+               f'{WALK_PIPE_BELOW_M:.1f} m above it, before the walk')
+        self.get_logger().info(msg)
+        self.mark(msg)
+        self.to_phase('down to pipe')
+        return True
+
+    def walk_down_step(self):
+        n, e, z, yaw = self.hold
+        want = self.wd['want']
+        alt = self.floor_clearance()
+        stop = None
+        if self.dry:
+            z = want
+            if self.now() - self.state_t0 > 3:
+                stop = 'dry run'
+        else:
+            nz = self.ramp(z, want, ALT_DZ_SPEED)
+            if nz > z and alt is not None and alt - (nz - z) < DZ_MIN_ALT_M:
+                stop = f'{alt:.2f} m above the bottom'
+            else:
+                z = nz
+            if self.cur and abs(z - want) < 0.01 and abs(self.cur[2] - want) < 0.1:
+                stop = 'there'
+        self.hold = (n, e, z, yaw)
+        self.stream_posvel(n, e, z, 0.0, 0.0, 0.0, 'down to the pipe')
+        if stop is None:
+            return
+        zc = self.cur[2] if self.cur else z
+        self.a_up, self.a_up_z = self.a_up_now(), zc
+        self.hold = (n, e, zc, yaw)
+        self.low_for_walk = True
+        self.get_logger().info(f'    down to the pipe ({stop}): {self.below_surface(zc):.2f} m down, the pipe '
+                               f'~{-self.a_up:.2f} m under the sonar')
+        self.align_begin()
 
     # ---- spot check: look again from over the likely spots (Ruth, Oct 16) ----
     def spot_from(self, g, score, m):
@@ -1262,6 +1603,8 @@ class PipelineMission(MissionBase):
         sr = self.srch
         if sr.get('goal') is None:          # where the sub turns: come back here if a look fails
             sr['goal'], sr['yaw'] = (self.hold[0], self.hold[1]), self.hold[3]
+        if sr.get('z') is None:             # ... and the depth it searches at
+            sr['z'] = self.hold[2]
         if sr['resume'] is not None:
             self.stop_i, sr['resume'] = sr['resume'], None
         else:
@@ -1388,7 +1731,14 @@ class PipelineMission(MissionBase):
         sr['resume'] = self.stop_i + 1          # if the walk says it isn't the pipe after all
         self.look = None
         self.f_dir, self.over_pt, self.spot_active, self.aligned, self.a_up = d, (tn, te), None, False, up
-        self.align_rev = False
+        self.a_up_z = here[2] if len(here) > 2 else self.hold[2]
+        self.align_rev, self.over_checked = False, False
+        # looking straight down from here on (Ruth, Oct 25): faster sweeps under the sub, and the check
+        # once over it sees the pipe the way it echoes best
+        self.anchor_then('over the pipe: sonar straight down', self.go_over_start)
+
+    def go_over_start(self, m):
+        here = self.cur if self.cur else self.hold
         self.carrot, self.last_t = (here[0], here[1]), self.now()
         self.to_phase('to pipe')
 
@@ -1436,14 +1786,21 @@ class PipelineMission(MissionBase):
             self.search_failed(f'nothing passed in {sr["n"]} stops')
             return
         sr['resume'] = resume_i
+        if self.low_for_walk:               # gone down for the walk: back up to the search's depth
+            self.low_for_walk, self.back_z = False, sr.get('z')
         here = self.cur if self.cur else self.hold
         self.carrot, self.last_t = (here[0], here[1]), self.now()
         self.to_phase('search back')
 
     def search_back_step(self):
         sr = self.srch
+        if self.back_z is not None:         # the depth on the way, up or down at ALT_DZ_SPEED
+            n, e, z, yaw = self.hold
+            self.hold = (n, e, self.back_z if self.dry else self.ramp(z, self.back_z, ALT_DZ_SPEED), yaw)
+            if self.dry or (self.cur and abs(self.hold[2] - self.back_z) < 0.01 and abs(self.cur[2] - self.back_z) < 0.1):
+                self.back_z = None
         left, _ = self.walk_to(sr['goal'], self.return_speed, sr['yaw'], 'to the search spot')
-        if (left < 0.05 and self.speed() < 0.05) or (self.dry and self.now() - self.state_t0 > 5):
+        if self.back_z is None and ((left < 0.05 and self.speed() < 0.05) or (self.dry and self.now() - self.state_t0 > 5)):
             self.hold = (sr['goal'][0], sr['goal'][1], self.hold[2], sr['yaw'])
             self.goto_ned(*self.hold, 'hold')
             self.scan = 'pool'
@@ -1467,6 +1824,11 @@ class PipelineMission(MissionBase):
         ahead = sonar_settings.SONAR_FWD_M
         self.srch = {'kind': 'lost', 'P': pt, 'dir': self.f_dir.copy(), 't0': now, 'entry': entry, 'resume': None,
                      'goal': (pt[0] - ahead * math.cos(h), pt[1] - ahead * math.sin(h)), 'yaw': h}
+        self.low_for_walk = False
+        alt = self.alt_now() if self.pool_alt > 0 else None
+        if alt is not None:                 # pool_alt_m: search from that high again (only ever up)
+            z = here[2] if len(here) > 2 else self.hold[2]
+            self.srch['z'] = self.back_z = max(self.z_surf, z - max(0.0, self.pool_alt - alt))
         msg = (f'pipe lost {self.f_dist:.1f} m along - search {entry["n"]} of {self.follow_searches} there: back over '
                f'where it was last seen, NED ({pt[0]:.2f}, {pt[1]:.2f}), and a side scan')
         self.get_logger().info(msg)
@@ -1509,27 +1871,49 @@ class PipelineMission(MissionBase):
             self.anchor_next(m)
 
     def align_begin(self):
-        """Step 2 (Ruth, Oct 23): over the pipe facing the way step 1 says it runs, walk align_walk_m
-        that way looking straight down, sliding sideways to keep the pipe under the sonar. How far
-        the pipe drifts sideways says how far off that was. Walked straight, a pipe 30 deg off left
-        the +-30 deg view after 0.25 m (sim, Oct 23); kept under the sonar, it is seen nearly
-        straight down, the way it echoes best."""
+        """Step 2 (Ruth, Oct 23; turning as it goes, Oct 25): over the pipe facing the way step 1 says it
+        runs, walk STRAIGHT that way looking straight down. The pipe's dots make a line across the walk:
+        if step 1 was off, the pipe drifts away from the sonar's middle. As soon as it is align_turn_m off
+        - before it can leave the +-30 deg view - or the walk has gone align_walk_m, turn by that line's
+        angle and put the sonar back over the pipe where it is NOW (not back where the walk began), then
+        follow from there."""
         here = self.cur if self.cur else self.hold
         h = self.cur_yaw if self.cur_yaw is not None else math.atan2(self.f_dir[1], self.f_dir[0])
         ahead = sonar_settings.SONAR_FWD_M
         d = self.f_dir / max(np.linalg.norm(self.f_dir), 1e-6)
-        self.al = {'d': d.copy(), 'pts': [], 'known': set(), 'lat': 0.0, 'up': self.a_up, 'locked': False,
+        self.al = {'d': d.copy(), 'pts': [], 'known': set(), 'up': self.a_up_now(), 'fit': None,
                    's0': np.array([here[0] + ahead * math.cos(h), here[1] + ahead * math.sin(h)]),
-                   'sweep': None, 'sweep_t': None, 'period': 3.0}
-        self.get_logger().info(f'align: walking {self.align_walk:.2f} m along heading '
-                               f'{math.degrees(math.atan2(d[1], d[0])) % 360:.0f} deg looking straight down')
+                   'sweep': None, 'sweep_t': None, 'period': 6.0, 'n_sw': 0}
+        self.get_logger().info(f'align: walking straight along heading {math.degrees(math.atan2(d[1], d[0])) % 360:.0f} '
+                               f'deg looking down, at most {self.align_walk:.2f} m - turning once the pipe is '
+                               f'{self.align_turn:.2f} m off the sonar\'s middle')
         self.anchor_then('align walk', self.align_go)
 
     def align_go(self, m):
         here = self.cur if self.cur else self.hold
+        self.start_end_watch()                  # light_detector:=yolo: the camera can see the pipe's end
         self.al['t0'] = self.now()
         self.carrot, self.last_t = (here[0], here[1]), self.now()
         self.to_phase('align walk')
+
+    def align_line(self, loose=False):
+        """The pipe across the walk, from its dots at the pipe's height (the search's, else the walk's
+        own): (slope, offset, dots) with across = offset + slope * along, or None. A line needs 3 dots
+        from 3 sweeps spread ALIGN_MIN_SPAN_M along the walk; loose (the pipe about to leave the view)
+        takes 2 sweeps over 0.1 m."""
+        A = self.al
+        Q0 = np.array(A['pts'], float).reshape(-1, 4)
+        span, sweeps = (0.1, 2) if loose else (ALIGN_MIN_SPAN_M, 3)
+        for up0 in ([A['up']] if A['up'] is not None else []) + ([float(np.median(Q0[:, 2]))] if len(Q0) else []):
+            Q = Q0[np.abs(Q0[:, 2] - up0) <= ALIGN_UP_M]
+            if len(Q) >= 3 and len(set(Q[:, 3])) >= sweeps and np.ptp(Q[:, 0]) >= span:
+                b, a0 = np.polyfit(Q[:, 0], Q[:, 1], 1)
+                keep = np.abs(Q[:, 1] - (a0 + b * Q[:, 0])) <= 0.08
+                if 3 <= keep.sum() < len(Q) and np.ptp(Q[keep, 0]) >= span:
+                    Q = Q[keep]
+                    b, a0 = np.polyfit(Q[:, 0], Q[:, 1], 1)
+                return float(b), float(a0), Q
+        return None
 
     def align_walk_step(self, m):
         A, now = self.al, self.now()
@@ -1537,10 +1921,11 @@ class PipelineMission(MissionBase):
         if sw != A['sweep']:
             if A['sweep_t'] is not None and 0.5 < now - A['sweep_t'] < 60:
                 A['period'] = 0.6 * A['period'] + 0.4 * (now - A['sweep_t'])
+            A['n_sw'] += A['sweep'] is not None         # sweeps finished since the walk began
             A['sweep'], A['sweep_t'] = sw, now
         d = A['d']
         right = np.array([-d[1], d[0]])
-        fresh = []
+        up0 = A['up']
         for x, y, z in (np.array(m['crumbs'], float)[:, [0, 1, 4]] if m.get('crumbs') else []):
             key = (round(x, 2), round(y, 2), round(z, 2))
             if key in A['known']:
@@ -1548,50 +1933,74 @@ class PipelineMission(MissionBase):
             A['known'].add(key)
             rel = np.array(self.map_to_ned(x, y)) - A['s0']
             along, across = float(rel @ d), float(rel @ right)
-            gate = ALIGN_GATE_M if A['locked'] else ALIGN_FIRST_M
-            if abs(across - A['lat']) <= gate and -0.3 <= along <= self.align_walk + 0.5:
+            # near the line found so far, else near the walk's own line (the pipe may start up to
+            # ALIGN_FIRST_M off it: the search places it ~0.2 x range off along the sub, lake sim Oct 24)
+            ref = A['fit'][1] + A['fit'][0] * along if A['fit'] else 0.0
+            if (abs(across - ref) <= (ALIGN_GATE_M if A['fit'] else ALIGN_FIRST_M)
+                    and -0.3 <= along <= self.align_walk + 0.5
+                    and (up0 is None or abs(z - up0) <= ALIGN_UP_M)):
                 A['pts'].append((along, across, z, sw))
-                fresh.append((across, z))
-        if fresh:
-            # the pipe's height: the search's, or (start_with:=follow) the most of the walk's dots
-            up0 = A['up'] if A['up'] is not None else float(np.median([p[2] for p in A['pts']]))
-            on = [a for a, z in fresh if abs(z - up0) <= ALIGN_UP_M]
-            if on:
-                A['lat'], A['locked'] = float(np.median(on)), True     # keep it under the sonar
-        # slowly enough for ~ALIGN_SWEEPS sweeps on the way: one dot each where the slice cuts the pipe
+        fit = self.align_line()
+        A['fit'] = fit[:2] if fit else None
+        # straight on, no sliding sideways, slowly enough for ~ALIGN_SWEEPS sweeps on the way, and no
+        # further than the sweeps finished so far allow (lake, Oct 24: 3 s assumed, ~6 s each)
         v = min(self.follow_speed, self.align_walk / (ALIGN_SWEEPS * A['period']))
         h = math.atan2(d[1], d[0])
         fwd = sonar_settings.SONAR_FWD_M * np.array([math.cos(h), math.sin(h)])
-        # the carrot's sonar: on toward 0.15 m further along at the pipe's last-seen offset, so a pipe
-        # drifting off to the side is caught up with first (the carrot moves at v in all)
         s_c = float((np.array(self.carrot) + fwd - A['s0']) @ d)
-        goal = A['s0'] + min(self.align_walk, s_c + 0.15) * d + A['lat'] * right - fwd
+        allow = self.align_walk * min(1.0, (A['n_sw'] + 1) / (ALIGN_SWEEPS + 1))
+        goal = A['s0'] + min(self.align_walk, s_c + 0.15, allow) * d - fwd
         self.walk_to((float(goal[0]), float(goal[1])), v, h, 'align walk')
         here = self.cur if self.cur else self.carrot
         s = float((np.array(here[:2]) + fwd - A['s0']) @ d)
         if self.dry and now - A['t0'] < 0.3:
-            self.get_logger().info(f'    dry run: drive the sub {self.align_walk:.2f} m forward, slowly, keeping the pipe under it')
-        if ((s >= self.align_walk - 0.03 and self.speed() < 0.05) or now - A['t0'] > 3 * self.align_walk / max(v, 0.01) + 20
+            self.get_logger().info(f'    dry run: drive the sub up to {self.align_walk:.2f} m straight forward, slowly')
+        # the camera sees the pipe's end ahead (the model, Ruth Oct 25): the rest of it lies the other way
+        if not self.align_rev and self.pipe_end_seen(ahead=True) is not None:
+            self.align_rev = True
+            pt = (A['s0'] + s * d + (fit[1] + fit[0] * s) * right) if fit else A['s0']
+            msg = 'align: the camera sees the pipe\'s end ahead - walking the other way from here'
+            self.get_logger().info(msg)
+            self.mark(msg)
+            self.f_dir, self.over_pt = -d, (float(pt[0]), float(pt[1]))
+            self.carrot, self.last_t = (here[0], here[1]), now
+            self.to_phase('to pipe')
+            return
+        # where the pipe is across the walk under the sonar now: the line's, else the latest dots'
+        if fit:
+            off = fit[1] + fit[0] * s
+        else:
+            last = [p[1] for p in A['pts'] if p[3] == max(q[3] for q in A['pts'])] if A['pts'] else []
+            off = float(np.median(last)) if last else None
+        if fit and abs(off) >= self.align_turn:
+            self.align_turn_now(s, fit, f'the pipe {abs(off):.2f} m {"right" if off > 0 else "left"} of the '
+                                        f'sonar\'s middle after {s:.2f} m')
+            return
+        if off is not None and abs(off) >= ALIGN_EDGE_M:
+            # about to leave the view with no line yet: the best line there is, or the walk failed
+            loose = self.align_line(loose=True)
+            if loose:
+                self.align_turn_now(s, loose, f'the pipe {abs(off):.2f} m off the middle after {s:.2f} m (few dots)')
+            else:
+                self.align_end(s)
+            return
+        if ((s >= self.align_walk - 0.03 and self.speed() < 0.05 and A['n_sw'] >= ALIGN_SWEEPS)
+                or now - A['t0'] > 2 * (ALIGN_SWEEPS + 2) * A['period'] + 20
                 or (self.dry and now - A['t0'] > 8)):
-            self.align_fit()
+            self.align_end(s)
 
-    def align_fit(self):
-        """A line through the walk's dots: the pipe's drift sideways per metre walked is the angle off."""
+    def align_end(self, s):
+        """The walk is over without the pipe reaching align_turn_m: a small turn by the line if there
+        is one; the pipe only near where it began: walk the other way once; else not the pipe."""
         A = self.al
-        Q0 = np.array(A['pts'], float).reshape(-1, 4)
-        fit, Q = None, Q0
-        # only dots at the pipe's height: the search's if it gave one, else the walk's own
-        for up0 in ([A['up']] if A['up'] is not None else []) + ([float(np.median(Q0[:, 2]))] if len(Q0) else []):
-            Q = Q0[np.abs(Q0[:, 2] - up0) <= ALIGN_UP_M]
-            if len(Q) >= 3 and len(set(Q[:, 3])) >= 3 and np.ptp(Q[:, 0]) >= ALIGN_MIN_SPAN_M:
-                b, a0 = np.polyfit(Q[:, 0], Q[:, 1], 1)
-                keep = np.abs(Q[:, 1] - (a0 + b * Q[:, 0])) <= 0.08
-                if 3 <= keep.sum() < len(Q) and np.ptp(Q[keep, 0]) >= ALIGN_MIN_SPAN_M:
-                    Q = Q[keep]
-                    b, a0 = np.polyfit(Q[:, 0], Q[:, 1], 1)
-                fit = (float(b), float(a0))
-                break
-        if fit is None and not self.align_rev and len(Q) and float(np.max(Q[:, 0])) < ALIGN_MIN_SPAN_M:
+        fit = self.align_line()
+        if fit:
+            off = fit[1] + fit[0] * s
+            self.align_turn_now(s, fit, f'walked {s:.2f} m, the pipe {abs(off):.2f} m '
+                                        f'{"right" if off > 0 else "left"} of the sonar\'s middle')
+            return
+        Q = np.array(A['pts'], float).reshape(-1, 4)
+        if not self.align_rev and len(Q) and float(np.max(Q[:, 0])) < ALIGN_MIN_SPAN_M:
             # the pipe only near where the walk began: step 1 pointed off its end (from a pipe's end
             # it can't tell which way the rest lies, sim Oct 24) - walk the other way from there once
             self.align_rev = True
@@ -1602,27 +2011,29 @@ class PipelineMission(MissionBase):
             self.carrot, self.last_t = (here[0], here[1]), self.now()
             self.to_phase('to pipe')
             return
-        if fit is None:
-            self.align_failed(f'the pipe showed in {len(set(Q[:, 3])) if len(Q) else 0} sweeps of the walk, over '
-                              f'{float(np.ptp(Q[:, 0])) if len(Q) else 0.0:.2f} m')
-            return
-        b, a0 = fit
+        self.align_failed(f'the pipe showed in {len(set(Q[:, 3])) if len(Q) else 0} sweeps of the walk, over '
+                          f'{float(np.ptp(Q[:, 0])) if len(Q) else 0.0:.2f} m')
+
+    def align_turn_now(self, s, fit, why):
+        """Turn by the line's angle, with the sonar over the pipe where the walk has got to - then follow."""
+        b, a0, Q = fit
+        A = self.al
         d = A['d']
         right = np.array([-d[1], d[0]])
         err = math.atan(b)
         nd = d * math.cos(err) + right * math.sin(err)
+        # over the pipe where the walk has got to - but no further than where it was last seen: a walk
+        # past the end of a short stretch put the sonar over nothing (sim, Oct 25)
+        s_pipe = min(s, float(np.max(Q[:, 0])) + 0.1)
+        pt = A['s0'] + s_pipe * d + (a0 + b * s_pipe) * right
         here = self.cur if self.cur else self.carrot
-        # back over the pipe where the walk began: following from there, none of it is missed (the
-        # survey's camera only starts once following)
-        pt = A['s0'] + a0 * right
-        span = float(np.ptp(Q[:, 0]))
-        msg = (f'align: the pipe drifted {b * span * 100:+.0f} cm sideways over {span:.2f} m ({len(Q)} dots, '
-               f'{len(set(Q[:, 3]))} sweeps) - {math.degrees(err):+.0f} deg off; back over where the walk began, '
-               f'heading {math.degrees(math.atan2(nd[1], nd[0])) % 360:.0f} deg')
+        where = 'here' if s_pipe >= s - 0.15 else f'where it was last seen, {s - s_pipe:.2f} m back'
+        msg = (f'align: {why} ({len(Q)} dots, {len(set(Q[:, 3]))} sweeps) - {math.degrees(err):+.0f} deg off; '
+               f'turning to heading {math.degrees(math.atan2(nd[1], nd[0])) % 360:.0f} deg, the sonar over the pipe {where}')
         self.get_logger().info(msg)
         self.mark(msg)
         self.f_dir, self.over_pt, self.aligned = nd, (float(pt[0]), float(pt[1])), True
-        self.a_up = float(np.median(Q[:, 2]))
+        self.a_up, self.a_up_z = float(np.median(Q[:, 2])), (here[2] if len(here) > 2 else self.hold[2])
         self.carrot, self.last_t = (here[0], here[1]), self.now()
         self.to_phase('to pipe')
 
@@ -1647,7 +2058,7 @@ class PipelineMission(MissionBase):
         self.srch, self.look = None, None
         self.f_seen, self.f_leg_t0, self.f_line = now, now, np.array(self.over_pt, float)
         if self.a_up is not None:
-            self.f_up, self.f_up_z = self.a_up, (here[2] if len(here) > 2 else self.hold[2])
+            self.f_up, self.f_up_z = self.a_up_now(), (here[2] if len(here) > 2 else self.hold[2])
         self.f_lost_now, self.f_prev_loss, self.f_stuck_t, self.f_hold_pt, self.f_creep0 = False, None, None, None, None
         self.f_prev = np.array([here[0] + ahead * math.cos(h), here[1] + ahead * math.sin(h)])
         self.f_known = set()
@@ -1802,8 +2213,14 @@ class PipelineMission(MissionBase):
             self.f_lost_now, self.f_prev_loss, self.f_stuck_t = False, None, None
             self.f_reversed, self.f_hold_pt, self.f_leg_t0, self.f_creep0 = False, None, self.now(), None
             self.f_start, self.f_dir0, self.f_path = (here[0], here[1]), self.f_dir.copy(), []
+            if self.aligned and self.align_walk > 0 and getattr(self, 'over_pt', None) is not None:
+                # the walk has just seen the pipe here: missing from the start is a lost pipe (search for
+                # it), not one that never showed (sim, Oct 25: following began past a stretch's end)
+                self.f_line, self.f_seen = np.array(self.over_pt, float), self.now()
             if not self.survey or self.s_leg == 'survey':     # the survey notes lights from the buoy end on
                 self.start_camera()
+            else:
+                self.start_end_watch()                         # ... but can see the pipe's end before that
             self.get_logger().info(f'    following: heading {math.degrees(math.atan2(self.f_dir[1], self.f_dir[0])) % 360:.0f} deg, '
                                    f'at most {self.follow_speed:.2f} m/s and {self.follow_step:.2f} m per sweep')
             self.to_phase('follow')
@@ -1906,15 +2323,26 @@ class PipelineMission(MissionBase):
         seen = self.f_seen if self.f_seen is not None else self.f_leg_t0
         lost = self.f_seen is not None and (now - seen > self.follow_lost
                                             or (self.f_stuck_t is not None and now - self.f_stuck_t > self.follow_lost))
+        # the camera sees the pipe's end here (the model, Ruth Oct 25): gone from under the sonar with its end
+        # in view, it is the end - no waiting follow_lost_s, no search
+        at_end = (self.f_line is not None and (self.f_seen is None or now - self.f_seen > self.f_period)
+                  and self.pipe_end_seen() is not None)
+        if at_end:
+            if self.end_said is None or float(np.linalg.norm(self.f_line - self.end_said)) > 0.5:
+                self.end_said = self.f_line.copy()
+                msg = f'follow: the pipe has gone from under the sonar and the camera sees its end - the end, {self.f_dist:.1f} m along'
+                self.get_logger().info(msg)
+                self.mark(msg)
+            lost = True
         # on the way to the buoy the pipe ends near it: that end is expected there, so no search
         to_buoy_end = (self.survey and self.s_leg == 'to buoy' and self.f_line is not None
                        and float(np.linalg.norm(np.asarray(self.f_line) - np.asarray(self.s_buoy))) <= BUOY_END_M)
-        if lost and not to_buoy_end and self.lost_search_begin(now, here):
+        if lost and not to_buoy_end and not at_end and self.lost_search_begin(now, here):
             return                                         # a bend, or a gap: look for it from there
         if self.survey and self.s_leg == 'to buoy' and lost:
             self.survey_turn(now, here)                    # at the buoy end: the survey starts here
             return
-        if (now - seen > self.follow_lost and self.follow_both and not self.f_reversed and not self.survey
+        if ((now - seen > self.follow_lost or at_end) and self.follow_both and not self.f_reversed and not self.survey
                 and self.f_dist < self.follow_max and now - self.f_t0 < self.follow_time):
             if self.follow_turn == 'return':
                 self.get_logger().info(f'    end of the pipe this way after {self.f_dist:.1f} m - going back to '
@@ -1940,7 +2368,9 @@ class PipelineMission(MissionBase):
             self.f_line = None
             self.f_lost_now, self.f_prev_loss, self.f_stuck_t = False, None, None
             return
-        if now - seen > self.follow_lost:
+        if at_end:
+            why = 'the camera saw the pipe\'s end'
+        elif now - seen > self.follow_lost:
             why = (f'no pipe under the sonar for {self.follow_lost:.0f} s (it ended, or it was lost)'
                    if self.f_seen is not None else f'the pipe never showed under the sonar in {self.follow_lost:.0f} s')
         elif self.f_stuck_t is not None and now - self.f_stuck_t > self.follow_lost:
@@ -2187,18 +2617,58 @@ class PipelineMission(MissionBase):
             except OSError:
                 pass
 
+    def yolo_lights(self):
+        """light_detector:=yolo: the model, loaded once; if it can't be (no file, no ultralytics), the
+        lights are judged against the water instead (contrast) for the rest of the mission."""
+        if self.light_detector == 'yolo' and self.yolo is None:
+            try:
+                self.yolo = led_boxes.YoloLights(self.light_model, self.light_conf)
+                self.get_logger().info(f'    camera: lights from the model {self.light_model}')
+            except Exception as ex:
+                self.get_logger().error(f'    camera: the light model {self.light_model!r} would not load ({ex}) - '
+                                        f'judging lights against the water instead')
+                self.light_detector = 'contrast'
+        return self.yolo
+
+    def start_end_watch(self):
+        """light_detector:=yolo: the camera on for pipe ends only (no lights counted) - on the line-up walk
+        and on the survey's way to the buoy end, where the light list mustn't start yet (Ruth, Oct 25)."""
+        if self.camera is None and self.light_detector == 'yolo' and self.yolo_lights() is not None:
+            self.camera = led_boxes.CameraWatcher(self.camera_url, self.camera_at,
+                                                  lambda t: self.get_logger().info('    ' + t), None,
+                                                  tracker=led_boxes.NoTracker(), yolo=self.yolo).start()
+            self.cam_ends_only = True
+            self.get_logger().info('    camera: watching for the pipe\'s end (the model)')
+
     def start_camera(self, force=False):
+        if self.camera is not None and self.cam_ends_only and (force or self.camera_boxes or self.survey):
+            # the pipe-end watch already runs: from here it counts the lights too
+            self.camera.tracker = (led_boxes.LightTracker(same_m=self.light_same, new_frac=self.light_min_share,
+                                                          min_frac=self.light_min_frac, detector=self.light_detector,
+                                                          yolo=self.yolo)
+                                   if self.survey else led_boxes.BoxTracker())
+            self.camera.on_box, self.cam_ends_only = self.on_box, False
+            self.get_logger().info('    camera: counting the lights from here')
+            return
         if (force or self.camera_boxes or self.survey) and self.camera is None:
+            self.yolo_lights()
             tracker = (led_boxes.LightTracker(same_m=self.light_same, new_frac=self.light_min_share,
-                                              min_frac=self.light_min_frac)
+                                              min_frac=self.light_min_frac, detector=self.light_detector,
+                                              yolo=self.yolo)
                        if self.survey else None)
-            self.get_logger().info(f'    camera: HSV - V >= {led_boxes.V_MIN}, S >= {led_boxes.S_MIN}, hues '
+            self.get_logger().info('    camera: lights judged against the water (contrast_lights)'
+                                   if self.light_detector == 'contrast' else
+                                   '    camera: lights from the trained model' if self.light_detector == 'yolo' else
+                                   f'    camera: HSV - V >= {led_boxes.V_MIN}, S >= {led_boxes.S_MIN}, hues '
                                    f'{led_boxes.SURVEY_HUES if self.survey else led_boxes.HUES}')
             self.camera = led_boxes.CameraWatcher(self.camera_url, self.camera_at,
                                                   lambda t: self.get_logger().info('    ' + t), self.on_box,
-                                                  tracker=tracker).start()
+                                                  tracker=tracker, yolo=self.yolo).start()
 
     def stop_camera(self, why='the mission ended early'):
+        if self.camera is not None and self.cam_ends_only:      # only watching for ends: nothing to report
+            self.camera.close()
+            self.camera, self.cam_ends_only = None, False
         if self.camera is None:
             if self.survey and self.s_leg == 'to buoy':
                 self.get_logger().warn(f'survey: no report - it never reached the buoy end ({why})')
@@ -2320,6 +2790,7 @@ class PipelineMission(MissionBase):
         self.c_goal = (here[0], here[1])
         self.c_frame, self.c_frame_t, self.c_seen, self.c_log, self.c_lost_said = None, self.now(), self.now(), 0.0, False
         self.c_errs, self.c_ok_since = [], self.now()   # recent offsets (px); since the last step (or the start)
+        self.c_green_n = 0                              # contrast: pictures running the light has read green
         self.c_last, self.c_first = None, True          # the light's last place in the picture; no guess yet
         self.c_dist = 0.5                               # the light's distance below the camera, m (until a picture)
         self.carrot, self.last_t = (here[0], here[1]), self.now()
@@ -2335,9 +2806,11 @@ class PipelineMission(MissionBase):
         cam = self.camera.latest if self.camera else None
         if cam is not None and cam[0] != self.c_frame:
             self.c_frame, self.c_frame_t = cam[0], now
-            fr = led_boxes.red_green_fractions(cam[1])
+            fr = self.light_fractions(cam[1])
             if fr['green'] >= GREEN_DONE and fr['green'] > fr['red']:
-                self.get_logger().info(f'repair: the light turned GREEN ({fr["green"]:.0%} of the picture) at '
+                self.get_logger().info(f'repair: the light turned GREEN ('
+                                       + (f'{C_GREEN_FRAMES} pictures running' if self.light_detector != 'hsv'
+                                          else f'{fr["green"]:.0%} of the picture') + ') at '
                                        f'{self.below_surface(self.cur[2]) if self.cur else float("nan"):.2f} m down')
                 self.watch_begin()
                 return
@@ -2395,6 +2868,46 @@ class PipelineMission(MissionBase):
         speed = self.centre_speed * min(1.0, max(0.4, self.c_dist / 0.5))
         self.walk_to(self.c_goal, speed, self.c_yaw, 'centre the light on the magnet', down=self.c_down)
 
+    def light_fractions(self, rgb):
+        """The repair's {'red', 'green'}: shares of the picture (hsv), or (contrast) 1.0 for the colour of
+        the biggest light judged against the water - green only once C_GREEN_FRAMES pictures running say
+        so, and any other light (a red LED close up reads yellow-orange, Oct 24) still the RED light."""
+        if self.light_detector == 'hsv':
+            return led_boxes.red_green_fractions(rgb)
+        colour, _ = self.biggest_light(rgb)
+        self.c_green_n = self.c_green_n + 1 if colour == 'green' else 0
+        return {'green': 1.0 if self.c_green_n >= C_GREEN_FRAMES else 0.0,
+                'red': 1.0 if colour not in (None, 'green') else 0.0}
+
+    def biggest_light(self, rgb):
+        """(colour, share) of the biggest light in the newest picture: the trained model's on the full
+        picture (light_detector:=yolo; the camera thread's finds when fresh), else judged against the
+        water on the small one."""
+        cam = self.camera
+        if self.light_detector == 'yolo' and self.yolo is not None and cam is not None:
+            if cam.latest_dets is not None and time.monotonic() - cam.latest_dets[0] < 0.5:
+                dets = cam.latest_dets[1]
+            elif cam.latest_full is not None:
+                dets = self.yolo(cam.latest_full)
+            else:
+                return None, 0.0
+            return led_boxes.biggest_colour([d for d in dets if d['colour'] in ('red', 'green')])
+        return led_boxes.light_colour(rgb)
+
+    def pipe_end_seen(self, ahead=None):
+        """light_detector:=yolo: the pipe's end in the down camera within END_SEEN_S, near the middle across
+        (END_MID_X) - ahead (top half of the picture) or under the camera with ahead=None/False, only ahead
+        with ahead=True - or None. The picture's top is the sub's front."""
+        cam = self.camera
+        if self.yolo is None or cam is None or cam.end_seen is None:
+            return None
+        t, d = cam.end_seen
+        if time.monotonic() - t > END_SEEN_S or d['conf'] < self.light_conf or abs(d['x']) > END_MID_X:
+            return None
+        if d['y'] > (-0.2 if ahead else END_BEHIND_Y):
+            return None
+        return d
+
     def light_below(self, alt):
         """How far the light's top is below the down camera now: from the sonar's pipe height when
         following found one (the camera is at about the sonar's level), else from the DVL altitude
@@ -2433,9 +2946,13 @@ class PipelineMission(MissionBase):
         cam = self.camera.latest if self.camera else None
         if cam is not None and cam[0] != self.w_frame:
             self.w_frame = cam[0]
-            fr = led_boxes.colour_fractions(cam[1])
-            c, share = max(fr.items(), key=lambda kv: kv[1])
-            c = c if share >= WATCH_MIN_SHARE else 'off'
+            if self.light_detector != 'hsv':
+                c, share = self.biggest_light(cam[1])
+                c = c or 'off'
+            else:
+                fr = led_boxes.colour_fractions(cam[1])
+                c, share = max(fr.items(), key=lambda kv: kv[1])
+                c = c if share >= WATCH_MIN_SHARE else 'off'
             if c != self.w_colour:
                 self.w_colour = c
                 t = self.now() - self.state_t0

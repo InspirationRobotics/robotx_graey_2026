@@ -15,6 +15,14 @@ sits idle until a button is pressed.
 Both tools serve their page on port 8095, which the Sonar tab shows. A sonar
 tool started by hand in a terminal is left alone, and nothing new is started
 while it runs - only one program can talk to the Ping360.
+
+The cameras too (Ruth, Oct 24), for the Camera tab's buttons and tools/task2.sh:
+
+    POST /camera/start        tools/cam_pair.py in the graey container -> port 8080
+    POST /camera/stop         like Ctrl-C, so the OAKs close cleanly
+    POST /record/start        the camera stream to ~/camera_rec/<name>_<date>_<time>.mjpg
+                              (?name=..., default cam)
+    POST /record/stop
 """
 import json
 import os
@@ -42,8 +50,18 @@ LOG = os.path.join(REPO, "sonar_data", "sonar_tool.log")
 # the same pattern as the safety check run before starting a tool by hand
 RUNNING = re.compile(r"^(/usr/bin/)?python3 (-u )?tools/sonar_")
 
+CAM_PORT = 8080                 # tools/cam_pair.py's stream (DOWN | FRONT)
+CAM_LOG = os.path.join(REPO, "sonar_data", "camera_tool.log")
+CAM_RUNNING = re.compile(r"tools/cam_pair\.py")
+CAM_CMD = ["docker", "exec", "graey", "bash", "-c",
+           "source /opt/ros/humble/setup.bash && source /root/robotx_ws/install/setup.bash && "
+           "cd /root/robotx_ws/src/robotx_graey_2026 && PYTHONPATH=.:$PYTHONPATH exec python3 -u tools/cam_pair.py"]
+REC_DIR = os.path.expanduser("~/camera_rec")
+
 _lock = threading.Lock()
 _job = {"tool": None, "proc": None, "since": None, "asked": False}
+_cam = {"proc": None, "since": None}
+_rec = {"proc": None, "path": None, "since": None}
 
 
 def _others():
@@ -58,17 +76,17 @@ def _others():
     return found
 
 
-def _web_up():
+def _web_up(port=WEB_PORT):
     try:
-        socket.create_connection(("127.0.0.1", WEB_PORT), timeout=0.3).close()
+        socket.create_connection(("127.0.0.1", port), timeout=0.3).close()
         return True
     except OSError:
         return False
 
 
-def _tail(n=8):
+def _tail(n=8, path=LOG):
     try:
-        with open(LOG, "rb") as f:
+        with open(path, "rb") as f:
             f.seek(0, 2)
             f.seek(max(0, f.tell() - 4000))
             return f.read().decode(errors="replace").splitlines()[-n:]
@@ -86,7 +104,8 @@ def status():
             "asked": _job["asked"],     # stopped with the Stop button, not by itself
             "webUp": _web_up(),         # also true for a tool started by hand
             "others": _others(),
-            "log": _tail()}
+            "log": _tail(),
+            **cam_status()}
 
 
 def start(tool):
@@ -128,6 +147,90 @@ def stop():
     return "ok"
 
 
+# ---------------- cameras (Ruth, Oct 24) ----------------
+def _cam_running():
+    """tools/cam_pair.py running in the container (started here or by hand): the host sees it in ps."""
+    out = subprocess.run(["ps", "-eo", "args="], capture_output=True, text=True).stdout
+    return any(CAM_RUNNING.search(line) and "pkill" not in line for line in out.splitlines())
+
+
+def cam_status():
+    rec = _rec["proc"]
+    recording = rec is not None and rec.poll() is None
+    size = None
+    if _rec["path"]:
+        try:
+            size = os.path.getsize(_rec["path"])
+        except OSError:
+            pass
+    return {"camRunning": _cam_running(),
+            "camUp": _web_up(CAM_PORT),
+            "camSince": _cam["since"],
+            "camLog": _tail(4, CAM_LOG),
+            "recording": recording,
+            "recFile": os.path.basename(_rec["path"]) if _rec["path"] else None,
+            "recBytes": size,
+            "recSince": _rec["since"]}
+
+
+def cam_start():
+    if _cam_running() or _web_up(CAM_PORT):
+        return "the cameras are already running"
+    os.makedirs(os.path.dirname(CAM_LOG), exist_ok=True)
+    log = open(CAM_LOG, "ab")
+    log.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} start cameras\n".encode())
+    log.flush()
+    _cam["proc"] = subprocess.Popen(CAM_CMD, stdout=log, stderr=subprocess.STDOUT,
+                                    stdin=subprocess.DEVNULL, start_new_session=True)
+    log.close()
+    _cam["since"] = time.time()
+    return "ok"
+
+
+def cam_stop():
+    if not _cam_running():
+        return "the cameras are not running"
+    rec_stop()                  # nothing left to record
+    # Ctrl-C inside the container (it runs as root there), so cam_pair closes the OAKs: a
+    # hard stop has left a camera crash dump twice (cam_pair.py)
+    for sig, wait in (("INT", 8), ("TERM", 3), ("KILL", 2)):
+        subprocess.run(["docker", "exec", "graey", "pkill", f"-{sig}", "-f", "tools/cam_pair.py"],
+                       capture_output=True)
+        end = time.time() + wait
+        while time.time() < end and _cam_running():
+            time.sleep(0.2)
+        if not _cam_running():
+            break
+    return "ok" if not _cam_running() else "the cameras did not stop"
+
+
+def rec_start(name):
+    if _rec["proc"] is not None and _rec["proc"].poll() is None:
+        return "already recording " + os.path.basename(_rec["path"])
+    if not _web_up(CAM_PORT):
+        return "no camera stream on port 8080 - start the cameras first"
+    name = re.sub(r"[^A-Za-z0-9_-]", "_", name or "cam")[:40] or "cam"
+    os.makedirs(REC_DIR, exist_ok=True)
+    path = os.path.join(REC_DIR, f"{name}_{time.strftime('%Y%m%d_%H%M%S')}.mjpg")
+    _rec["proc"] = subprocess.Popen(["curl", "-s", "-N", f"http://127.0.0.1:{CAM_PORT}/stream", "-o", path],
+                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL, start_new_session=True)
+    _rec["path"], _rec["since"] = path, time.time()
+    return "ok"
+
+
+def rec_stop():
+    proc = _rec["proc"]
+    if proc is None or proc.poll() is not None:
+        return "not recording"
+    proc.terminate()
+    try:
+        proc.wait(3)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    return "ok"
+
+
 class Handler(BaseHTTPRequestHandler):
     def _send(self, obj):
         body = json.dumps(obj).encode()
@@ -153,6 +256,14 @@ class Handler(BaseHTTPRequestHandler):
                 msg = start(parse_qs(u.query).get("tool", [""])[0])
             elif u.path == "/stop":
                 msg = stop()
+            elif u.path == "/camera/start":
+                msg = cam_start()
+            elif u.path == "/camera/stop":
+                msg = cam_stop()
+            elif u.path == "/record/start":
+                msg = rec_start(parse_qs(u.query).get("name", ["cam"])[0])
+            elif u.path == "/record/stop":
+                msg = rec_stop()
             else:
                 self.send_error(404)
                 return

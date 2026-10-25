@@ -97,7 +97,13 @@
 </div>
 
 <div id="camera" style="display:none">
-  <iframe id="cam" src="about:blank"></iframe>
+  <div class="sub" style="padding:4px 0">
+    <button class="act" onclick="camCmd('camera/start')">Start cameras</button>
+    <button class="act" onclick="camCmd('camera/stop')">Stop cameras</button>
+    <button class="act" onclick="camCmd('record/start')">Record</button>
+    <button class="act" onclick="camCmd('record/stop')">Stop recording</button>
+    <span id="camSt"></span></div>
+  <iframe id="cam" src="about:blank" style="height:calc(100vh - 125px)"></iframe>
 </div>
 
 <div id="sonar" style="display:none">
@@ -212,10 +218,7 @@ function show(t){
     var frame = document.querySelector('#' + t + ' iframe');
     if (frame && !frame.src) frame.src = frame.dataset.src;
   }
-  if (t === 'camera'){                       // load only when looked at - the stream
-    var cam = document.getElementById('cam'); // is a live MJPEG connection
-    if (cam.src === 'about:blank') cam.src = 'http://' + location.hostname + ':8080/';
-  }
+  if (t === 'camera') camCheck();            // the stream loads once it is up (camShow)
   if (t === 'sonar') sonarCheck();
 }
 // The sonar tools run on the Jetson itself, outside the container, so this GUI
@@ -247,6 +250,34 @@ function sonarCheck(){
 }
 setInterval(function(){                       // only while the Sonar tab is open
   if (document.getElementById('sonar').style.display !== 'none') sonarCheck();
+}, 1500);
+
+// The cameras (tools/cam_pair.py, in the container) and recording them to ~/camera_rec on the
+// Jetson: the same launcher on 8096 (Ruth, Oct 24). The stream is on 8080, loaded into the
+// frame only while the Camera tab is open (it is a live MJPEG connection).
+function camShow(s){
+  var st = document.getElementById('camSt'), f = document.getElementById('cam');
+  if (!s){ st.textContent = 'launcher not reachable on port 8096 - is graey-sonar-launcher.service installed?'; return; }
+  var txt = s.camUp ? 'cameras running' : (s.camRunning ? 'cameras starting...' : 'cameras stopped');
+  if (!s.camRunning && !s.camUp && s.camLog.length) txt += ' (last: ' + s.camLog[s.camLog.length - 1] + ')';
+  if (s.recording) txt += '  |  RECORDING ' + s.recFile + ', ' + (s.recBytes / 1e6).toFixed(0) + ' MB';
+  else if (s.recFile) txt += '  |  last recording ' + s.recFile;
+  st.textContent = (s.msg && s.msg !== 'ok' ? s.msg + '  |  ' : '') + txt;
+  if (s.camUp && (f.src === 'about:blank' || s.camSince !== camRun)){ camRun = s.camSince; f.src = sonarUrl(8080); }
+  if (!s.camUp && f.src !== 'about:blank') f.src = 'about:blank';
+}
+var camRun = null;                           // which camera start the frame shows
+function camCmd(p){
+  document.getElementById('camSt').textContent = '...';
+  fetch(sonarUrl(8096, p), {method: 'POST'}).then(function(r){ return r.json(); })
+    .then(camShow).catch(function(){ camShow(null); });
+}
+function camCheck(){
+  fetch(sonarUrl(8096, 'status')).then(function(r){ return r.json(); })
+    .then(camShow).catch(function(){ camShow(null); });
+}
+setInterval(function(){                       // only while the Camera tab is open
+  if (document.getElementById('camera').style.display !== 'none') camCheck();
 }, 1500);
 
 function age(a){ return (a < 0) ? '--' : a.toFixed(1) + ' s'; }

@@ -110,6 +110,141 @@ def red_green_fractions(rgb):
     return {c: float(m.mean()) for c, m in hsv_masks(rgb, SURVEY_HUES).items()}
 
 
+# ---- the lights judged against the water (Ruth, Oct 25) ----
+# Lake, Oct 24: the water itself was bright (V ~167) and strongly green (S ~203, hue 40-63), so the
+# fixed test above called 82% of every picture a green light, and a red LED 2 m below (10-170 px of
+# 640x360) was far under the survey's smallest blob. Here a light is a ROUND patch much brighter than
+# the water around it, with a burnt-out middle (every LED seen on Oct 24 had one); its colour is the
+# hue of the strongly coloured glow around it. On the Oct 24 footage (03:43-04:21): red in 1146 frames,
+# every red event checked by eye a real light; green in 45 (none real - no green LED was on); the
+# board's glare streaks, the pale pipe close up and the label are not counted as lights.
+# Close up a red LED's glow burns out to yellow-orange (hue 20-37): it reads 'other', not green.
+C_BG_K = 31            # SMALL px: the water's local brightness, a blur this wide
+C_DV_MIN = 50          # a light: brighter than the water around it by at least this (V, 0-255) ...
+C_CORE_V = 240         # ... with a burnt-out white middle
+C_MIN_PX = 3           # smallest patch, SMALL px (a lake LED 2 m below: 3-40 SMALL px)
+C_MAX_ASPECT = 3.0     # round-ish: glare streaks and the pipe close up are long and thin ...
+C_MIN_FILL = 0.3       # ... and don't fill their box
+C_BIG = 0.01           # a patch this big (share of the picture) is a light whatever its shape: close up in
+                       # the dark pool a green LED is a huge glow with streaks, often off the edge (Oct 16)
+C_EDGE_SMALL = 0.001   # light_colour: patches touching the picture's edge count only from this big
+C_RING = 5             # SMALL px: the glow is looked at this far around the patch ...
+C_GLOW_S = 90          # ... its pixels this strongly coloured (S) ...
+C_GLOW_DV = 20         # ... and this much brighter than the water
+C_GLOW_N = 4           # fewer coloured glow pixels than this: 'white'
+C_LABEL = (50, 18)     # SMALL px: tools/cam_pair.py writes 'DOWN' in the top-left corner
+C_MAGNET = (164, 146, 34)   # SMALL px (x, y, r): the magnet and the bright tab on its rim
+C_RED_H = ((0, 25), (165, 180))   # red LEDs 175-179 and 0-4 (pool); their glow 9-21 in the lake's green
+                                  # water. Orange tags (Oct 18) don't glow, so they can't be a light here
+C_GREEN_H = ((60, 100),)          # green LEDs 70-89 (pool); the lake water is 40-63, below this
+C_FAR = 10             # SMALL px: the water just beyond the glow, out to this far ...
+C_GREEN_ADD = 10       # ... and a GREEN light adds this much more green than red to it, and about as much
+                       # as blue or more (this camera's green LEDs are blue-ish, Oct 16): sunlit spots on
+                       # the pale pipe read hue 64-77 too, but add white - red and blue (Oct 24)
+
+
+def contrast_lights(rgb):
+    """The lights in a SMALL down frame, judged against the water (see above): [dict(colour, x, y,
+    share, whole, hue, box)], colour 'red', 'green', 'other' (a coloured glow of neither) or 'white' (no
+    coloured glow); x, y from -1 to 1 across the picture; whole = clear of the picture's edge; box = the
+    patch's (left, top, width, height) as shares of the picture's width and height."""
+    import cv2
+    h, w = rgb.shape[:2]
+    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+    v = hsv[..., 2].astype(np.float32)
+    # the water's brightness nearby - but no brighter than the picture's own middle brightness + 20:
+    # a big glow (the dark pool, a light close up) otherwise raised its own 'water' and hid itself
+    bg = np.minimum(cv2.blur(v, (C_BG_K, C_BG_K)), float(np.median(v)) + 20.0)
+    m = (v - bg >= C_DV_MIN).astype(np.uint8)
+    m[:C_LABEL[1], :C_LABEL[0]] = 0
+    cv2.circle(m, C_MAGNET[:2], C_MAGNET[2], 0, -1)
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    n, lab, st, cen = cv2.connectedComponentsWithStats(m, connectivity=8)
+    out = []
+    for k in range(1, n):
+        area = int(st[k, cv2.CC_STAT_AREA])
+        x0, y0, bw, bh = (int(c) for c in st[k, :4])
+        if area < C_MIN_PX:
+            continue
+        if area / float(h * w) < C_BIG and (max(bw, bh) / max(1, min(bw, bh)) > C_MAX_ASPECT
+                                          or area / float(bw * bh) < C_MIN_FILL):
+            continue
+        pad = C_FAR + 1
+        xa, ya, xb, yb = max(0, x0 - pad), max(0, y0 - pad), min(w, x0 + bw + pad), min(h, y0 + bh + pad)
+        blob = (lab[ya:yb, xa:xb] == k).astype(np.uint8)
+        sub = hsv[ya:yb, xa:xb]
+        if not (sub[..., 2][blob > 0] >= C_CORE_V).any():
+            continue
+        near = cv2.dilate(blob, np.ones((2 * C_RING + 1,) * 2, np.uint8)) > 0
+        glow = near & (sub[..., 1] >= C_GLOW_S) & ((v[ya:yb, xa:xb] - bg[ya:yb, xa:xb]) >= C_GLOW_DV)
+        colour, hue = 'white', None
+        if glow.sum() >= C_GLOW_N:
+            ang = sub[..., 0][glow].astype(np.float32) * (np.pi / 90.0)          # hue 0-179 -> 0-2 pi
+            hue = float((np.degrees(np.arctan2(np.sin(ang).mean(), np.cos(ang).mean())) / 2.0) % 180.0)
+            colour = ('red' if any(a <= hue < b for a, b in C_RED_H) else
+                      'green' if any(a <= hue < b for a, b in C_GREEN_H) else 'other')
+            if colour == 'green':
+                water = (cv2.dilate(blob, np.ones((2 * C_FAR + 1,) * 2, np.uint8)) > 0) & ~near
+                if water.sum() >= 10:
+                    px = rgb[ya:yb, xa:xb].astype(np.float32)
+                    r, g, b = px[near].mean(axis=0) - px[water].mean(axis=0)     # what the light adds
+                    if g - r < C_GREEN_ADD or g - b < -C_GREEN_ADD:
+                        colour = 'other'
+        out.append({'colour': colour, 'x': float(cen[k][0] / w * 2 - 1), 'y': float(cen[k][1] / h * 2 - 1),
+                    'share': area / float(h * w), 'hue': hue, 'box': (x0 / w, y0 / h, bw / w, bh / h),
+                    'whole': x0 > 0 and y0 > 0 and x0 + bw < w and y0 + bh < h})
+    return out
+
+
+def light_colour(rgb):
+    """The biggest light judged against the water in a SMALL frame - none of the specks at the picture's
+    edge (sparkles there read green, Oct 24): (colour, share), or (None, 0.0)."""
+    return biggest_colour(contrast_lights(rgb))
+
+
+# ---- lights from a trained model (Ruth, Oct 25): YOLO through ultralytics, as the prequal's pole
+# tracker runs it (api/vision/pole_tracker.py) - in the graey container, on the Jetson's GPU ----
+YOLO_COLOURS = {'red_light': 'red', 'green_light': 'green', 'red': 'red', 'green': 'green'}
+
+
+class YoloLights:
+    """yolo(bgr) -> the same list contrast_lights gives, from a trained model, on the full-size down
+    picture (BGR, 640x360). Classes red_light / green_light (or red / green) are the lights' colours;
+    any other class (a pipe end, later) keeps its own name as the colour."""
+
+    def __init__(self, path, conf=0.4):
+        from ultralytics import YOLO        # slow import, and only in the graey container
+        self.model, self.conf = YOLO(path), conf
+        try:
+            import torch
+            self.device = 0 if torch.cuda.is_available() else 'cpu'
+        except ImportError:
+            self.device = 'cpu'
+
+    def __call__(self, bgr):
+        h, w = bgr.shape[:2]
+        res = self.model.predict(bgr, conf=self.conf, verbose=False, device=self.device)[0]
+        out = []
+        for b in res.boxes:
+            x0, y0, x1, y1 = (float(v) for v in b.xyxy[0].tolist())
+            name = res.names[int(b.cls[0])]
+            out.append({'colour': YOLO_COLOURS.get(name, name), 'conf': float(b.conf[0]),
+                        'x': (x0 + x1) / w - 1, 'y': (y0 + y1) / h - 1,
+                        'share': (x1 - x0) * (y1 - y0) / float(w * h), 'hue': None,
+                        'box': (x0 / w, y0 / h, (x1 - x0) / w, (y1 - y0) / h),
+                        'whole': x0 > 2 and y0 > 2 and x1 < w - 2 and y1 < h - 2})
+        return out
+
+
+def biggest_colour(lights):
+    """(colour, share) of the biggest light - none of the specks at the picture's edge - or (None, 0.0)."""
+    L = [l for l in lights if l['whole'] or l['share'] >= C_EDGE_SMALL]
+    if not L:
+        return None, 0.0
+    b = max(L, key=lambda l: l['share'])
+    return b['colour'], b['share']
+
+
 class BoxTracker:
     def __init__(self, min_frac=0.02, gap_s=1.0, same_m=0.5, new_frac=0.04, minor_share=0.35,
                  palette='all'):
@@ -174,7 +309,8 @@ class LightTracker:
     camera, whichever way the camera is turned. Repeat sightings of a colour within
     same_m are that light again; boxes holds the lights, in BoxTracker's format."""
 
-    def __init__(self, min_frac=0.02, gap_s=1.0, same_m=0.3, new_frac=0.10, link=0.6):
+    def __init__(self, min_frac=0.02, gap_s=1.0, same_m=0.3, new_frac=0.10, link=0.6, detector='hsv',
+                 yolo=None):
         # A NEW light must once be seen whole - its blob clear of the picture's edge - or be big
         # (new_frac of the picture): glimpses at the edge (pool, Oct 16-17: 5-8%) sat in the wrong
         # place and were counted twice, while a lake ring ~1 m below is whole but tiny (0.03-6%,
@@ -184,6 +320,8 @@ class LightTracker:
         self.link = link            # a blob this close (picture half-widths) to a track's last is that track:
                                     # 0.6 kept one track per real light on the Oct 15-16 footage (0.35 split
                                     # halos), and still parts lights ~0.4 m apart
+        self.detector = detector    # 'hsv': the fixed HSV test; 'contrast': judged against the water (Oct 25);
+        self.yolo = yolo            # 'yolo': a YoloLights, on the full picture update() is given
         self.boxes = []
         self._tracks = []
 
@@ -206,11 +344,20 @@ class LightTracker:
                     out.append((colour, cents[k][0] / w * 2 - 1, cents[k][1] / h * 2 - 1, share, whole))
         return out
 
-    def update(self, t, rgb, pos):
-        """One frame at time t (s); pos = (north, east) of the camera, or None.
-        Returns the lights whose sightings just ended (new or seen again): a list."""
+    def update(self, t, rgb, pos, full=None, dets=None):
+        """One frame at time t (s); pos = (north, east) of the camera, or None; full = the full-size BGR
+        picture, or dets = the yolo detector's finds in it already. Returns the lights whose sightings
+        just ended (new or seen again)."""
         free = list(self._tracks)
-        for colour, x, y, share, whole in sorted(self.blobs(rgb, self.min_frac), key=lambda b: -b[3]):
+        if self.detector == 'yolo' and self.yolo is not None and (dets is not None or full is not None):
+            found = [(l['colour'], l['x'], l['y'], l['share'], l['whole'])
+                     for l in (dets if dets is not None else self.yolo(full)) if l['colour'] in ('red', 'green')]
+        elif self.detector in ('contrast', 'yolo'):
+            found = [(l['colour'], l['x'], l['y'], l['share'], l['whole']) for l in contrast_lights(rgb)
+                     if l['colour'] in ('red', 'green')]
+        else:
+            found = self.blobs(rgb, self.min_frac)
+        for colour, x, y, share, whole in sorted(found, key=lambda b: -b[3]):
             best = None
             for tr in free:
                 dd = math.hypot(x - tr['x'], y - tr['y'])
@@ -289,28 +436,45 @@ def frames_from_mjpeg(url, stop, every=2, timeout=5.0):
                     yield time.monotonic(), jpg
 
 
-def down_half_rgb(jpg):
-    """cam_pair puts DOWN on the left half, FRONT on the right: the left half, small, RGB."""
+def down_half_rgb(jpg, full=False):
+    """cam_pair puts DOWN on the left half, FRONT on the right: the left half, small, RGB - and with
+    full, (that, the left half full-size BGR)."""
     import cv2
     img = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
     if img is None:
-        return None
+        return (None, None) if full else None
     h, w = img.shape[:2]
     half = img[:, : w // 2] if w > 1.5 * h * 16 / 9 else img      # one camera only: the whole frame
     small = cv2.resize(half, SMALL, interpolation=cv2.INTER_AREA)
-    return cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+    rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+    return (rgb, half) if full else rgb
+
+
+class NoTracker:
+    """CameraWatcher's tracker while it only looks for pipe ends (the yolo model): counts nothing."""
+    boxes = []
+
+    def update(self, t, rgb, pos, **kw):
+        return []
+
+    def flush(self):
+        return []
 
 
 class CameraWatcher:
     """Runs the tracker on the camera stream in a thread. where() gives the camera's
     (north, east) now; report(text) logs; on_box(box) is called as sightings end."""
 
-    def __init__(self, url, where, report, on_box=None, tracker=None, **tracker_args):
+    def __init__(self, url, where, report, on_box=None, tracker=None, yolo=None, **tracker_args):
         self.url, self.where, self.report, self.on_box = url, where, report, on_box
+        self.yolo = yolo                # a YoloLights: run once per picture, its finds shared (latest_dets)
+        self.latest_dets = None         # (time.monotonic(), [finds]) of the newest picture
+        self.end_seen = None            # (time.monotonic(), find) - the newest picture with a pipe end in it
         self.tracker = tracker if tracker is not None else BoxTracker(**tracker_args)
         self.stop = threading.Event()
         self.frames = 0
         self.latest = None              # (time, SMALL RGB frame) of the newest picture, for centring
+        self.latest_full = None         # ... and the same picture full-size BGR (a yolo detector's)
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self):
@@ -322,14 +486,23 @@ class CameraWatcher:
         while not self.stop.is_set():
             try:
                 for t, jpg in frames_from_mjpeg(self.url, self.stop):
-                    rgb = down_half_rgb(jpg)
+                    rgb, full = down_half_rgb(jpg, full=True)
                     if rgb is None:
                         continue
                     self.frames += 1
-                    self.latest = (t, rgb)
+                    self.latest, self.latest_full = (t, rgb), full
                     if self.frames == 1:
                         self.report(f'camera: watching for light boxes on {self.url}')
-                    for b in self.tracker.update(t, rgb, self.where()):
+                    dets = None
+                    if self.yolo is not None:
+                        dets = self.yolo(full)
+                        self.latest_dets = (t, dets)
+                        ends = [d for d in dets if d['colour'] == 'pipe_end']
+                        if ends:
+                            self.end_seen = (t, max(ends, key=lambda d: d['conf']))
+                    found = (self.tracker.update(t, rgb, self.where(), full=full, dets=dets)
+                             if isinstance(self.tracker, LightTracker) else self.tracker.update(t, rgb, self.where()))
+                    for b in found:
                         if self.on_box:
                             self.on_box(b)
             except Exception as ex:                  # no stream yet, cv2 missing, stream dropped

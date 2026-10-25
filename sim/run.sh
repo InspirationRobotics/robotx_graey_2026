@@ -11,6 +11,7 @@
 # SIM_WORLD=pool: Ruth's ~0.9 m pool (use WATER_DEPTH=0.9), walls POOL_L x POOL_W m with
 # a corner at POOL_N0, POOL_E0 from home, and the pipeline hung without legs at
 # PIPE_DEPTH (default half the water depth).
+# SIM_IMAGE=graey-sitl-yolo: an image with ultralytics added, for the mission's light_detector:=yolo.
 # Stop with:  docker rm -f graey-sitl
 set -e
 cd "$(dirname "$0")/.."
@@ -27,5 +28,5 @@ docker run -d --name graey-sitl \
     -e SIM_N_BOXES="${SIM_N_BOXES:-4}" -e SIM_BOX_COLOURS="${SIM_BOX_COLOURS:-red green blue yellow}" \
     -e SIM_CAM_HFOV="${SIM_CAM_HFOV:-55}" \
     -e POOL_L="${POOL_L:-11}" -e POOL_W="${POOL_W:-7}" -e POOL_N0="${POOL_N0:--3}" -e POOL_E0="${POOL_E0:--2}" \
-    graey-sitl bash sim/inside.sh >/dev/null
+    "${SIM_IMAGE:-graey-sitl}" bash sim/inside.sh >/dev/null
 echo "graey-sitl starting. Logs: docker exec graey-sitl tail -f /tmp/sim/sitl.log"
