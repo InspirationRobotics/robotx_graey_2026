@@ -189,6 +189,8 @@ SETTINGS = {
                                        #   'hsv' = the old fixed colour test (82% of the lake picture 'green');
                                        #   'yolo' = a trained model (light_model; contrast if it won't load)
     'light_model':         '/root/robotx_ws/src/robotx_graey_2026/models/lights.pt',   # the yolo model
+    'end_model':           '',         # a yolo model with a pipe_end class, for the pipe's ends only (the
+                                       #   lights stay on light_detector): '' = none, ends from the sonar
     'light_above_floor_m': 1.6,        # the light box's top above the bottom (m): sets the repair's first step down
     'centre_max_down_m':   0.65,       # repair: never more than this below where centring began (m)
 
@@ -602,6 +604,8 @@ class PipelineMission(MissionBase):
                                             # around it, its colour from its glow (led_boxes.contrast_lights)
         p('light_model', '')                # light_detector:=yolo: the trained model (.pt, ultralytics) ...
         p('light_conf', 0.4)                # ... and the confidence a box needs
+        p('end_model', '')                  # a model with a pipe_end class used for the pipe's ends only, the
+                                            # lights staying on light_detector (Ruth, Oct 25); '' = none
         p('light_min_frac', 0.02)           # smallest blob that counts: 0.02 in the pool (camera close,
                                             # the glow breaks into pieces); ~0.0005 at the lake, where a
                                             # ring ~1 m below is 0.05-6% of the picture (Oct 18)
@@ -711,7 +715,9 @@ class PipelineMission(MissionBase):
         if self.light_detector not in ('hsv', 'contrast', 'yolo'):
             raise ValueError(f"light_detector must be hsv, contrast or yolo, not {self.light_detector!r}")
         self.light_model, self.light_conf = g('light_model').strip(), float(g('light_conf'))
-        self.yolo = None                    # the loaded model (light_detector:=yolo), once it is needed
+        self.end_model = g('end_model').strip()
+        self.yolo = None                    # the loaded model (light_detector:=yolo, or end_model), once needed
+        self.yolo_failed = False
         led_boxes.V_MIN, led_boxes.S_MIN = int(g('light_v_min')), int(g('light_s_min'))
         self.survey_backup = float(g('survey_backup_m'))
         self.survey_dir = g('survey_dir')
@@ -2618,22 +2624,28 @@ class PipelineMission(MissionBase):
                 pass
 
     def yolo_lights(self):
-        """light_detector:=yolo: the model, loaded once; if it can't be (no file, no ultralytics), the
-        lights are judged against the water instead (contrast) for the rest of the mission."""
-        if self.light_detector == 'yolo' and self.yolo is None:
+        """The YOLO model, loaded once: light_detector:=yolo's light_model (lights and pipe ends), else
+        end_model (pipe ends only). If it can't be loaded (no file, no ultralytics): lights are judged
+        against the water (contrast) and the pipe's ends come from the sonar, as without one."""
+        path = self.light_model if self.light_detector == 'yolo' else self.end_model
+        if self.yolo is None and path and not self.yolo_failed:
             try:
-                self.yolo = led_boxes.YoloLights(self.light_model, self.light_conf)
-                self.get_logger().info(f'    camera: lights from the model {self.light_model}')
+                self.yolo = led_boxes.YoloLights(path, self.light_conf)
+                self.get_logger().info(f'    camera: the model {path} - '
+                                       + ('lights and pipe ends' if self.light_detector == 'yolo' else 'pipe ends only'))
             except Exception as ex:
-                self.get_logger().error(f'    camera: the light model {self.light_model!r} would not load ({ex}) - '
-                                        f'judging lights against the water instead')
-                self.light_detector = 'contrast'
+                self.yolo_failed = True
+                self.get_logger().error(f'    camera: the model {path!r} would not load ({ex}) - '
+                                        f'lights against the water, pipe ends from the sonar')
+                if self.light_detector == 'yolo':
+                    self.light_detector = 'contrast'
         return self.yolo
 
     def start_end_watch(self):
-        """light_detector:=yolo: the camera on for pipe ends only (no lights counted) - on the line-up walk
-        and on the survey's way to the buoy end, where the light list mustn't start yet (Ruth, Oct 25)."""
-        if self.camera is None and self.light_detector == 'yolo' and self.yolo_lights() is not None:
+        """A YOLO model (light_detector:=yolo or end_model): the camera on for pipe ends only (no lights
+        counted) - on the line-up walk and on the survey's way to the buoy end, where the light list
+        mustn't start yet (Ruth, Oct 25)."""
+        if self.camera is None and self.yolo_lights() is not None:
             self.camera = led_boxes.CameraWatcher(self.camera_url, self.camera_at,
                                                   lambda t: self.get_logger().info('    ' + t), None,
                                                   tracker=led_boxes.NoTracker(), yolo=self.yolo).start()

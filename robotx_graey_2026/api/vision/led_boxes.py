@@ -136,7 +136,8 @@ C_LABEL = (50, 18)     # SMALL px: tools/cam_pair.py writes 'DOWN' in the top-le
 C_MAGNET = (164, 146, 34)   # SMALL px (x, y, r): the magnet and the bright tab on its rim
 C_RED_H = ((0, 25), (165, 180))   # red LEDs 175-179 and 0-4 (pool); their glow 9-21 in the lake's green
                                   # water. Orange tags (Oct 18) don't glow, so they can't be a light here
-C_GREEN_H = ((60, 100),)          # green LEDs 70-89 (pool); the lake water is 40-63, below this
+C_GREEN_H = ((60, 92),)           # green LEDs 65-90 (pool videos); the lake water is 40-63, below this
+C_BLUE_H = ((92, 135),)           # blue LEDs 95-110 (Oct 17 colour sequence) - not green (Ruth, Oct 25)
 C_FAR = 10             # SMALL px: the water just beyond the glow, out to this far ...
 C_GREEN_ADD = 10       # ... and a GREEN light adds this much more green than red to it, and about as much
                        # as blue or more (this camera's green LEDs are blue-ish, Oct 16): sunlit spots on
@@ -145,7 +146,7 @@ C_GREEN_ADD = 10       # ... and a GREEN light adds this much more green than re
 
 def contrast_lights(rgb):
     """The lights in a SMALL down frame, judged against the water (see above): [dict(colour, x, y,
-    share, whole, hue, box)], colour 'red', 'green', 'other' (a coloured glow of neither) or 'white' (no
+    share, whole, hue, box)], colour 'red', 'green', 'blue', 'other' (a coloured glow of none) or 'white' (no
     coloured glow); x, y from -1 to 1 across the picture; whole = clear of the picture's edge; box = the
     patch's (left, top, width, height) as shares of the picture's width and height."""
     import cv2
@@ -182,13 +183,16 @@ def contrast_lights(rgb):
             ang = sub[..., 0][glow].astype(np.float32) * (np.pi / 90.0)          # hue 0-179 -> 0-2 pi
             hue = float((np.degrees(np.arctan2(np.sin(ang).mean(), np.cos(ang).mean())) / 2.0) % 180.0)
             colour = ('red' if any(a <= hue < b for a, b in C_RED_H) else
-                      'green' if any(a <= hue < b for a, b in C_GREEN_H) else 'other')
-            if colour == 'green':
+                      'green' if any(a <= hue < b for a, b in C_GREEN_H) else
+                      'blue' if any(a <= hue < b for a, b in C_BLUE_H) else 'other')
+            if colour in ('green', 'blue'):
                 water = (cv2.dilate(blob, np.ones((2 * C_FAR + 1,) * 2, np.uint8)) > 0) & ~near
                 if water.sum() >= 10:
                     px = rgb[ya:yb, xa:xb].astype(np.float32)
                     r, g, b = px[near].mean(axis=0) - px[water].mean(axis=0)     # what the light adds
-                    if g - r < C_GREEN_ADD or g - b < -C_GREEN_ADD:
+                    if colour == 'green' and (g - r < C_GREEN_ADD or g - b < -C_GREEN_ADD):
+                        colour = 'other'
+                    if colour == 'blue' and b - r < C_GREEN_ADD:      # a blue light adds blue, not white
                         colour = 'other'
         out.append({'colour': colour, 'x': float(cen[k][0] / w * 2 - 1), 'y': float(cen[k][1] / h * 2 - 1),
                     'share': area / float(h * w), 'hue': hue, 'box': (x0 / w, y0 / h, bw / w, bh / h),
@@ -204,12 +208,13 @@ def light_colour(rgb):
 
 # ---- lights from a trained model (Ruth, Oct 25): YOLO through ultralytics, as the prequal's pole
 # tracker runs it (api/vision/pole_tracker.py) - in the graey container, on the Jetson's GPU ----
-YOLO_COLOURS = {'red_light': 'red', 'green_light': 'green', 'red': 'red', 'green': 'green'}
+YOLO_COLOURS = {'red_light': 'red', 'green_light': 'green', 'blue_light': 'blue',
+                'red': 'red', 'green': 'green', 'blue': 'blue'}
 
 
 class YoloLights:
     """yolo(bgr) -> the same list contrast_lights gives, from a trained model, on the full-size down
-    picture (BGR, 640x360). Classes red_light / green_light (or red / green) are the lights' colours;
+    picture (BGR, 640x360). Classes red_light / green_light / blue_light (or red / green / blue) are the lights' colours;
     any other class (a pipe end, later) keeps its own name as the colour."""
 
     def __init__(self, path, conf=0.4):
