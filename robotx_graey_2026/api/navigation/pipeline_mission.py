@@ -168,7 +168,8 @@ SETTINGS = {
                                        #   45 deg either side of straight down
     'pool_far_m':          7.0,        # ignore echoes farther from the sonar than this (m, along the beam)
     'scan_turn_deg':       180.0,      # total turn (deg); looking both ways, 180 covers every direction
-    'search_step_deg':     25.0,       # turn between stops (deg, rounded to divide the turn evenly)
+    'search_step_deg':     30.0,       # turn between stops (deg, rounded to divide the turn evenly):
+                                       #   30 = 6 stops over 180 (Ruth, Oct 25; was 25 = 8)
     'sweeps_per_stop':     2,          # sonar sweeps held still at each stop
     'floor_filter':        '0.75 2.25',  # keep only echoes this high above the bottom (m, low high)
     'look_min_score':      0.2,        # how pipe-like the closer look's shape must be to pass (0-1)
