@@ -173,6 +173,9 @@ SETTINGS = {
     'sweeps_per_stop':     2,          # sonar sweeps held still at each stop
     'floor_filter':        '0.75 2.25',  # keep only echoes this high above the bottom (m, low high)
     'look_min_score':      0.2,        # how pipe-like the closer look's shape must be to pass (0-1)
+    'stop_tol_deg':        10.0,       # a stop starts looking once the heading is this close to it for 2 s
+                                       #   (Oct 25 pool: the sub swung +-12 deg in its heading hold; was 3,
+                                       #   which also waited for the turning to stop)
 
     # ---- walk and follow: the sonar looks straight down ----------------------------------
     'follow_range':        6.0,        # how far the sonar listens (m); must reach past the bottom
@@ -496,6 +499,8 @@ class PipelineMission(MissionBase):
         p('look_span_deg', 20.0)            # ... then a closer look: stops out to this far either side,
         p('look_step_deg', 10.0)            # this far apart
         p('look_min_score', 0.2)            # ... passed: a shape this pipe-like near the promising bunch
+        p('stop_tol_deg', 3.0)              # a stop looks once the heading is within this for 2 s (and, at
+                                            # 3 or less, turning slower than 2 deg/s)
         p('record_scan', True)              # record the scan (Map tab Record), a Mark at each stop
         p('pool_max_pick_m', 2.5)           # pick only shapes this close to the sonar: start
                                             # ~1.5 m from the pipe, so walls farther out are ignored
@@ -751,6 +756,7 @@ class PipelineMission(MissionBase):
         self.look_span = math.radians(max(0.0, float(g('look_span_deg'))))
         self.look_step = math.radians(max(2.0, float(g('look_step_deg'))))
         self.look_min_score = float(g('look_min_score'))
+        self.stop_tol = math.radians(max(1.0, float(g('stop_tol_deg'))))
         self.record_scan = bool(g('record_scan'))
         self.pool_max_pick = float(g('pool_max_pick_m'))
         self.pool_alt = max(0.0, float(g('pool_alt_m'))) if self.plan == 'pool' else 0.0
@@ -950,7 +956,10 @@ class PipelineMission(MissionBase):
                 self.get_logger().info(f'    dry run: turn the sub to heading {math.degrees(want) % 360:.0f} deg '
                                        f'({self.stop_label()}) and hold it still')
             err = None if self.cur_yaw is None else abs(wrap_pi(self.cur_yaw - want))
-            still = err is not None and err < math.radians(3) and abs(self.yaw_rate or 0.0) < math.radians(2)
+            # wider than 3 deg (Oct 25 pool: the heading hold swung +-12 deg with the gyro past 30 deg/s):
+            # the heading alone counts - with the turning check, a stop waited up to 3 minutes
+            still = (err is not None and err < self.stop_tol
+                     and (self.stop_tol > math.radians(3) or abs(self.yaw_rate or 0.0) < math.radians(2)))
             if not still:
                 self.still_t = None
             elif self.still_t is None:
