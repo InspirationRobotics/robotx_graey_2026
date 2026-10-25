@@ -1,0 +1,67 @@
+{
+  "model": "Assumed cross current; first-order horizontal drag, pilot thrust/1000 m/s, 1 s time constant; synthetic GPS/DVL/VN; no wave or heave model",
+  "measured_miramar_conditions": false,
+  "results": [
+    {
+      "current_local_xy_mps": [
+        0.0,
+        0.05
+      ],
+      "stage": "COMPLETE",
+      "reason": "Estimated waypoint reached; stopped and disarmed",
+      "heading_offset_deg": 39.99915628228362,
+      "alignment_m": 9.900170880344962,
+      "physical_target_error_m": 0.37843788146796536,
+      "stages": [
+        "WAIT_SURFACE",
+        "GUIDED",
+        "ARM",
+        "TRANSIT",
+        "TRANSIT_CHECK",
+        "TRANSIT",
+        "STOP",
+        "DISARM"
+      ]
+    },
+    {
+      "current_local_xy_mps": [
+        0.0,
+        0.1
+      ],
+      "stage": "COMPLETE",
+      "reason": "Estimated waypoint reached; stopped and disarmed",
+      "heading_offset_deg": 39.99835233832232,
+      "alignment_m": 9.900171219962658,
+      "physical_target_error_m": 0.43842877412852665,
+      "stages": [
+        "WAIT_SURFACE",
+        "GUIDED",
+        "ARM",
+        "TRANSIT",
+        "TRANSIT_CHECK",
+        "TRANSIT",
+        "STOP",
+        "DISARM"
+      ]
+    },
+    {
+      "current_local_xy_mps": [
+        0.0,
+        0.2
+      ],
+      "stage": "TRANSIT",
+      "reason": "Continuous waypoint navigation",
+      "heading_offset_deg": 39.99653434186746,
+      "alignment_m": 9.900172143311993,
+      "physical_target_error_m": 40.13481284403985,
+      "stages": [
+        "WAIT_SURFACE",
+        "GUIDED",
+        "ARM",
+        "TRANSIT",
+        "TRANSIT_CHECK",
+        "TRANSIT"
+      ]
+    }
+  ]
+}

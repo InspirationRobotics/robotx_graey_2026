@@ -69,9 +69,21 @@ class NavigationNewTests(unittest.TestCase):
         o['bridge']['estimator_health']['all_sensors_lost']=True
         r.step(10.1,o);self.assertEqual(r.stage,'ABORTED')
 
-    def test_no_metre_stops_after_registration(self):
+    def test_existing_map_still_starts_with_ten_metre_leg(self):
         r=GuidedSurfaceRun(dict(lat=33.0001,lon=-117.,mode='surface',map='geographic',alignment_corridor_confirmed=True),'r',0.)
         r.stage='TRANSIT';r.align_start=(0,0,0);r.align_heading=0.;r.heading=0.;r.surface_down=0.
+        e=ContinuousEstimator();e.map.align(33.,-117.,(0,0),0.)
+        o=dict(fresh=True,armed=True,mode=0,local=(2.,0,0),velocity_ned=(.1,0,0),yaw=0.,speed=.1,
+               bridge=dict(map_transform=e.map.snapshot(),estimator_health=dict(usable=True,all_sensors_lost=False)))
+        self.assertEqual(r.step(.1,o)[0][0],'align_velocity')
+        self.assertFalse(r.geographic_tracking)
+        o['local']=(10.,0,0);r.step(.2,o)
+        self.assertTrue(r.alignment_complete)
+        r.step(.4,o);self.assertTrue(r.geographic_tracking)
+
+    def test_no_metre_stops_after_registration(self):
+        r=GuidedSurfaceRun(dict(lat=33.0001,lon=-117.,mode='surface',map='geographic',alignment_corridor_confirmed=True),'r',0.)
+        r.stage='TRANSIT';r.align_start=(0,0,0);r.align_heading=0.;r.heading=0.;r.surface_down=0.;r.alignment_complete=True
         e=ContinuousEstimator();e.map.align(33.,-117.,(0,0),0)
         for i in range(1,50):
             o=dict(fresh=True,armed=True,mode=0,local=(i*.1,0,0),velocity_ned=(.1,0,0),yaw=0.,speed=.1,

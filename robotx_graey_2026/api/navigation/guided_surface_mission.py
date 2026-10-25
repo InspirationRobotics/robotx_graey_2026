@@ -18,7 +18,7 @@ class GuidedSurfaceRun(WaypointRun):
         self.align_start=None;self.align_heading=None;self.alignment_distance=0.
         self.alignment_started=None;self.transit_started=None
         self.sample_check_ready=False;self.segment_checks=0
-        self.geographic_tracking=False
+        self.geographic_tracking=False;self.alignment_complete=False
 
     def abort_actions(self,now,o):
         if self.takeover_requested and not self.pilot_takeover and o.get('mode') in (None,0):
@@ -66,15 +66,19 @@ class GuidedSurfaceRun(WaypointRun):
             else:return self.command(now,'arm')
         elif self.stage in ('TRANSIT','TRANSIT_CHECK'):
             frame=GeographicFrame.restore(b.get('map_transform'))
-            if frame.angle is None:
+            if not self.alignment_complete:
                 along,cross,command=straight_command(self.align_start,local,o['velocity_ned'],self.align_heading)
                 self.alignment_distance=along
-                if along>=9.9 or self.stage=='TRANSIT_CHECK':
+                if along>=9.9:
+                    self.alignment_complete=True
                     self.sample_check_ready=True
                     if self.stage!='TRANSIT_CHECK':self.enter('TRANSIT_CHECK',now,'10 m complete; accepting GPS north evidence')
                     self.reason='Waiting for usable GPS north evidence; waypoint retained'
                     return self.command(now,'stop',(self.align_heading,),interval=.1)
                 return self.command(now,'align_velocity',command,interval=.1)
+            if frame.angle is None:
+                self.reason='Waiting for usable GPS north evidence; waypoint retained'
+                return self.command(now,'stop',(self.align_heading,),interval=.1)
             if not self.geographic_tracking:
                 self.start=local;self.geographic_tracking=True
                 self.enter('TRANSIT',now,'Continuous waypoint navigation')

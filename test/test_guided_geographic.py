@@ -4,21 +4,28 @@ from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame, r
 from robotx_graey_2026.api.navigation.continuous_estimator import ContinuousEstimator as RelativeEstimator
 from robotx_graey_2026.api.navigation.bridge_estimator import yaw_rotate
 from robotx_graey_2026.api.navigation.guided_surface_mission import GuidedSurfaceRun
-from robotx_graey_2026.api.navigation.surface_control import SurfaceLeg, surface_velocity
+from robotx_graey_2026.api.navigation.surface_control import SurfaceLeg, surface_velocity, StabilizeSurfaceControl
 from robotx_graey_2026.api.navigation.waypoint_logic import ne_to_geo
 
 
-def simulate(offset=73., gps_jump=False, dropout=False, abort=False):
+def simulate(offset=73., gps_jump=False, dropout=False, abort=False, current=None):
     e=RelativeEstimator();e.set_origin((33.,-117.,200.))
     p=[0.,0.];v=[0.,0.];heading=0.;cmd=(0.,0.,0.);desired=0.;mode=19;armed=False
     target=(10.,3.);lat,lon=ne_to_geo(*target,(33.,-117.))
     run=None;leg=SurfaceLeg();begun=False;stages=[];previous=None
-    for i in range(10000):
+    pilot=StabilizeSurfaceControl()
+    for i in range(14000 if current is not None else 10000):
         t=100+i*.05
         rate=max(-.15,min(.15,((desired-heading+math.pi)%(2*math.pi)-math.pi)*2))
         heading+=rate*.05
+        demanded=cmd
+        if current is not None:
+            output=pilot.step(t,cmd,(*e.filter.x[2:4],0.),heading,desired) if armed else (0,0,500,0)
+            thrust=rotation((output[0]/1000.,output[1]/1000.),math.degrees(heading))
+            demanded=tuple(thrust[j]+current[j] for j in (0,1))
         for axis in (0,1):
-            v[axis]+=(cmd[axis]-v[axis])*.15;p[axis]+=v[axis]*.05
+            v[axis]+=(demanded[axis]-v[axis])*.05 if current is not None else (cmd[axis]-v[axis])*.15
+            p[axis]+=v[axis]*.05
         body=rotation(v,-math.degrees(heading))
         e.gps.clock.offset=90.;e.gps.clock.uncertainty=.005;e.gps.clock.updated=t
         e.imu(t,yaw_rotate((1.,0.,0.,0.),math.degrees(heading)),(0.,0.,rate))
@@ -39,10 +46,10 @@ def simulate(offset=73., gps_jump=False, dropout=False, abort=False):
         if run.stage=='TRANSIT_CHECK' and run.sample_check_ready and e.north_alignment.status().get('candidate_ready') and e.north_alignment.active and not e.north_alignment.approved:e.north_alignment.stop(True)
         s=dict(run_id='run',reference_current=True,reference=dict(reference_id='ref'),navigation_ready=b['healthy'],
             surfaced=True,fusion_policy='continuous',state='Ready')
-        current=e.gps.status(t)['qualified'] and e.last_correction is not None and t-e.last_correction<.35
+        gps_current=e.gps.status(t)['qualified'] and e.last_correction is not None and t-e.last_correction<.35
         o=dict(fresh=b['healthy'],failure='',abort=abort and i>280,supervisor=s,bridge=b,
             armed=armed,mode=mode,local=(*e.position[:2],0.),velocity_ned=(*v,0.),depth=0.,yaw=heading,
-            speed=math.hypot(*v),surface_gps_current=current,navigation_hold_safe=b['healthy'],
+            speed=math.hypot(*v),surface_gps_current=gps_current,navigation_hold_safe=b['healthy'],
             surface_measurement=dict(ready=True),dvl_continuity=b['dvl_continuity'],
             **{'global':(glat,glon)})
         if run.stage!=previous:stages.append(run.stage);previous=run.stage

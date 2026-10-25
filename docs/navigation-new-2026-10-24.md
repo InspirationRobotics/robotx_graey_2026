@@ -42,3 +42,16 @@ Simulation uses synthetic sensor truth; it does not establish lake-current, EMI,
 The Jetson EKF is a modest horizontal filter, not a complete copy of EKF3 fault diagnosis. Its covariances/noise constants require real data review. Cube still performs inertial fusion and attitude control. Correlations between external fused odometry channels and Cube fusion are not fully modelled. GPS timing uses Cube timestamp/clock alignment and bounded latency compensation, not hardware PPS synchronization.
 
 Before deployment: review the new branch/profile and backup the vehicle; verify disarm/restart state, single bridge ownership, parameter profile, timestamps and physical frame signs. Then test bounded surface motion in a clear corridor with takeover available. No live readiness is asserted here.
+
+
+## Follow-up: distance controls and current scenarios
+
+Every new mission now performs its initial approximately 10 m straight leg, including when a map registration already exists. First commanded movement is forward in STABILIZE; mode acknowledgement, control ownership and arming still precede thrust. No stationary GPS qualification dwell was added. A known map is retained rather than resetting Cube coordinates; new GPS observations continue the normal heading correction.
+
+Waypoint GUI retains manual latitude/longitude entry and live coordinate output. Record GPS is visible in the main sidebar. The last recorded coordinate is saved in browser localStorage and displayed outside collapsed controls, with a Navigate to recorded point action that selects it without starting propulsion. Persistence is browser/origin-specific, not cross-device. Distance updates from fresh mapped Cube position, falling back to explicitly labelled raw GPS before registration. Move target applies the entered 0.3–20 m distance along the existing bearing from the current vehicle position. Editing does not change an active mission; stale/missing position disables distance editing.
+
+Current simulations: `python -m sitl.validate_current_scenarios`. These are software closed-loop sensitivity tests of the production estimator, mission, line guidance and STABILIZE velocity controller, NOT native ArduSub hydrodynamics or measured Miramar conditions. Assumptions: constant lateral current, synthetic GPS/DVL/VN, first-order horizontal response with 1 s time constant and pilot command/1000 through-water speed. No waves, heave, multipath or motor asymmetry. User approved assumed scenarios after no measured current was supplied.
+
+Results: 0.05 m/s completed with 0.378 m final physical-model error; 0.10 m/s completed with 0.438 m error; 0.20 m/s did NOT complete by the 700 s horizon and drifted about 40.1 m from the target. The existing gentle thrust cap cannot reject that modelled disturbance. This is an exposed operating limitation, not a successful lake validation; thrust limits were not silently raised. See `current-scenarios-2026-10-24.json`. Existing native no-current SITL evidence remains in the previous section.
+
+Follow-up checks: 14 focused Python tests and waypoint GUI suite pass, including retained-map initial leg, saved GPS reload and distance/bearing editing. First current-test harness invocation failed due to a test-local variable shadowing the current vector; fixed and all three scenarios rerun. No vehicle access, deployment or push.

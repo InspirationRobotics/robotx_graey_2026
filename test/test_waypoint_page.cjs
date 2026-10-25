@@ -3,7 +3,7 @@ const code=fs.readFileSync('tools/waypoint.html','utf8').match(/<script>([\s\S]*
 async function render(data,options={}){
   const elements={},posts=[],imageSources=[],ctx2d=new Proxy({},{get:()=>()=>{}});let now=100,starts=0;
   const el=id=>elements[id]??=(id==='map'?{getContext:()=>ctx2d,getBoundingClientRect:()=>({width:900,height:600,...options.viewport,left:0,top:0})}:{checked:options.corridor!==false,value:id==='maptype'?'geographic':id==='imagery'?'current':id==='depth'?'0.5':'',textContent:''});
-    const ctx={document:{getElementById:el},window:{},Image:class{complete=!!options.tilesLoaded;naturalWidth=options.tilesLoaded?256:0;set src(url){imageSources.push(url)}},devicePixelRatio:1,
+    const storage=options.storage||{};const ctx={localStorage:{getItem:k=>storage[k]||null,setItem:(k,v)=>storage[k]=v},document:{getElementById:el},window:{},Image:class{complete=!!options.tilesLoaded;naturalWidth=options.tilesLoaded?256:0;set src(url){imageSources.push(url)}},devicePixelRatio:1,
     location:{pathname:'/waypoint'},performance:{now:()=>now},AbortSignal:{timeout:()=>null},
     setTimeout:()=>{},fetch:async(url,request)=>{if(!request?.body)return{ok:true,json:async()=>data};const body=JSON.parse(request.body);posts.push(body);if(body.action==='start'&&++starts===1&&options.timeoutStart)throw Error('Timeout');return{ok:!options.reject,json:async()=>options.reject?{ok:false,msg:'Target rejected'}:{ok:true,plan_id:'single-plan',run_id:'run'}}}};
   vm.runInNewContext(code,ctx);await new Promise(setImmediate);elements.posts=posts;elements.imageSources=imageSources;elements.refreshAt=async t=>{now=t;await ctx.poll()};elements.tileXY=ctx.tileXY;elements.tileGeo=ctx.tileGeo;elements.tileURL=ctx.tileURL;return elements;
@@ -65,7 +65,7 @@ async function render(data,options={}){
   assert.match(e.rawGPSStatus.textContent,/NOT AIDING/);
   e=await render({...telemetry,navigation:{...telemetry.navigation,streams:{...telemetry.navigation.streams,
     waypoint:{fresh:true,data:{stage:'WAIT_SURFACE',surface_measurement:{ready:false,reason:'Surface measurement 12/20 s'}}}}}});
-  assert.match(e.surfaceMeasurement.textContent,/pending.*12\/20.*not proof/);
+  assert.match(e.surfaceMeasurement.textContent,/First motion: 10 m/);
   assert.equal(e.headingOffsets.textContent,'90.0° / 2.0°');assert.equal(e.cubeSpeed.textContent,'0.50');assert.equal(e.gpsSeparation.textContent,'0.00');assert.match(e.estimateAge.textContent,/local: 0.10 s/);
   e=await render({...telemetry,navigation:{...telemetry.navigation,streams:{...telemetry.navigation.streams,bridge:{fresh:false,age:4,data:telemetry.navigation.streams.bridge.data},local:{fresh:false,age:4,data:telemetry.navigation.streams.local.data}}}});
   assert.match(e.alignedHeading.textContent,/Unavailable/);assert.equal(e.headingDifference.textContent,'—');assert.equal(e.cubeSpeed.textContent,'—');assert.match(e.estimateAge.textContent,/4.00 s · stale/);
@@ -97,5 +97,10 @@ async function render(data,options={}){
   assert.match(e.gpsRecord.textContent,/1.20 m/);assert.equal(e.posts.length,0);assert(e.start.disabled);
   e.useCoordinates.onclick();assert(!e.start.disabled);
   e=await render({...gpsData,navigation:{...gpsData.navigation,streams:{...gpsData.navigation.streams,gps:{fresh:false,data:gpsData.navigation.streams.gps.data}}}});assert(e.recordGPS.disabled);
+  const storage={};e=await render(gpsData,{storage});e.recordGPS.onclick();assert(storage['graey.lastRecordedGPS']);
+  e=await render(gpsData,{storage});assert.match(e.savedGPS.textContent,/32\.9235700/);e.useRecorded.onclick();assert(!e.start.disabled);
+  e=await render(ready);e.map.onclick({clientX:550,clientY:300});e.targetDistance.value='7';e.applyDistance.onclick();
+  assert.match(e.distanceStatus.textContent,/7.00 m/);const lat=Number(e.targetLat.value),lon=Number(e.targetLon.value);assert(Math.abs(lat-32.9)<1e-7);assert(lon>-117);
+  e.targetDistance.value='-1';e.applyDistance.onclick();assert.match(e.message.textContent,/0.3 to 20/);
   console.log('Waypoint map, desktop archive resolution, readiness, Start retry and estimate stats checks pass');
 })().catch(e=>{console.error(e);process.exit(1)});
