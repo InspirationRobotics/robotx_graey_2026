@@ -114,7 +114,7 @@ Line numbers are in `robotx_graey_2026/api/navigation/pipeline_mission.py`, unle
 - **Otherwise:**
   - **Pipe seen only near the start:** it walks the other way, once.
   - **No line:** `not the pipe after all`. It goes back up to the search depth and on with the next stop.
-- **With `light_detector: yolo` and a `pipe_end` model:** if the camera sees the pipe's end ahead, it walks the other way at once.
+- **With a `pipe_end` model** (`end_model`, or `light_detector: yolo`): if the camera sees the pipe's end ahead, it walks the other way at once.
 
 ## 10. Start following (`follow_map` line 2106, `follow_anchor` line 2183)
 - **Does:**
@@ -129,8 +129,10 @@ Line numbers are in `robotx_graey_2026/api/navigation/pipeline_mission.py`, unle
 - **Moving:** along at the smaller of `follow_speed` **0.08 m/s** and 0.3 m per sweep, sideways toward the pipe at most 0.08 m/s, turning at most 5°/s.
 - **Depth** (`follow_depth`, line 2463): keeps the pipe `follow_pipe_below_m` **0.7 m** under the sonar, give or take `follow_pipe_tol_m` **0.15 m**. Moves at 0.05 m/s, never more than 1.5 m from where following began, never within 0.5 m of the bottom.
 - **Pipe missing for more than one sweep:** back over where it was last seen, and waits.
-- **The end, seen by the camera** (`light_detector: yolo`, `pipe_end` model; `pipe_end_seen` line 2897):
-  - The pipe has gone from under the sonar, and the camera has seen a pipe end in the last `END_SEEN_S` **3 s**, near the middle across (`END_MID_X` 0.6) and not behind (`END_BEHIND_Y` 0.3). That's the end: no 30 s wait, no search.
+- **The end, seen by the camera** (`end_model` **models/pipe_end.pt**, or `light_detector: yolo`; `pipe_end_seen` line 2914):
+  - The pipe has gone from under the sonar, and the camera has seen a pipe end scoring at least `end_conf` **0.25** in the last `END_SEEN_S` **3 s**, near the middle across (`END_MID_X` 0.6) and not behind (`END_BEHIND_Y` 0.3). That's the end: no 30 s wait, no search.
+  - `pipe_end.pt` (Oct 25, trained on Ruth's 333 labelled Oct 24 frames): on held-back frames, 0.25 found all 28 ends with 1 false box in 139 frames without one. Real ends score 0.28–0.55, so 0.4 (the lights' bar) found only 13.
+  - No model file, or it won't load: ends come from the sonar only (the lost search below), as before.
 - **Lost** (missing **30 s**) (`lost_search_begin`, line 1809):
   1. Back over where it was last seen.
   2. Back up to 4 m off the bottom.

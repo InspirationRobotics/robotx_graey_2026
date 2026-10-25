@@ -189,8 +189,12 @@ SETTINGS = {
                                        #   'hsv' = the old fixed colour test (82% of the lake picture 'green');
                                        #   'yolo' = a trained model (light_model; contrast if it won't load)
     'light_model':         '/root/robotx_ws/src/robotx_graey_2026/models/lights.pt',   # the yolo model
-    'end_model':           '',         # a yolo model with a pipe_end class, for the pipe's ends only (the
+    'end_model':           '/root/robotx_ws/src/robotx_graey_2026/models/pipe_end.pt',
+                                       # a yolo model with a pipe_end class, for the pipe's ends only (the
                                        #   lights stay on light_detector): '' = none, ends from the sonar
+                                       #   (also the sonar if the file isn't there or won't load)
+    'end_conf':            0.25,       # ... the confidence a pipe end needs (pipe_end.pt, Oct 25 held-back
+                                       #   frames: 0.25 found all 28 ends, 1 false box in 139 frames; 0.4 found 13)
     'light_above_floor_m': 1.6,        # the light box's top above the bottom (m): sets the repair's first step down
     'centre_max_down_m':   0.65,       # repair: never more than this below where centring began (m)
 
@@ -606,6 +610,7 @@ class PipelineMission(MissionBase):
         p('light_conf', 0.4)                # ... and the confidence a box needs
         p('end_model', '')                  # a model with a pipe_end class used for the pipe's ends only, the
                                             # lights staying on light_detector (Ruth, Oct 25); '' = none
+        p('end_conf', 0.25)                 # ... and the confidence a pipe end needs (either model)
         p('light_min_frac', 0.02)           # smallest blob that counts: 0.02 in the pool (camera close,
                                             # the glow breaks into pieces); ~0.0005 at the lake, where a
                                             # ring ~1 m below is 0.05-6% of the picture (Oct 18)
@@ -715,7 +720,7 @@ class PipelineMission(MissionBase):
         if self.light_detector not in ('hsv', 'contrast', 'yolo'):
             raise ValueError(f"light_detector must be hsv, contrast or yolo, not {self.light_detector!r}")
         self.light_model, self.light_conf = g('light_model').strip(), float(g('light_conf'))
-        self.end_model = g('end_model').strip()
+        self.end_model, self.end_conf = g('end_model').strip(), float(g('end_conf'))
         self.yolo = None                    # the loaded model (light_detector:=yolo, or end_model), once needed
         self.yolo_failed = False
         led_boxes.V_MIN, led_boxes.S_MIN = int(g('light_v_min')), int(g('light_s_min'))
@@ -2630,7 +2635,7 @@ class PipelineMission(MissionBase):
         path = self.light_model if self.light_detector == 'yolo' else self.end_model
         if self.yolo is None and path and not self.yolo_failed:
             try:
-                self.yolo = led_boxes.YoloLights(path, self.light_conf)
+                self.yolo = led_boxes.YoloLights(path, self.light_conf, self.end_conf)
                 self.get_logger().info(f'    camera: the model {path} - '
                                        + ('lights and pipe ends' if self.light_detector == 'yolo' else 'pipe ends only'))
             except Exception as ex:
@@ -2914,7 +2919,7 @@ class PipelineMission(MissionBase):
         if self.yolo is None or cam is None or cam.end_seen is None:
             return None
         t, d = cam.end_seen
-        if time.monotonic() - t > END_SEEN_S or d['conf'] < self.light_conf or abs(d['x']) > END_MID_X:
+        if time.monotonic() - t > END_SEEN_S or d['conf'] < self.end_conf or abs(d['x']) > END_MID_X:
             return None
         if d['y'] > (-0.2 if ahead else END_BEHIND_Y):
             return None

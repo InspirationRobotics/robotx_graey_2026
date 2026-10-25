@@ -215,11 +215,13 @@ YOLO_COLOURS = {'red_light': 'red', 'green_light': 'green', 'blue_light': 'blue'
 class YoloLights:
     """yolo(bgr) -> the same list contrast_lights gives, from a trained model, on the full-size down
     picture (BGR, 640x360). Classes red_light / green_light / blue_light (or red / green / blue) are the lights' colours;
-    any other class (a pipe end, later) keeps its own name as the colour."""
+    any other class (a pipe end, later) keeps its own name as the colour. A light needs conf, a pipe end
+    end_conf (the pipe-end model scores real ends 0.28-0.55, Oct 25)."""
 
-    def __init__(self, path, conf=0.4):
+    def __init__(self, path, conf=0.4, end_conf=None):
         from ultralytics import YOLO        # slow import, and only in the graey container
         self.model, self.conf = YOLO(path), conf
+        self.end_conf = conf if end_conf is None else end_conf
         try:
             import torch
             self.device = 0 if torch.cuda.is_available() else 'cpu'
@@ -228,11 +230,13 @@ class YoloLights:
 
     def __call__(self, bgr):
         h, w = bgr.shape[:2]
-        res = self.model.predict(bgr, conf=self.conf, verbose=False, device=self.device)[0]
+        res = self.model.predict(bgr, conf=min(self.conf, self.end_conf), verbose=False, device=self.device)[0]
         out = []
         for b in res.boxes:
             x0, y0, x1, y1 = (float(v) for v in b.xyxy[0].tolist())
             name = res.names[int(b.cls[0])]
+            if float(b.conf[0]) < (self.end_conf if name == 'pipe_end' else self.conf):
+                continue
             out.append({'colour': YOLO_COLOURS.get(name, name), 'conf': float(b.conf[0]),
                         'x': (x0 + x1) / w - 1, 'y': (y0 + y1) / h - 1,
                         'share': (x1 - x0) * (y1 - y0) / float(w * h), 'hue': None,
