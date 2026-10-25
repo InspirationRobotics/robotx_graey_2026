@@ -21,7 +21,7 @@ from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.pixhawk.mavlink import Link
 from .bridge_estimator import BridgeEstimator, yaw
 from .odometry_profile import PROFILE
-from .maintenance_safety import require_maintenance
+from .maintenance_safety import require_maintenance, navigation_start_reason
 from .automatic_recovery import AutomaticRecovery
 from .land_north import LandNorth
 from .track_north import TrackNorth
@@ -257,7 +257,7 @@ class FusedNavBridge(SteadyNode):
 
     def prepare(self, request, response):
         try:
-            require_maintenance()
+            require_maintenance(check=navigation_start_reason)
             now = time.monotonic()
             if request.data is not True:
                 raise ValueError('Operator must confirm floating at the water surface')

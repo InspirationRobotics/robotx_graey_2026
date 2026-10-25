@@ -1,0 +1,66 @@
+[
+  {
+    "run": "a5ddd76657",
+    "site": "pool",
+    "passed": true,
+    "stages": [
+      "STARTING",
+      "WAIT_SURFACE",
+      "GUIDED",
+      "ARM",
+      "TRANSIT",
+      "TRANSIT_CHECK",
+      "TRANSIT",
+      "STOP",
+      "DISARM",
+      "COMPLETE"
+    ],
+    "dvl_error_rejected": true,
+    "gps_loss_observed": true,
+    "final_sensors": {
+      "gps": true,
+      "dvl": true,
+      "vn": true
+    },
+    "alignment_m": 9.901301773608214,
+    "north_offset_deg": -40.02422549345181,
+    "vertical_inputs": [
+      500
+    ],
+    "startup_requests": null,
+    "startup_bridge_count": null,
+    "qgc_forwarding": false
+  },
+  {
+    "run": "47b8597a39",
+    "site": "miramar",
+    "passed": true,
+    "stages": [
+      "STARTING",
+      "WAIT_SURFACE",
+      "GUIDED",
+      "ARM",
+      "TRANSIT",
+      "TRANSIT_CHECK",
+      "TRANSIT",
+      "STOP",
+      "DISARM",
+      "COMPLETE"
+    ],
+    "dvl_error_rejected": true,
+    "gps_loss_observed": true,
+    "final_sensors": {
+      "gps": true,
+      "dvl": true,
+      "vn": true
+    },
+    "alignment_m": 9.900172371751232,
+    "north_offset_deg": -40.03363180405091,
+    "vertical_inputs": [
+      500
+    ],
+    "startup_requests": 2,
+    "startup_bridge_count": 1,
+    "qgc_forwarding": false
+  }
+]

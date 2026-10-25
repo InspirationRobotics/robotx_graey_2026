@@ -11,7 +11,7 @@
 <label><input type="checkbox" id="calConfirm">I read the rotation instructions and will maintain disarm, kill and ESC-off throughout.</label>
 <button id="calibrate" disabled>Calibrate VN</button><progress id="progress" value="0" max="120"></progress><p id="coverage" class="note">Six-face coverage unavailable</p>
 <p class="note">The normal VN reader performs calibration itself. No competing serial reader or duplicate navigation node is launched. Attitude input and odometry are withheld during calibration.</p></section>
-<section class="card" style="margin-top:18px"><h2>2 · Start Navigation</h2><p>Start the navigation data path and establish surface pressure zero. No stationary qualification or sensor checklist. Health is displayed live; north is learned during the mission’s initial 10 m track.</p><label><input type="checkbox" id="surfaceConfirm">Graey is currently floating at the water surface, disarmed and killed, with ESC power off.</label>
+<section class="card" style="margin-top:18px"><h2>2 · Start Navigation</h2><p>Start the navigation data path and establish surface pressure zero. No stationary qualification or sensor checklist. Health is displayed live; north is learned during the mission’s initial 10 m track.</p><label><input type="checkbox" id="surfaceConfirm">Graey is floating at the surface and under manual control; no autonomous mission is running.</label>
 <button id="prepare" disabled>Start Navigation</button><p class="note">Startup never arms or restores ESC power. It starts navigation; sensor and estimator status remain visible without a qualification loop.</p></section></div>
 <section class="card" style="margin-top:18px"><h2>3 · Navigation health</h2><p id="healthStatus" role="status">Waiting for supervisor status.</p><p>Jetson reports estimator health. Individual sensor dropouts do not stop the mission. Start Mission aligns over 10 m, then travels continuously.</p></section>
 <section class="card" style="margin-top:18px"><h2>Live preparation evidence</h2><dl>
@@ -22,6 +22,7 @@
 'use strict';const $=id=>document.getElementById(id);let state=null,received=0,sending=false;
 function sample(name){const s=state?.navigation?.streams?.[name];return s?.fresh?s.data:null}
 function render(){const fresh=state&&performance.now()-received<2000,c=state?.controller||{},j=state?.job||{},v=sample('vn_calibration'),b=sample('bridge'),s=sample('supervisor'),a=b?.north_alignment||s?.north_alignment;
+const startSafe=fresh&&c.online===true&&c.vehicle_fresh===true&&['MANUAL','STABILIZE'].includes(c.mode)&&c.mission_claimed===false&&c.autonomous===false;
 const safe=fresh&&c.online===true&&c.vehicle_fresh===true&&c.armed===false&&c.sa_active===true&&c.esc_commanded_on===false&&c.mission_claimed===false&&c.autonomous===false;
 $('status').textContent=!fresh?'Connection stale — controls disabled':`${j.phase||'idle'} · ${j.message||'Read instructions before starting'}`;
 $('safety').textContent=fresh&&c.vehicle_fresh?`${c.armed?'ARMED':'disarmed'} · kill ${c.sa_active?'engaged':'released'} · ESC ${c.esc_commanded_on?'on':'off'}${c.vehicle_fresh?'':' · vehicle telemetry unavailable'}`:'Unavailable';
@@ -32,7 +33,7 @@ $('gpsQuality').textContent=fresh&&g?`${g.qualified?'Qualified':g.reason} · pos
 $('depth').textContent=fresh&&b?`${b.surface_pressure_hpa?.toFixed(2)??'—'} hPa / ${b.depth_m?.toFixed(2)??'—'} m`:'Unavailable';$('odometry').textContent=fresh&&b?`${b.transmitting?'Transmitting':'Withheld'} · ${b.healthy?'healthy':b.fault||'waiting for inputs'}`:'Unavailable';
 $('cube').textContent=fresh&&s?`${s.mode} · ${s.reason}`:'Unavailable';$('log').textContent=v?.log||'None';$('coverage').textContent=v?.faces?'Six-face samples: '+v.faces.join(' / '):'Six-face coverage unavailable';
 $('progress').value=v?.phase==='collecting'?120-v.remaining_s:v?.phase==='collected'?120:0;
-$('calibrate').disabled=sending||!safe||j.busy||!$('calConfirm').checked;$('prepare').disabled=sending||!safe||j.busy||!$('surfaceConfirm').checked;$('cancel').disabled=sending||!fresh||!j.busy;
+$('calibrate').disabled=sending||!safe||j.busy||!$('calConfirm').checked;$('prepare').disabled=sending||!startSafe||j.busy||!$('surfaceConfirm').checked;$('cancel').disabled=sending||!fresh||!j.busy;
 
 }
 async function act(action){if(sending)return;sending=true;render();try{const response=await fetch('/api/calibration',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,confirmed:action==='calibrate'?$('calConfirm').checked:$('surfaceConfirm').checked,surface_confirmed:$('surfaceConfirm').checked,alignment_mode:'gps'})});const result=await response.json();if(!response.ok||!result.ok)throw Error(result.msg||'Request rejected');$('message').textContent='Request accepted. Follow confirmed live instructions above.';$('calConfirm').checked=false;$('surfaceConfirm').checked=false;}catch(error){$('message').textContent=error.message;}finally{sending=false;render();}}

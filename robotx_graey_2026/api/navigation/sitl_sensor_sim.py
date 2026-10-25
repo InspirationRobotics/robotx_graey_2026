@@ -66,7 +66,7 @@ class SitlSensorSim(Node):
         if not self.control_fixture:return
         try:
             d=json.loads(msg.data)
-            for name in ('vn','dvl'):
+            for name in ('vn','dvl','dvl_error'):
                 if name in d:self.drop_until[name]=time.monotonic()+max(0.,min(30.,float(d[name])))
         except (ValueError,TypeError):pass
 
@@ -84,7 +84,7 @@ class SitlSensorSim(Node):
         if getattr(self,'control_fixture',False) and heartbeat and now-heartbeat['received']<1.:
             armed=heartbeat['armed']
             self.control_pub.publish(String(data=json.dumps(dict(
-                session='isolated-sitl',vehicle_fresh=True,online=True,
+                session='isolated-sitl',revision=int(now*10),vehicle_fresh=True,online=True,
                 mode=heartbeat['mode'],armed=armed,sa_active=not armed,
                 esc_commanded_on=armed,mission_claimed=self.claimed,autonomous=False,inhibit=''))))
         attitude, local = self.latest.get('attitude'), self.latest.get('local')
@@ -112,6 +112,7 @@ class SitlSensorSim(Node):
         if now>=self.drop_until.get('vn',0.):self.imu_pub.publish(imu)
         sample = dict(stamp_ns=stamp_ns, velocity=body_velocity, valid=True,
                       sensor_time=int(now*1_000_000))
+        if now<self.drop_until.get('dvl_error',0.):sample['velocity']=[3.,-3.,0.]
         if now>=self.drop_until.get('dvl',0.):self.dvl_pub.publish(String(data=json.dumps(sample, allow_nan=False)))
         self.valid_pub.publish(Bool(data=True))
         twist = TwistWithCovarianceStamped()

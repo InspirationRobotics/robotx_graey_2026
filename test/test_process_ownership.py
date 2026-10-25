@@ -75,7 +75,7 @@ class ProcessDisplayTests(unittest.TestCase):
         process = Mock(DEVNULL=-3, STDOUT=-2)
         ns = dict(os=os, subprocess=process)
         exec(compile(ast.Module(body=nodes, type_ignores=[]), 'gui_node.py', 'exec'), ns)
-        for name in ('dvl_node', 'vn100_node', 'nav_ekf_bridge', 'navigation_supervisor'):
+        for name in ('dvl_node', 'vn100_node', 'fused_nav_bridge', 'nav_ekf_bridge', 'navigation_supervisor'):
             for argv in (['ros2', 'run', 'robotx_graey_2026', name],
                          ['/usr/bin/python3', '/install/lib/robotx_graey_2026/'+name]):
                 with self.subTest(argv=argv), self.assertRaises(ValueError):

@@ -18,6 +18,8 @@ async function page(state){
  let p=await page(data);assert(p.e.prepare.disabled);p.e.surfaceConfirm.checked=true;p.refresh();assert(!p.e.prepare.disabled);
  await p.e.prepare.onclick();assert.equal(p.posts[0].alignment_mode,'gps');assert(p.posts[0].surface_confirmed);
  p.expire();assert(p.e.prepare.disabled);
+ p=await page({...data,controller:{...safe,armed:true,sa_active:false,esc_commanded_on:true}});p.e.surfaceConfirm.checked=true;p.refresh();assert(!p.e.prepare.disabled);assert(p.e.calibrate.disabled);
+ p=await page({...data,controller:{...safe,mission_claimed:true}});p.e.surfaceConfirm.checked=true;p.refresh();assert(p.e.prepare.disabled);
  assert(!html.includes('id="alignAuto"'));
  assert(html.includes('10 m track'));
  console.log('GPS track calibration GUI tests passed');

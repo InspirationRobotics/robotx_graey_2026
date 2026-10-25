@@ -98,7 +98,7 @@ class TransportTests(unittest.TestCase):
         self.clock = NS(now=10.)
         ns = dict(ContinuousEstimator=ContinuousEstimator, SteadyNode=object, math=math, json=json, String=NS, PROFILE=PROFILE,
                   yaw=yaw, time=NS(monotonic=lambda: self.clock.now),
-                  statistics=statistics, BridgeEstimator=BridgeEstimator,RelativeEstimator=RelativeEstimator,TrackNorth=TrackNorth, require_maintenance=Mock(), AutomaticRecovery=AutomaticRecovery)
+                  statistics=statistics, BridgeEstimator=BridgeEstimator,RelativeEstimator=RelativeEstimator,TrackNorth=TrackNorth, require_maintenance=Mock(), navigation_start_reason=Mock(), AutomaticRecovery=AutomaticRecovery)
         exec(compile(tree, str(path), 'exec'), ns)
         self.b = ns['FusedNavBridge'].__new__(ns['FusedNavBridge'])
         self.b.est = BridgeEstimator()
@@ -232,6 +232,12 @@ class TransportTests(unittest.TestCase):
         self.assertTrue(response.success)
         self.assertTrue(self.b.est.started)
         self.assertTrue(self.b.output_permitted)
+        self.assertEqual(self.b.reset_counter,0)
+        original=self.b.est
+        self.b.est.filter.x[0]=4.5
+        self.assertTrue(self.b.prepare(NS(data=True),NS()).success)
+        self.assertIs(self.b.est,original)
+        self.assertEqual(self.b.est.filter.x[0],4.5)
         self.assertEqual(self.b.reset_counter,0)
 
     def test_profile_never_selects_native_gps(self):

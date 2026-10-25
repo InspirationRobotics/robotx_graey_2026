@@ -5,7 +5,7 @@ import queue
 import threading
 import time
 import uuid
-from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason
+from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason, navigation_start_reason
 
 
 class ServiceQueue:
@@ -94,7 +94,7 @@ class CalibrationJobs:
             if action=='cancel':
                 self.job['cancel']=True
                 return self.snapshot()
-            reason=maintenance_reason(self.controller())
+            reason=(navigation_start_reason if action=='prepare' else maintenance_reason)(self.controller())
             if reason or self.mission_running():
                 raise ValueError(reason or 'Stop the mission before calibration/startup')
             if self.job.get('busy'):raise ValueError('An operation is already running')

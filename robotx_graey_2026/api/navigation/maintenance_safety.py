@@ -12,6 +12,15 @@ def maintenance_reason(c):
     return ''
 
 
+def navigation_start_reason(c):
+    """Enable an existing data path remotely; not hardware calibration/reboot."""
+    if not (c.get('online') is True and c.get('vehicle_fresh') is True
+            and c.get('mission_claimed') is False and c.get('autonomous') is False
+            and c.get('mode') in ('MANUAL','STABILIZE')):
+        return 'Take manual control and stop autonomy; fresh controller telemetry required'
+    return ''
+
+
 def require_maintenance(check=maintenance_reason):
     with urllib.request.urlopen('http://localhost:8090/api/controller', timeout=.2) as source:
         c = json.load(source)

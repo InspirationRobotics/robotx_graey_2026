@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from robotx_graey_2026.api.gui.calibration_jobs import CalibrationJobs
-from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason
+from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason, navigation_start_reason
 from robotx_graey_2026.api.navigation.vn_calibration import VNCalibration
 
 
@@ -17,6 +17,16 @@ class CalibrationJobsTests(unittest.TestCase):
         self.job.run('prepare')
         self.assertEqual(self.calls,[('prepare',True)])
         self.assertEqual(self.job.snapshot()['phase'],'ready')
+
+    def test_remote_start_allows_armed_manual_but_not_autonomy(self):
+        self.c.update(armed=True,sa_active=False,esc_commanded_on=True)
+        self.assertEqual(navigation_start_reason(self.c),'')
+        self.assertTrue(maintenance_reason(self.c)) # Calibration still needs disabled propulsion.
+        with patch('threading.Thread') as thread:
+            self.job.request(dict(action='prepare',surface_confirmed=True))
+            thread.return_value.start.assert_called_once()
+        for key,value in [('mode','GUIDED'),('mission_claimed',True),('vehicle_fresh',False)]:
+            self.assertTrue(navigation_start_reason(dict(self.c,**{key:value})))
 
     def test_retired_actions_rejected(self):
         for action in ('align_land','align_auto','recover_dvl','compass_start'):
