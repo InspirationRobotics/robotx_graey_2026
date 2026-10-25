@@ -21,6 +21,12 @@ class RelativeEstimator(BridgeEstimator):
         self.gps.quality.max_accuracy=1.5
         self.gps.quality.motion_margin=4.
 
+    def start_dvl_gap(self):
+        first=self.initialized and self.dvl_gap_start is None
+        super().start_dvl_gap()
+        if first and self.north_alignment.active:
+            self.north_alignment.reject('DVL gap: collecting a new measured north track', reset=True)
+
     def apply_gps(self, now, fix):
         sample=self.at(fix['cube_fix_time_us']/1e6+self.gps.clock.offset)
         if sample is None or self.dvl_gap_start is not None:
@@ -66,7 +72,10 @@ class RelativeEstimator(BridgeEstimator):
                 else:self.course_heading.reset_window('Near waypoint; geographic heading correction frozen')
             else:self.last_stationary_fix_at=now
         self.last_fix,self.last_correction=dict(fix),now
-        self.horizontal_variance=max(.25,min(self.horizontal_variance,fix['accuracy']**2))
+        # GPS corrects the map transform, not Cube-local displacement. It must
+        # not erase uncertainty in unobserved local displacement after a gap.
+        if self.missing_distance_bound == 0:
+            self.horizontal_variance=max(.25,min(self.horizontal_variance,fix['accuracy']**2))
         self.event.update(decision='accepted',reason='GPS admitted for Jetson geographic map; Cube frame unchanged')
         return True
 
@@ -90,7 +99,7 @@ class RelativeEstimator(BridgeEstimator):
         local_ready=(self.initialized and not self.fault and not self.heading_continuity_lost and self.fresh(self.imu_at,now)
             and self.fresh(self.depth_at,now) and (self.motion_valid and self.fresh(self.motion_at,now)
             or s['dvl_continuity']['prediction_active']))
-        s.update(healthy=bool(local_ready),navigation_valid=bool(local_ready and self.horizontal_variance<=25),
+        s.update(healthy=bool(local_ready),navigation_valid=bool(local_ready),
             coordinate_frame='fixed_local',local_navigation_ready=bool(local_ready),map_transform=self.map.snapshot(),
             map_position_ne=self.map.to_map(self.position) if self.map.angle is not None else None,
             map_heading_deg=(yaw(self.orientation())+self.map.angle)%360 if self.map.angle is not None else None)

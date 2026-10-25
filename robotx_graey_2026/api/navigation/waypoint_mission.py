@@ -1,4 +1,5 @@
 """Operator-started waypoint mission; the same controller runs in isolated SITL."""
+from .prediction_policy import cube_prediction_allowed
 import json
 import math
 import os
@@ -39,7 +40,8 @@ class WaypointMission(Node):
         if not cfg['run_id'] or (not self.sim and not cfg['commissioned']):
             raise ValueError('Mission run ID and commissioned live configuration required')
         plan=json.loads(cfg['plan_json'])
-        self.logic = (GuidedSurfaceRun if plan.get('mode','surface')=='surface' else WaypointRun)(plan,cfg['run_id'],time.monotonic())
+        if plan.get('mode','surface')!='surface':raise ValueError('Only surface missions are supported')
+        self.logic = GuidedSurfaceRun(plan,cfg['run_id'],time.monotonic())
         self.result_file = cfg['result_file']
         self.link = Link(cfg['mavlink'], 198, self.get_logger(),system=255 if isinstance(self.logic,GuidedSurfaceRun) else 1)
         self.view = NavigationView()
@@ -166,21 +168,16 @@ class WaypointMission(Node):
             return s.get('data', {}) if s.get('age', math.inf) < limit else {}
         hb, local, att = sample('heartbeat', 2), sample('local', .5), sample('attitude', .5)
         glob, origin = sample('global', .5), sample('cube_origin', 10)
-        s = self.supervisor
-        fresh = bool(hb and local and att and origin and self.view.position_healthy()
-                     and 0 <= now-self.supervisor_time < .7
-                     and 0 <= now-s.get('published_monotonic', -math.inf) < .7)
+        s = self.supervisor  # display only
+        b=getattr(self,'bridge',{})
         ned, velocity = local.get('ned'), local.get('velocity')
-        depth = s.get('depth_m')
-        fresh = fresh and all(isinstance(v, (int, float)) and math.isfinite(v)
-                             for v in (*(ned or [None]), *(velocity or [None]),
-                                       *att.get('rpy', [None]), depth))
+        depth=b.get('depth_m') if b.get('depth_m') is not None else 0.
+        fresh=bool(hb and local and att and ned and velocity
+            and all(isinstance(v,(int,float)) and math.isfinite(v)
+                    for v in (*ned,*velocity,*att.get('rpy',[None])))
+            and 0<=now-getattr(self,'bridge_time',-math.inf)<1.)
         failure = ''
-        limits_ready=self.limits_ready(now)
-        if not limits_ready:
-            fresh=False
-            if self.logic.stage!='WAIT_SURFACE':
-                failure='Shallow waypoint vertical speed/acceleration limits unavailable or excessive'
+        limits_ready=True  # STABILIZE sends neutral vertical; no depth controller.
         if not self.sim:
             c = self.safety
             if not (0 <= now-self.safety_time < 2 and c.get('vehicle_fresh')
@@ -197,16 +194,7 @@ class WaypointMission(Node):
             and all(isinstance(v,(int,float)) and math.isfinite(v)
                     for v in (*ned,*velocity,*att.get('rpy',[None]),depth)))
         continuity=b.get('dvl_continuity') or {}
-        # Brief DVL loss permits bounded hold, never continued travel.
-        dvl_hold=bool(continuity.get('recovering') is True
-            and continuity.get('state')=='COASTING'
-            and 0<=continuity.get('gap_age_s',math.inf)<5.0
-            and 0<=continuity.get('position_sigma_m',math.inf)<=5.
-            and not continuity.get('requires_position_revalidation',True)
-            and b.get('initialized') is True and b.get('enabled') is True
-            and not b.get('heading_continuity_lost',True)
-            and (b.get('inputs') or {}).get('vn') is True
-            and 0<=now-(b.get('pressure_sample') or {}).get('received',-math.inf)<.5)
+        dvl_hold=cube_prediction_allowed(b,now,cube_fresh)
         hold_safe=bool(cube_fresh and not failure
             and 0<=now-getattr(self,'bridge_time',-math.inf)<.3
             and 0<=now-b.get('published_monotonic',-math.inf)<.3
@@ -232,6 +220,7 @@ class WaypointMission(Node):
             frame=GeographicFrame.restore(b.get('map_transform'))
             geographic=frame.to_geo(ned) if frame.angle is not None and ned else ((fix['lat'],fix['lon']) if gps_current else None)
         return dict(fresh=fresh, failure=failure, abort=self.aborted,bridge=b,
+            cube_prediction_healthy=bool(dvl_hold and not failure),
             surface_gps_current=gps_current,surface_gps_at_target=gps_at_target,
             dvl_continuity=b.get('dvl_continuity') if 0<=now-getattr(self,'bridge_time',-math.inf)<.3 else {},
             vertical_limits_verified=limits_ready,
@@ -255,7 +244,7 @@ class WaypointMission(Node):
         if not isinstance(self.logic,GuidedSurfaceRun) and self.logic.stage=='CHECK_SURFACE' and getattr(self,'measurement_stage',None)!='CHECK_SURFACE':
             self.surface_measurement=SurfaceMeasurement(duration=5.,tolerated_gps_gap=4.,tolerated_sensor_gap=1.5)
         self.measurement_stage=self.logic.stage
-        if self.logic.stage in ('WAIT_SURFACE','CHECK_SURFACE') or (isinstance(self.logic,GuidedSurfaceRun) and self.logic.stage in ('GUIDED','ARM')):
+        if not isinstance(self.logic,GuidedSurfaceRun) and self.logic.stage in ('WAIT_SURFACE','CHECK_SURFACE'):
             b=self.bridge if 0<=now-self.bridge_time<.3 else {}
             self.surface_measurement_status=self.surface_measurement.update(now,b)
         o['surface_measurement']=self.surface_measurement_status

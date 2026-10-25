@@ -5,6 +5,7 @@ import math
 import statistics
 from collections import deque
 from robotx_graey_2026.api.navigation.relative_estimator import RelativeEstimator
+from robotx_graey_2026.api.navigation.continuous_estimator import ContinuousEstimator
 from pathlib import Path
 from types import SimpleNamespace as NS
 import unittest
@@ -95,7 +96,7 @@ class TransportTests(unittest.TestCase):
         tree = ast.parse(path.read_text())
         tree.body = [n for n in tree.body if isinstance(n, ast.ClassDef)]
         self.clock = NS(now=10.)
-        ns = dict(SteadyNode=object, math=math, json=json, String=NS, PROFILE=PROFILE,
+        ns = dict(ContinuousEstimator=ContinuousEstimator, SteadyNode=object, math=math, json=json, String=NS, PROFILE=PROFILE,
                   yaw=yaw, time=NS(monotonic=lambda: self.clock.now),
                   statistics=statistics, BridgeEstimator=BridgeEstimator,RelativeEstimator=RelativeEstimator,TrackNorth=TrackNorth, require_maintenance=Mock(), AutomaticRecovery=AutomaticRecovery)
         exec(compile(tree, str(path), 'exec'), ns)
@@ -223,14 +224,15 @@ class TransportTests(unittest.TestCase):
         self.b.link.odometry.assert_not_called()
         self.b.link.command.assert_not_called()
 
-    def test_prepare_rejects_unstable_pressure_or_failed_calibration(self):
-        self.b.params = {k:(10.,v) for k,v in dict(PROFILE,COMPASS_LEARN=0).items()}
-        for phase,spread in (('failed',0.),('collecting',0.),('idle',20.)):
-            self.b.vn_calibration = (10.,dict(phase=phase))
-            self.b.pressures = deque((8.+i*.1,1000.+spread*i/20) for i in range(21))
-            response = self.b.prepare(NS(data=True),NS())
-            self.assertFalse(response.success)
-            self.assertEqual(self.b.reset_counter,0)
+    def test_continuous_start_does_not_qualify_sensors(self):
+        self.b.est=ContinuousEstimator()
+        self.b.settings['surface_pressure_hpa']=0.
+        self.b.vn_calibration=(10.,dict(phase='idle'))
+        response=self.b.prepare(NS(data=True),NS())
+        self.assertTrue(response.success)
+        self.assertTrue(self.b.est.started)
+        self.assertTrue(self.b.output_permitted)
+        self.assertEqual(self.b.reset_counter,0)
 
     def test_profile_never_selects_native_gps(self):
         for slot in (1, 2, 3):
@@ -239,6 +241,8 @@ class TransportTests(unittest.TestCase):
 
     def test_fast_receive_polling_does_not_flood_odometry(self):
         self.b.params = {k: (10., v) for k, v in dict(PROFILE,COMPASS_LEARN=0).items()}
+        self.b.est=ContinuousEstimator()
+        self.b.est.imu(10.,(1.,0.,0.,0.),(0.,0.,0.))
         self.b.est.status = lambda now: dict(healthy=True)
         self.b.tick()
         self.clock.now = 10.01

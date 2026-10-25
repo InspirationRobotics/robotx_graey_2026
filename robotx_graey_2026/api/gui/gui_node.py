@@ -172,9 +172,8 @@ def waypoint_simulation():
 
 def waypoint_capabilities():
     sim = waypoint_simulation()
-    enabled = sim or os.environ.get('GRAEY_WAYPOINT_ENABLED') == '1'
-    if calibration_jobs is not None and calibration_jobs.snapshot().get('action'):
-        enabled = calibration_jobs.waypoint_permission and not calibration_jobs.snapshot().get('busy')
+    bridge=navigation.snapshot()['streams'].get('bridge',{})
+    enabled=bool(bridge.get('age',float('inf'))<1. and bridge.get('data',{}).get('enabled'))
     return dict(simulation=sim, enabled=enabled,
                 pool_registration='approximate',
                 mapping_note=('Screenshot scale/anchor are approximate, not surveyed. Live pool-image starts are blocked.'

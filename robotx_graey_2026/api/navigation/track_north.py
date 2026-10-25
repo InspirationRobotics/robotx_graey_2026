@@ -17,7 +17,7 @@ class TrackNorth:
         self.rows = []
         self.active = self.approved = False
         self.last_fix = None
-        self.reason = 'Prepare surface sensors, then explicitly start the 5 m alignment run'
+        self.reason = 'Prepare surface sensors, then start the mission with a clear 10 m alignment corridor'
 
     def begin(self):
         self.__init__(self.maximum_uncertainty_deg,self.maximum_gap_s)

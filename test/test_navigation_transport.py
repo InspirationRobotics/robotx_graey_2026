@@ -25,71 +25,39 @@ def load_callbacks(filename, classname):
     return (namespace[classname].__new__(namespace[classname]), clock)
 
 class TelemetryTests(unittest.TestCase):
-
     def setUp(self):
-        (self.s, self.clock) = load_callbacks('navigation_supervisor.py', 'NavigationSupervisor')
-        (self.s.samples, self.s.stamps, self.s.params) = ({}, {}, {})
-        self.s.settings = dict(pressure_message='SCALED_PRESSURE2', surface_pressure_hpa=0.0, water_density=1025.0)
-        self.s.boot_ms = self.s.cube_origin = self.s.last_gps = self.s.last_gps_time = None
-        self.s.epoch = 'original'
-        self.s.logic = NS(fault='',active=False)
-        self.s.logic.pending = None
-        self.s.switch_trace = None
-        self.s.get_logger = Mock(return_value=Mock())
-        self.s.bridge_identity = BridgeIdentity()
-        self.s.gps_quality = GPSQuality()
-        self.s.gps_quality.motion(self.clock.now, (0, 0, 0), True)
+        self.s,self.clock=load_callbacks('navigation_supervisor.py','NavigationSupervisor')
+        self.s.bridge={};self.s.received=None;self.s.mission={};self.s.pub=Mock()
 
-    def receive(self, kind, **fields):
-        self.s.consume(kind, NS(get_srcSystem=lambda : 1, get_srcComponent=lambda : 1, **fields))
+    def status(self):
+        self.s.tick()
+        return json.loads(self.s.pub.publish.call_args.args[0].data)
 
-    def test_bridge_duplicates_latch_fault_and_malformed_status_does_not_refresh(self):
-        for data in ('null', '[]', '42', '{}', '{"instance": 12}'):
-            self.s.bridge_status(NS(data=data))
-        self.assertNotIn('bridge', self.s.samples)
-        for instance in ('first', 'second', 'first'):
-            self.s.bridge_status(NS(data=json.dumps(dict(instance=instance, healthy=True))))
-            self.clock.now += 0.1
-        self.assertIn('Multiple', self.s.logic.fault)
-        self.clock.now += 2
-        self.s.bridge_status(NS(data='{"instance":"first","healthy":true}'))
-        self.assertIn('Multiple', self.s.logic.fault)
+    def test_read_only_health_projection_and_staleness(self):
+        row=dict(estimator_health=dict(state='DEGRADED',usable=True),enabled=True)
+        self.s.observe(NS(data=json.dumps(row)))
+        status=self.status()
+        self.assertTrue(status['read_only']);self.assertTrue(status['navigation_ready'])
+        self.assertEqual(status['state'],'DEGRADED')
+        self.assertFalse(status['reference_current'])
+        self.clock.now+=2
+        self.assertFalse(self.status()['navigation_ready'])
+        self.assertEqual(self.s.bridge,row) # Observation never changes the producer.
 
-    def test_cube_reboot_and_origin_change_invalidate_frame(self):
-        self.receive('LOCAL_POSITION_NED', time_boot_ms=10000, x=0.0, y=0.0, z=0.0)
-        self.receive('LOCAL_POSITION_NED', time_boot_ms=100, x=0.0, y=0.0, z=0.0)
-        self.assertNotEqual(self.s.epoch, 'original')
-        self.assertIn('restarted', self.s.logic.fault)
-        self.receive('GPS_GLOBAL_ORIGIN', latitude=1, longitude=2, altitude=3)
-        self.receive('GPS_GLOBAL_ORIGIN', latitude=2, longitude=2, altitude=3)
-        self.assertIn('origin changed', self.s.logic.fault)
+    def test_malformed_messages_cannot_crash_or_refresh(self):
+        for data in ('null','[]','42','broken'):
+            self.s.observe(NS(data=data));self.s.observe_mission(NS(data=data))
+        self.assertIsNone(self.s.received)
+        self.assertEqual(self.s.mission,{})
+        self.status()
 
-    def test_observation_maintenance_pause_does_not_latch_but_real_faults_do(self):
-        row=dict(instance='one',fusion_policy='bridge_odometry',published_monotonic=10.,
-                 enabled=False,fault='Navigation maintenance; Prepare required before reuse')
-        self.s.bridge_status(NS(data=json.dumps(row)))
-        self.assertEqual(self.s.logic.fault,'')
-        row.update(enabled=True,fault='')
-        self.s.bridge_status(NS(data=json.dumps(row)))
-        self.assertEqual(self.s.logic.fault,'')
-        row.update(enabled=False,fault='DVL continuity fault')
-        self.s.bridge_status(NS(data=json.dumps(row)))
-        self.assertEqual(self.s.logic.fault,'DVL continuity fault')
-        row['fault']='Navigation maintenance; Prepare required before reuse'
-        self.s.bridge_status(NS(data=json.dumps(row)))
-        self.assertEqual(self.s.logic.fault,'DVL continuity fault')
-
-    def test_maintenance_pause_during_active_navigation_still_latches(self):
-        self.s.logic.active=True
-        row=dict(instance='one',fusion_policy='bridge_odometry',published_monotonic=10.,
-                 enabled=False,fault='Navigation maintenance; Prepare required before reuse')
-        self.s.bridge_status(NS(data=json.dumps(row)))
-        self.assertEqual(self.s.logic.fault,row['fault'])
-
-    def test_uninitialized_or_constant_position_ekf_is_not_healthy(self):
-        for flags in (1 | 2 | 8 | 32 | 32768, 1 | 2 | 8 | 32 | 128):
-            self.receive('EKF_STATUS_REPORT', flags=flags, velocity_variance=0.1, pos_horiz_variance=0.1, pos_vert_variance=0.1)
-            self.assertFalse(self.s.fresh('ekf'))
+    def test_no_command_or_service_authority(self):
+        source=(ROOT/'navigation_supervisor.py').read_text()
+        tree=ast.parse(source)
+        calls=[n.func.attr if isinstance(n.func,ast.Attribute) else n.func.id
+               for n in ast.walk(tree) if isinstance(n,ast.Call) and isinstance(n.func,(ast.Attribute,ast.Name))]
+        for forbidden in ('Link','create_service','create_client','set_mode','arm','disarm','param_set'):
+            self.assertNotIn(forbidden,calls)
 
 class RuntimeRegressionTests(unittest.TestCase):
 

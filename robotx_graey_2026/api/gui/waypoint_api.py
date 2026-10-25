@@ -19,40 +19,27 @@ class WaypointAPI:
             return item['data']
         hb = fresh('heartbeat', 2.)
         cube = nav.get('cube_estimate', {})
-        s = fresh('supervisor')
-        bridge=streams.get('bridge',{})
-        relative=bridge.get('age',math.inf)<.5 and bridge.get('data',{}).get('coordinate_frame')=='fixed_local'
-        if hb.get('armed') and hb.get('mode_id') not in (0, 19):
-            raise ValueError('Armed start requires MANUAL or STABILIZE pilot mode')
-        if not (cube.get('local_valid') if relative else cube.get('valid')) or (not relative and cube.get('heading_deg') is None):
-            raise ValueError('Healthy Cube location and heading required')
-        if not s.get('configuration_verified') or s.get('mode') != 'Active':
-            raise ValueError('Supervisor/source profiles must be commissioned and active')
-        if s.get('surfaced') is not True or s.get('state') == 'Fault':
-            raise ValueError('Calibrated surface state without a supervisor fault required')
-        local = fresh('local')['ned']
-        origin = streams.get('cube_origin', {})
-        if origin.get('age', math.inf) > 10:
-            raise ValueError('Cube origin unavailable')
-        o = origin['data']
-        origin = (o['lat'], o['lon'], o['alt'])
-        if relative:
-            b=bridge['data'];fix=b.get('gps_observation') or {}
-            if not b.get('local_navigation_ready'):
-                raise ValueError('Prepared local navigation required: '+(b.get('fault') or 'check fresh VN, DVL and calibrated depth'))
-            gps=b.get('gps_admission') or {}
-            if not gps.get('qualified'):
-                raise ValueError('Qualified GPS required: '+(gps.get('reason') or 'GPS admission unavailable'))
-            return dict(local=local,origin=origin,session=nav['session'],relative=True,start_gps=(fix['lat'],fix['lon']))
-        if math.dist(geo_to_ne(cube['lat'], cube['lon'], origin), local[:2]) > .75:
-            raise ValueError('Cube global and local coordinates disagree')
-        return dict(local=local, origin=origin, session=nav['session'])
-
+        b=fresh('bridge')
+        if hb.get('armed') and hb.get('mode_id') not in (0,19):
+            raise ValueError('Start in MANUAL or STABILIZE')
+        if not b.get('enabled'):raise ValueError('Start navigation first')
+        if not (b.get('estimator_health') or {}).get('usable'):
+            raise ValueError('Navigation estimate initializing or all sensors lost')
+        local=fresh('local')['ned']
+        origin_item=streams.get('cube_origin',{}).get('data') or {}
+        fix=(b.get('gps_admission') or {}).get('fix') or {}
+        frame=b.get('map_transform') or {}
+        anchor=frame.get('origin') or ([fix.get('lat'),fix.get('lon')] if fix.get('fix',0)>=3 else None)
+        if not anchor or any(v is None or not math.isfinite(v) for v in anchor):
+            raise ValueError('A geographic reference is needed to select a waypoint')
+        origin=(origin_item.get('lat',anchor[0]),origin_item.get('lon',anchor[1]),origin_item.get('alt',0.))
+        return dict(local=local,origin=origin,session=nav['session'],relative=True,start_gps=tuple(anchor))
     def preview(self, plan, nav):
         plan = validate_plan(plan)
+        if plan['mode']!='surface':raise ValueError('Only surface missions are supported in navigation_new')
         base = self.baseline(nav)
         if base.get('relative') and plan.get('alignment_corridor_confirmed') is not True:
-            raise ValueError('Confirm the initial 5 m movement corridor and stopping clearance')
+            raise ValueError('Confirm the initial 10 m movement corridor and stopping clearance')
         target = geo_to_ne(plan['lat'], plan['lon'], base.get('start_gps',base['origin']))
         distance = math.hypot(*target) if base.get('relative') else math.dist(target, base['local'][:2])
         if not .3 <= distance <= 20:
@@ -72,7 +59,6 @@ class WaypointAPI:
         if self.clock()-item['created'] > 30:
             raise ValueError('Preview expired; select the point again')
         base = self.baseline(nav)
-        if (base['origin'][:2] != item['base']['origin'][:2] or base['session'] != item['base']['session']
-                or math.dist(base['local'], item['base']['local']) > .5):
+        if (base['origin'][:2] != item['base']['origin'][:2] or base['session'] != item['base']['session']):
             raise ValueError('Vehicle/frame moved since preview; select the point again')
         return item, False

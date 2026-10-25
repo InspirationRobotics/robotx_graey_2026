@@ -173,7 +173,7 @@ class Link:
                   0, TARGET_SYS, TARGET_COMP, FRAME_LOCAL_NED, MASK_POSVEL_YAWRATE,
                   n, e, down, vn, ve, vd, 0, 0, 0, 0, yaw_rate)
 
-    def odometry(self, pos, q, vel, rates, reset_counter=0, covariance=None, quality=0):
+    def odometry(self, pos, q, vel, rates, reset_counter=0, covariance=None, quality=0, velocity_covariance=None):
         """VN-100 attitude + DVL velocity + dead-reckoned position, as one ODOMETRY.
 
         Here rather than in nav_ekf_bridge so the guarded send covers it too - it
@@ -184,4 +184,4 @@ class Link:
                   pos[0], pos[1], pos[2], list(q),
                   vel[0], vel[1], vel[2], rates[0], rates[1], rates[2],
                   covariance if covariance is not None else COV_UNKNOWN,
-                  COV_UNKNOWN, reset_counter, EST_VIO, quality)
+                  velocity_covariance if velocity_covariance is not None else COV_UNKNOWN, reset_counter, EST_VIO, quality)

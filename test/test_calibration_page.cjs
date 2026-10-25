@@ -12,13 +12,13 @@ async function page(state){
 }
 (async()=>{
  assert(!html.includes('compassStart'));assert(!html.includes('COMPASS_LEARN'));
- assert(html.includes('Prepare Navigation'));
+ assert(html.includes('Start Navigation'));
  const safe={online:true,vehicle_fresh:true,armed:false,mode:'MANUAL',sa_active:true,esc_commanded_on:false,mission_claimed:false,autonomous:false};
  const data={controller:safe,job:{busy:false,phase:'idle'},navigation:{streams:{vn_calibration:{fresh:true,data:{phase:'idle'}}}}};
  let p=await page(data);assert(p.e.prepare.disabled);p.e.surfaceConfirm.checked=true;p.refresh();assert(!p.e.prepare.disabled);
  await p.e.prepare.onclick();assert.equal(p.posts[0].alignment_mode,'gps');assert(p.posts[0].surface_confirmed);
  p.expire();assert(p.e.prepare.disabled);
  assert(!html.includes('id="alignAuto"'));
- assert(html.includes('inside the STABILIZE waypoint mission'));
+ assert(html.includes('10 m track'));
  console.log('GPS track calibration GUI tests passed');
 })().catch(e=>{console.error(e);process.exit(1)});

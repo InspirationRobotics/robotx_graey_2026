@@ -255,7 +255,7 @@ class BridgeEstimator:
         # can reduce the resulting covariance.
         self.horizontal_variance = min(10000., (math.sqrt(self.horizontal_variance)+increase)**2)
         self.gap_bound = bound
-        if self.horizontal_variance > 25.:
+        if self.horizontal_variance > 25. and not getattr(self, 'fixed_local', False):
             self.fault = 'DVL continuity lost; position uncertainty requires revalidation'
             return
         if not self.fresh(self.imu_at,now) or not self.fresh(self.depth_at,now):

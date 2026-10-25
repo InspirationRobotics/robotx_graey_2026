@@ -10,9 +10,9 @@ async function render(data,options={}){
 }
 (async()=>{
   let e=await render({capabilities:{enabled:false},navigation:{streams:{},cube_estimate:{valid:false}}});
-  assert(e.start.disabled);assert.match(e.readiness.textContent,/commissioning disabled/);
-  assert.match(e.readiness.textContent,/Cube estimate unavailable/);
-  const ready={capabilities:{enabled:true,simulation:true},navigation:{streams:{supervisor:{fresh:true,data:{mode:'Active',configuration_verified:true,surfaced:true,state:'GPS aiding admitted'}}},cube_estimate:{valid:true,lat:32.9,lon:-117,heading_deg:0,depth_m:0}}};
+  assert(e.start.disabled);assert.match(e.readiness.textContent,/Start navigation first/);
+  assert.match(e.readiness.textContent,/Cube control telemetry unavailable/);
+  const ready={capabilities:{enabled:true,simulation:true},navigation:{streams:{bridge:{fresh:true,data:{estimator_health:{usable:true,state:'AIDED',sensors:{gps:true,dvl:true,vn:true},position_sigma_m:1.}}},supervisor:{fresh:true,data:{mode:'Active',configuration_verified:true,surfaced:true,state:'GPS aiding admitted'}}},cube_estimate:{valid:true,lat:32.9,lon:-117,heading_deg:0,depth_m:0}}};
   e=await render(ready);
   const bow=vm.runInNewContext(code.slice(code.indexOf('function bowPoint'),code.indexOf('function mark'))+'; bowPoint');
   for(const [heading,x,y] of [[0,0,-25],[90,25,0],[180,0,25],[270,-25,0]]){const p=bow([0,0],heading,25);assert(Math.abs(p[0]-x)<1e-8&&Math.abs(p[1]-y)<1e-8)}
@@ -25,7 +25,7 @@ async function render(data,options={}){
   e=await render(ready,{reject:true});e.map.onclick({clientX:500,clientY:300});await e.start.onclick();assert.equal(e.posts.length,1);assert.match(e.message.textContent,/Target rejected/);
   e=await render(ready,{timeoutStart:true});e.map.onclick({clientX:500,clientY:300});await e.start.onclick();await e.start.onclick();assert.deepEqual(e.posts.map(p=>p.action),['preview','start','start']);assert.equal(e.posts[1].plan_id,e.posts[2].plan_id);
   e=await render({...ready,capabilities:{enabled:true,simulation:false}});e.maptype.value='pool';e.maptype.onchange();
-  e.map.onclick({clientX:500,clientY:300});assert(e.start.disabled);assert(!e.useGrid.hidden);assert.match(e.readiness.textContent,/view-only/);
+  e.map.onclick({clientX:500,clientY:300});assert(e.start.disabled);assert(!e.useGrid.hidden);assert.match(e.readiness.textContent,/satellite or geographic/);
   e.useGrid.onclick();assert.equal(e.maptype.value,'geographic');assert(e.useGrid.hidden);assert(e.start.disabled);assert.equal(e.posts.length,0);
   e.map.onclick({clientX:500,clientY:300});assert(!e.start.disabled);
   e=await render({...ready,capabilities:{enabled:true,simulation:false}},{tilesLoaded:true});e.maptype.value='satellite';e.maptype.onchange();
@@ -72,7 +72,7 @@ async function render(data,options={}){
   e=await render(ready,{tilesLoaded:true,viewport:{width:1440,height:900}});e.maptype.value='satellite';e.imagery.value='archive2023';e.maptype.onchange();
   assert(e.imageSources.some(s=>s.includes('/tile/64776/20/')));assert(!e.imageSources.some(s=>s.includes('/tile/64776/21/')));
   assert.match(e.tileStatus.textContent,/zoom 20/);e.zoomIn.onclick();assert(!e.imageSources.some(s=>s.includes('/tile/64776/21/')));
-  e.imagery.value='current';e.imagery.onchange();assert(e.imageSources.some(s=>s.includes('/MapServer/tile/21/')));
+  e.imagery.value='current';e.imagery.onchange();assert(e.imageSources.some(s=>s.includes('/MapServer/tile/19/')));assert(!e.imageSources.some(s=>s.includes('/MapServer/tile/21/')));
   e.findLake.onclick();e.map.onclick({clientX:720,clientY:450});
   assert.match(e.target.textContent,/32\.9160000, -117\.0990000/);
   assert.equal(e.posts.length,0);
@@ -82,7 +82,7 @@ async function render(data,options={}){
   assert(e.imageSources.some(s=>s==='/vendor/miramar/19-211332-91604.jpg'));
   e.map.onclick({clientX:450,clientY:300});assert(!e.start.disabled);
   e.alignmentCorridor.checked=false;e.alignmentCorridor.onchange();assert(e.start.disabled);
-  assert.match(e.readiness.textContent,/clear sampling corridor/);
+  assert.match(e.readiness.textContent,/clear 10 m corridor/);
   e.alignmentCorridor.checked=true;e.alignmentCorridor.onchange();assert(!e.start.disabled);
   e.findLake.onclick();assert(e.imageSources.some(s=>s==='/vendor/miramar/16-26416-11450.jpg'));
   e=await render(ready);

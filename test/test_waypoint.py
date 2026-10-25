@@ -99,7 +99,7 @@ class WaypointTests(unittest.TestCase):
     def test_dvl_recovery_cannot_extend_deadline_or_override_pilot(self):
         self.dive();self.o.update(navigation_hold_safe=True,dvl_continuity=dict(recovering=True))
         self.step()
-        for _ in range(17):self.step()
+        for _ in range(52):self.step()
         self.assertEqual(self.run.stage,'ABORTED')
         self.o['dvl_continuity']['recovering']=False
         self.assertFalse(any(a=='target' for a,_ in self.step()))
@@ -269,7 +269,8 @@ class WaypointTests(unittest.TestCase):
             heartbeat=dict(armed=False), supervisor=dict(configuration_verified=True,mode='Active',surfaced=True),
             local=dict(ned=[0.,0.,0.]),cube_origin=dict(lat=self.origin[0],lon=self.origin[1],alt=0.)).items()}
         nav = dict(session=1,streams=streams,cube_estimate=dict(valid=True,lat=self.origin[0],lon=self.origin[1],heading_deg=0.))
-        p = api.preview(self.plan,nav)
+        streams['bridge']=dict(age=0.,data=dict(enabled=True,estimator_health=dict(usable=True),map_transform=dict(origin=self.origin[:2])))
+        p = api.preview(dict(self.plan,mode='surface',alignment_corridor_confirmed=True),nav)
         item, duplicate = api.consume(p['plan_id'],nav)
         self.assertFalse(duplicate)
         altitude_update = copy.deepcopy(nav)

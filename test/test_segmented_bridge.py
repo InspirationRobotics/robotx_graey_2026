@@ -9,7 +9,7 @@ from robotx_graey_2026.api.navigation.relative_estimator import RelativeEstimato
 
 
 class SegmentedBridgeTests(unittest.TestCase):
-    def test_correction_requires_authorized_stopped_fresh_check(self):
+    def test_retired_segment_checks_do_not_apply_heading(self):
         path=Path(__file__).parents[1]/'robotx_graey_2026/api/navigation/fused_nav_bridge.py'
         tree=ast.parse(path.read_text())
         method=next(n for c in tree.body if isinstance(c,ast.ClassDef)
@@ -20,7 +20,7 @@ class SegmentedBridgeTests(unittest.TestCase):
         e=RelativeEstimator();e.motion_at=10.;e.motion_valid=True
         e.status=Mock(return_value=dict(healthy=True,gps_admission=dict(qualified=True)))
         e.apply_segment_correction=Mock()
-        node=NS(est=e,control_received=10.,segmented_course_run='r',control_state=dict(
+        node=NS(est=e,control_received=10.,course_run='r',control_state=dict(
             mission_claimed=True,mode='STABILIZE',armed=True,sa_active=False,esc_commanded_on=True))
         message=dict(published_monotonic=10.,run_id='r',stage='TRANSIT_CHECK',segment_checks=2,
                      plan=dict(lat=33.,lon=-117.))
@@ -31,4 +31,4 @@ class SegmentedBridgeTests(unittest.TestCase):
         send();e.apply_segment_correction.assert_not_called()
         node.control_state['sa_active']=False;e.motion_at=0.
         send();e.apply_segment_correction.assert_not_called()
-        e.motion_at=10.;send();e.apply_segment_correction.assert_called_once_with(10.,('r',2))
+        e.motion_at=10.;send();e.apply_segment_correction.assert_not_called()

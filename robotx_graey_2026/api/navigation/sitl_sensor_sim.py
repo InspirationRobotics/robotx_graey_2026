@@ -49,6 +49,8 @@ class SitlSensorSim(Node):
         self.valid_pub = self.create_publisher(Bool, '/graey/dvl/valid', 10)
         self.depth_pub = self.create_publisher(Float32, '/graey/sitl/depth_m', 10)
         self.control_pub = self.create_publisher(String, '/graey/control_watchdog/status', 10)
+        self.drop_until={}
+        self.create_subscription(String,'/graey/sitl/faults',self.faults,10)
         self.claimed=False
         self.create_subscription(Bool, '/graey/autonomy_active', self.claim, 10)
         self.latest = {}
@@ -59,6 +61,14 @@ class SitlSensorSim(Node):
         self.last_publish = 0.0
         self.last_request = 0.0
         self.create_timer(.01, self.tick)
+
+    def faults(self,msg):
+        if not self.control_fixture:return
+        try:
+            d=json.loads(msg.data)
+            for name in ('vn','dvl'):
+                if name in d:self.drop_until[name]=time.monotonic()+max(0.,min(30.,float(d[name])))
+        except (ValueError,TypeError):pass
 
     def claim(self,msg):
         self.claimed=msg.data
@@ -99,10 +109,10 @@ class SitlSensorSim(Node):
         imu.header.frame_id = 'vn100_sitl'
         imu.orientation.w, imu.orientation.x, imu.orientation.y, imu.orientation.z = yaw_rotate(q, self.relative_yaw_offset)
         imu.angular_velocity.x, imu.angular_velocity.y, imu.angular_velocity.z = attitude['rates']
-        self.imu_pub.publish(imu)
+        if now>=self.drop_until.get('vn',0.):self.imu_pub.publish(imu)
         sample = dict(stamp_ns=stamp_ns, velocity=body_velocity, valid=True,
                       sensor_time=int(now*1_000_000))
-        self.dvl_pub.publish(String(data=json.dumps(sample, allow_nan=False)))
+        if now>=self.drop_until.get('dvl',0.):self.dvl_pub.publish(String(data=json.dumps(sample, allow_nan=False)))
         self.valid_pub.publish(Bool(data=True))
         twist = TwistWithCovarianceStamped()
         twist.header.stamp = stamp

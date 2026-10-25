@@ -8,242 +8,27 @@ from robotx_graey_2026.api.navigation.vn_calibration import VNCalibration
 
 
 class CalibrationJobsTests(unittest.TestCase):
-    def test_retired_compass_actions_are_rejected(self):
-        for action in ('compass_start','compass_capture','compass_cancel'):
-            with self.assertRaisesRegex(ValueError,'Unknown'):
-                self.job.request(dict(action=action,confirmed=True))
-
-    def test_land_alignment_job_never_prepares_pressure_or_commissions(self):
-        self.job.job=dict(busy=True,cancel=False,true_heading_deg=90.)
-        self.job.run('align_land')
-        self.assertEqual(self.calls,[('suspend',None),('pause',None),('align_land',90.)])
-        self.assertEqual(self.job.snapshot()['phase'],'aligned_land')
-        self.assertFalse(self.job.waypoint_permission)
-
-    def test_retained_prepare_requires_current_land_reference(self):
-        with self.assertRaisesRegex(ValueError,'Capture land north first'):
-            self.job.request(dict(action='prepare',confirmed=True,surface_confirmed=True,alignment_mode='retained'))
-
-    def test_automatic_alignment_requires_prepare_clearance_and_qualified_inputs(self):
-        from unittest.mock import Mock
-        self.job.maneuver=Mock()
-        with self.assertRaisesRegex(ValueError,'Wait for qualified'):
-            self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=5.))
-        self.job.job=dict(busy=False,action='prepare',phase='prepared')
-        with self.assertRaisesRegex(ValueError,'Confirm clear'):
-            self.job.request(dict(action='align_auto',max_distance_m=5.))
-        with self.assertRaisesRegex(ValueError,'Wait for qualified'):
-            self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=5.))
-        self.put('bridge',dict(gps_eligible=True,inputs=dict(vn=True,dvl=True),gps_admission=dict(qualified=True)))
-        with patch('threading.Thread'):
-            self.job.request(dict(action='align_auto',clearance_confirmed=True,max_distance_m=5.))
-        self.job.maneuver.assert_called_once_with('start',5.)
-        self.assertTrue(self.job.snapshot()['auto_started'])
-        self.assertFalse(self.job.waypoint_permission)
-        self.job.request(dict(action='cancel'))
-        self.job.maneuver.assert_called_with('abort',None)
-
-    def test_dvl_recovery_requires_surface_confirmation_and_safe_controller(self):
-        with self.assertRaisesRegex(ValueError,'floating at the water surface'):
-            self.job.request(dict(action='recover_dvl',confirmed=True))
-        self.c['armed']=True
-        with self.assertRaisesRegex(ValueError,'disarmed'):
-            self.job.request(dict(action='recover_dvl',confirmed=True,surface_confirmed=True))
-        self.assertEqual(self.calls,[])
-
-    def test_dvl_recovery_uses_retained_alignment_without_pause_or_heading_capture(self):
-        self.put('supervisor',dict(state='DVL continuation',north_alignment=dict(aligned=True)))
-        self.job.job=dict(busy=True,cancel=False,alignment_mode='known',true_heading_deg=90.)
-        def service(name,value=None):
-            self.calls.append((name,value))
-            if name=='recover_dvl':self.put('bridge',dict(published_monotonic=self.now,fault=''))
-            if name=='suspend' and self.now>=.6:
-                self.put('supervisor',dict(state='DVL continuation',north_alignment=dict(aligned=True)))
-            return 'ok'
-        self.job.service=service
-        self.job.run('recover_dvl')
-        self.assertEqual(self.calls,[('suspend',None),('recover_dvl',None),('suspend',None),('commission',None)])
-        self.assertTrue(self.job.waypoint_permission)
-
-    def test_recovery_clears_old_latch_only_after_clean_bridge_reset(self):
-        self.put('supervisor',dict(state='Fault',reason='DVL continuity lost'))
-        self.job.job=dict(busy=True,cancel=False)
-        count=[0]
-        def service(name,value=None):
-            result=self.service(name,value)
-            if name=='suspend':
-                count[0]+=1
-                if count[0]==2:
-                    self.assertGreaterEqual(self.now,.6)
-                    self.assertFalse(self.nav['streams']['bridge']['data']['fault'])
-                    self.put('supervisor',dict(north_alignment=dict(aligned=True)))
-            return result
-        self.job.service=service
-        self.job.run('prepare')
-        self.assertTrue(self.job.waypoint_permission)
-        self.assertEqual(count[0],2)
-
-    def test_recovery_does_not_clear_fault_without_clean_reset_status(self):
-        self.job.job=dict(busy=True,cancel=False)
-        def service(name,value=None):
-            result=self.service(name,value)
-            if name=='prepare':self.put('bridge',dict(published_monotonic=0.,fault='Still invalid'))
-            return result
-        self.job.service=service
-        self.job.run('prepare')
-        self.assertFalse(self.job.waypoint_permission)
-        self.assertEqual(sum(name=='suspend' for name,value in self.calls),1)
-        self.assertIn('No clean bridge',self.job.snapshot()['message'])
-
-    def test_known_heading_requires_confirmation_and_numeric_true_bearing(self):
-        for value in (None,True,'90',-1,360,float('nan')):
-            with self.assertRaises(ValueError):
-                self.job.request(dict(action='prepare',confirmed=True,surface_confirmed=True,
-                    alignment_mode='known',heading_confirmed=True,true_heading_deg=value))
-        with self.assertRaises(ValueError):
-            self.job.request(dict(action='prepare',confirmed=True,surface_confirmed=True,
-                alignment_mode='known',heading_confirmed=False,true_heading_deg=90.))
-
-    def test_known_heading_preparation_captures_before_commission(self):
-        self.job.job=dict(busy=True,cancel=False,alignment_mode='known',true_heading_deg=90.)
-        def service(name,value=None):
-            self.service(name,value)
-            if name=='align_heading':
-                self.put('supervisor',dict(north_alignment=dict(aligned=True)))
-            return 'ok'
-        self.job.service=service
-        self.job.run('prepare')
-        self.assertEqual(self.calls,[('suspend',None),('pause',None),('prepare',True),('suspend',None),('align_heading',90.),('commission',None)])
-        self.assertTrue(self.job.waypoint_permission)
-
-    def test_known_heading_cancel_during_settling_never_captures_or_commissions(self):
-        self.job.job=dict(busy=True,cancel=False,alignment_mode='known',true_heading_deg=90.)
-        def sleep(seconds):
-            self.now+=seconds
-            self.job.job['cancel']=True
-        self.job.sleep=sleep
-        self.job.run('prepare')
-        self.assertNotIn(('align_heading',90.),self.calls)
-        self.assertFalse(self.job.waypoint_permission)
-
     def setUp(self):
-        self.c = dict(online=True,vehicle_fresh=True,armed=False,sa_active=True,
-                      esc_commanded_on=False,mission_claimed=False,autonomous=False)
-        self.nav = dict(streams={})
-        self.now, self.calls = 0., []
-        self.refresh_status=True
-        self.job = CalibrationJobs(lambda:self.c,lambda:self.nav,self.service,lambda:False,
-                                   clock=lambda:self.now,sleep=self.sleep)
+        self.calls=[]
+        self.c=dict(online=True,vehicle_fresh=True,armed=False,mode='MANUAL',sa_active=True,esc_commanded_on=False,mission_claimed=False,autonomous=False)
+        self.job=CalibrationJobs(lambda:self.c,lambda:dict(streams={}),lambda n,v=None:self.calls.append((n,v)) or 'started',lambda:False)
 
-    def service(self, name, value=None):
-        self.calls.append((name,value))
-        if name=='prepare':
-            self.put('bridge',dict(published_monotonic=self.now,fault=''))
-        if name=='suspend' and self.now>=.6 and self.refresh_status and 'supervisor' in self.nav['streams']:
-            self.nav['streams']['supervisor']['data']['published_monotonic']=self.now
-        return name+' accepted'
-
-    def sleep(self, seconds):
-        self.now += seconds
-
-    def put(self, name, value):
-        if name == 'supervisor':
-            value.setdefault('published_monotonic',self.now)
-        self.nav['streams'][name] = dict(fresh=True,data=value)
-
-    def test_prepare_ignores_cached_maintenance_fault_until_new_status(self):
-        self.put('supervisor',dict(state='Fault',reason='Navigation maintenance; Prepare required before reuse',
-                                  published_monotonic=-1.))
-        self.job.job = dict(busy=True,cancel=False)
-        def sleep(seconds):
-            self.now += seconds
-            self.put('supervisor',dict(north_alignment=dict(aligned=True)))
-        self.job.sleep = sleep
+    def test_startup_calls_start_only_without_sensor_qualification(self):
         self.job.run('prepare')
+        self.assertEqual(self.calls,[('prepare',True)])
         self.assertEqual(self.job.snapshot()['phase'],'ready')
-        self.assertTrue(self.job.waypoint_permission)
 
-    def test_prepare_missing_new_status_times_out_without_permission(self):
-        self.refresh_status=False
-        self.put('supervisor',dict(state='Fault',published_monotonic=-1.))
-        self.job.job = dict(busy=True,cancel=False)
-        self.job.run('prepare')
-        self.assertEqual(self.job.snapshot()['phase'],'failed')
-        self.assertIn('No fresh supervisor',self.job.snapshot()['message'])
-        self.assertFalse(self.job.waypoint_permission)
+    def test_retired_actions_rejected(self):
+        for action in ('align_land','align_auto','recover_dvl','compass_start'):
+            with self.assertRaises(ValueError):self.job.request(dict(action=action))
 
-    def test_prepare_new_fault_is_not_ignored(self):
-        self.put('supervisor',dict(state='Fault',reason='DVL continuity fault'))
-        self.job.job = dict(busy=True,cancel=False)
-        self.job.run('prepare')
-        self.assertEqual(self.job.snapshot()['message'],'DVL continuity fault')
-        self.assertFalse(self.job.waypoint_permission)
+    def test_startup_requires_surface_confirmation_for_pressure_zero(self):
+        with self.assertRaisesRegex(ValueError,'surface'):
+            self.job.request(dict(action='prepare'))
 
-    def test_unconfirmed_or_armed_request_cannot_start(self):
-        for field, value in (('armed',True),('sa_active',False),('online',False),('vehicle_fresh',False),('esc_commanded_on',True)):
-            old = self.c[field]
-            self.c[field] = value
-            with self.assertRaises(ValueError):
-                self.job.request(dict(action='calibrate',confirmed=True))
-            self.c[field] = old
-        with self.assertRaises(ValueError):
-            self.job.request(dict(action='calibrate',confirmed=False))
-        with self.assertRaises(ValueError):
-            self.job.request(dict(action='prepare',confirmed=True,surface_confirmed=False))
-        self.assertEqual(self.calls,[])
-
-    def test_prepare_finishes_without_alignment_and_without_waypoint_permission(self):
-        self.put('supervisor',dict(north_alignment=dict(aligned=False,reason='Need motion')))
-        self.job.job=dict(busy=True,cancel=False,action='prepare')
-        self.job.run('prepare')
-        self.assertEqual(self.calls,[('suspend',None),('pause',None),('prepare',True),('suspend',None)])
-        self.assertFalse(self.job.waypoint_permission)
-        self.assertEqual(self.job.snapshot()['phase'],'prepared')
-        self.assertFalse(self.job.snapshot()['busy'])
-
-    def test_alignment_finishes_without_commissioning(self):
-        from unittest.mock import Mock
-        self.job.maneuver=Mock()
-        self.job.job=dict(busy=True,cancel=False,auto_started_at=0.)
-        self.put('north_maneuver',dict(stage='COMPLETE',published_monotonic=0.))
-        self.put('bridge',dict(north_alignment=dict(aligned=True)))
-        self.job.monitor_alignment()
-        self.assertEqual(self.job.snapshot()['phase'],'aligned')
-        self.assertFalse(self.job.snapshot()['busy'])
-        self.assertFalse(self.job.waypoint_permission)
-        self.assertEqual(self.calls,[])
-
-    def test_prepare_timeout_and_cancellation_do_not_grant_permission(self):
-        for cancel in (True,False):
-            self.job.job = dict(busy=True,cancel=cancel)
-            self.job.run('prepare')
-            self.assertFalse(self.job.waypoint_permission)
-            self.assertEqual(self.job.snapshot()['phase'],'failed')
-
-    def test_old_success_cannot_complete_a_new_calibration(self):
-        self.put('vn_calibration',dict(phase='collected',log='old',reason='old success'))
-        self.job.job = dict(busy=True,cancel=False)
-        def sleep(seconds):
-            self.assertTrue(self.job.snapshot()['busy'])
-            self.now += seconds
-            self.put('vn_calibration',dict(phase='failed',log='new',reason='Coverage missing'))
-        self.job.sleep = sleep
-        self.job.run('calibrate')
-        self.assertEqual(self.job.snapshot()['phase'],'failed')
-        self.assertEqual(self.job.snapshot()['message'],'Coverage missing')
-        self.assertFalse(self.job.waypoint_permission)
-
-    def test_cancel_during_commission_ack_never_enables_gui(self):
-        self.put('supervisor',dict(north_alignment=dict(aligned=True)))
-        self.job.job = dict(busy=True,cancel=False)
-        def service(name, value=None):
-            self.service(name,value)
-            if name == 'commission':
-                self.job.request(dict(action='cancel'))
-            return 'ok'
-        self.job.service = service
-        self.job.run('prepare')
-        self.assertFalse(self.job.waypoint_permission)
+    def test_startup_failure_does_not_report_ready(self):
+        def fail(*args):raise ValueError('Service unavailable')
+        self.job.service=fail;self.job.run('prepare')
         self.assertEqual(self.job.snapshot()['phase'],'failed')
 
 
