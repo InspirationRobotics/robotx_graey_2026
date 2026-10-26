@@ -245,13 +245,16 @@ class YoloLights:
         return out
 
 
+def biggest_light(lights):
+    """The biggest light - none of the specks at the picture's edge - or None."""
+    L = [l for l in lights if l['whole'] or l['share'] >= C_EDGE_SMALL]
+    return max(L, key=lambda l: l['share']) if L else None
+
+
 def biggest_colour(lights):
     """(colour, share) of the biggest light - none of the specks at the picture's edge - or (None, 0.0)."""
-    L = [l for l in lights if l['whole'] or l['share'] >= C_EDGE_SMALL]
-    if not L:
-        return None, 0.0
-    b = max(L, key=lambda l: l['share'])
-    return b['colour'], b['share']
+    b = biggest_light(lights)
+    return (b['colour'], b['share']) if b else (None, 0.0)
 
 
 class BoxTracker:

@@ -2841,7 +2841,7 @@ class PipelineMission(MissionBase):
                                        f'{self.below_surface(self.cur[2]) if self.cur else float("nan"):.2f} m down')
                 self.watch_begin()
                 return
-            spot = led_boxes.light_spot(cam[1]) if fr['red'] >= RED_SEEN else None
+            spot = self.light_where(cam[1]) if fr['red'] >= RED_SEEN else None
             if spot is None and fr['red'] >= RED_SEEN and self.c_last is not None and \
                     math.hypot(self.c_last[0] - self.magnet[0], self.c_last[1] - self.magnet[1]) <= self.centre_tol:
                 spot = (self.c_last, 0.0)       # its core just went behind the magnet (about as big as the ring)
@@ -2906,10 +2906,9 @@ class PipelineMission(MissionBase):
         return {'green': 1.0 if self.c_green_n >= C_GREEN_FRAMES else 0.0,
                 'red': 1.0 if colour not in (None, 'green') else 0.0}
 
-    def biggest_light(self, rgb):
-        """(colour, share) of the biggest light in the newest picture: the trained model's on the full
-        picture (light_detector:=yolo; the camera thread's finds when fresh), else judged against the
-        water on the small one."""
+    def lights_now(self, rgb):
+        """The lights in the newest picture: the trained model's on the full picture (light_detector:=yolo;
+        the camera thread's finds when fresh), else judged against the water on the small one."""
         cam = self.camera
         if self.light_detector == 'yolo' and self.yolo is not None and cam is not None:
             if cam.latest_dets is not None and time.monotonic() - cam.latest_dets[0] < 0.5:
@@ -2917,9 +2916,22 @@ class PipelineMission(MissionBase):
             elif cam.latest_full is not None:
                 dets = self.yolo(cam.latest_full)
             else:
-                return None, 0.0
-            return led_boxes.biggest_colour([d for d in dets if d['colour'] in ('red', 'green')])
-        return led_boxes.light_colour(rgb)
+                return []
+            return [d for d in dets if d['colour'] in ('red', 'green')]
+        return led_boxes.contrast_lights(rgb)
+
+    def biggest_light(self, rgb):
+        """(colour, share) of the biggest light in the newest picture (lights_now)."""
+        return led_boxes.biggest_colour(self.lights_now(rgb))
+
+    def light_where(self, rgb):
+        """Where the repair's light is: ((x, y) in 640x360 pixels, share). hsv: its bright core
+        (light_spot); contrast/yolo: the biggest light those judged - in the sunlit pool the brightest
+        patch was the white pipe beside the box, not the LED ring (Oct 25)."""
+        if self.light_detector == 'hsv':
+            return led_boxes.light_spot(rgb)
+        b = led_boxes.biggest_light(self.lights_now(rgb))
+        return (((b['x'] + 1) * 320, (b['y'] + 1) * 180), b['share']) if b else None
 
     def pipe_end_seen(self, ahead=None):
         """light_detector:=yolo: the pipe's end in the down camera within END_SEEN_S, near the middle across
