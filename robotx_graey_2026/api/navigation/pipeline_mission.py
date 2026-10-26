@@ -733,6 +733,9 @@ class PipelineMission(MissionBase):
         self.survey_backup = float(g('survey_backup_m'))
         self.survey_dir = g('survey_dir')
         self.s_leg = None                   # survey: 'to buoy', then 'survey'
+        # set again by survey_begin; here too, as start_with:=centre's camera notes sightings without a
+        # survey (Oct 25 pool: a red sighting stopped the camera thread on a missing s_red)
+        self.s_red, self.s_red_new, self.s_repair_mono, self.s_track = None, False, None, []
         self.side = 1.0 if g('pool_side').strip().lower() == 'right' else -1.0
         self.pool_pick_any = bool(g('pool_pick_any'))
         ff = g('floor_filter').strip().lower()
