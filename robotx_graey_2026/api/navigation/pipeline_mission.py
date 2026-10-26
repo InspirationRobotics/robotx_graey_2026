@@ -361,6 +361,8 @@ class PipelineMission(MissionBase):
         self.over_checked = False           # looked straight down once over the picked spot
         self.cam_ends_only = False          # the camera runs for pipe ends only (no lights counted yet)
         self.end_said = None                # the pipe end the log last mentioned
+        self.f_seen_mark = None             # (f_seen, the map's sweep count it counts from): missing = a whole sweep since
+        self.f_end_rechecked = False        # the pipe came back during an "its end?" hold here once already
         self.f_path = []                    # where the sonar went while following, NED
         self.last_t = 0.0
         self.step_z = None                  # DESCEND's current target
@@ -534,7 +536,8 @@ class PipelineMission(MissionBase):
         p('follow_fit_m', 1.2)              # line fit: pipe dots this far behind the sonar
         p('follow_gate_m', 0.3)             # once seen, only echoes this far (sideways) from the pipe's
                                             # line count as the pipe (0 = off): not the wall (Oct 17)
-        p('follow_gate_up_m', 0.2)          # ... and this far above or below the pipe's height
+        p('follow_gate_up_m', 0.3)          # ... and this far above or below the pipe's height (0.2 dropped
+                                            # the dot pinged just before a 0.25 m depth change: Oct 25 pool)
         p('follow_threshold', 80)           # echo strength that makes a dot while following. 100 (the
                                             # scan's) lost a tilted segment after an elbow: replayed, the map
                                             # made 0 dots there at 100 and 2-6 a sweep at 80 (pool, Oct 17)
@@ -2298,6 +2301,8 @@ class PipelineMission(MissionBase):
                     return
         # sonar sweep period, for the speed limit
         sw = m.get('sweep', 0)
+        if self.f_seen is not None and (self.f_seen_mark is None or self.f_seen_mark[0] != self.f_seen):
+            self.f_seen_mark = (self.f_seen, sw + 1)       # counted as seen without a sighting: a whole sweep from now
         if sw != self.f_sweep:
             dt = now - self.f_sweep_t
             if 0.5 < dt < 60:
@@ -2353,7 +2358,15 @@ class PipelineMission(MissionBase):
                 self.f_lat = float(np.median((c[under] - sonar) @ right))
                 self.f_line = sonar + self.f_lat * right        # a point ON the pipe, fixed in NED
                 self.f_lost_now = False
-                self.f_seen = now
+                self.f_seen, self.f_seen_mark = now, (now, sw)
+                if self.f_stuck_t is not None and not self.f_end_rechecked:
+                    # held still where it went missing twice, and the pipe is there: not its end, follow on -
+                    # once per spot, or a real end would go round this for ever (Ruth, Oct 25 pool: two quick
+                    # misses mid-pipe were taken for the end while it saw the pipe every sweep)
+                    self.f_stuck_t, self.f_end_rechecked = None, True
+                    msg = 'follow: the pipe is under the sonar again - not its end; following on'
+                    self.get_logger().info('    ' + msg)
+                    self.mark(msg)
                 # a box sits on the pipe (~0.15 m tall): a fresh dot clearly above the pipe's line
                 level = corridor & ~fresh
                 if level.sum() >= 5:
@@ -2380,7 +2393,7 @@ class PipelineMission(MissionBase):
                                             or (self.f_stuck_t is not None and now - self.f_stuck_t > self.follow_lost))
         # the camera sees the pipe's end here (the model, Ruth Oct 25): gone from under the sonar with its end
         # in view, it is the end - no waiting follow_lost_s, no search
-        at_end = (self.f_line is not None and (self.f_seen is None or now - self.f_seen > self.f_period)
+        at_end = (self.f_line is not None and self.pipe_missing(sw)
                   and self.pipe_end_seen() is not None)
         if at_end:
             if self.end_said is None or float(np.linalg.norm(self.f_line - self.end_said)) > 0.5:
@@ -2450,7 +2463,7 @@ class PipelineMission(MissionBase):
         v = min(self.follow_speed, self.follow_step / max(self.f_period, 1.0))
         yaw_d = math.atan2(d[1], d[0])
         rate, err = self.yaw_rate_to(yaw_d)
-        waiting = self.f_seen is None or now - self.f_seen > 1.0 * self.f_period or self.f_stuck_t is not None
+        waiting = self.pipe_missing(sw) or self.f_stuck_t is not None
         if waiting and not self.f_lost_now and self.f_line is not None:
             self.f_lost_now = True
             self.note_loss(now)
@@ -2555,10 +2568,21 @@ class PipelineMission(MissionBase):
             if self.f_stuck_t is None:
                 self.f_stuck_t = now
                 self.get_logger().info(f'    lost the pipe again at the same spot - its end? holding over it '
-                                       f'{self.follow_lost:.0f} s')
+                                       f'{self.follow_lost:.0f} s'
+                                       + (' (it came back here once already)' if self.f_end_rechecked
+                                          else ', following on if it shows under the sonar'))
         else:
-            self.f_prev_loss = pt
+            self.f_prev_loss, self.f_end_rechecked = pt, False
             self.get_logger().info('    pipe missing - going back over where it was last seen')
+
+    def pipe_missing(self, sw):
+        """No pipe under the sonar in a whole sweep since it was last seen there (Ruth, Oct 25: not after
+        a time - the pool's sweeps took 8-11 s, so a slow one counted as the pipe missing). With the floor
+        filter a sweep's dots come in when it ends; without it, while it sweeps, so a sighting early in one
+        waits for the next whole sweep. sw = the map's sweep count."""
+        if self.f_seen is None or self.f_seen_mark is None:
+            return self.f_seen is None
+        return sw - self.f_seen_mark[1] >= (1 if self.floor_filter else 2)
 
     def on_pilot_takeover(self):
         """The pilot took the sub mid-survey: still log and save what it saw so far."""
