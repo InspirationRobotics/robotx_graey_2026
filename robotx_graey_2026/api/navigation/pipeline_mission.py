@@ -862,8 +862,8 @@ class PipelineMission(MissionBase):
                 e0 + y * math.sin(yaw0) + x * math.cos(yaw0))
 
     # ---------- phases ----------
-    def to_phase(self, name):
-        self.get_logger().info(f'    phase: {name}')
+    def to_phase(self, name, note=''):
+        self.get_logger().info(f'    phase: {name}' + (f' - {note}' if note else ''))   # note: only printed
         self.phase = name
         self.state_t0 = self.now()
 
@@ -944,7 +944,7 @@ class PipelineMission(MissionBase):
                     self.search_start()
                 elif self.scan_mode == 'stops':
                     self.stop_i, self.stop_yaw0 = 0, (self.cur_yaw if self.cur_yaw is not None else self.hold[3])
-                    self.to_phase(f'{self.scan} scan: stop turn')
+                    self.to_phase(f'{self.scan} scan: stop turn', self.stop_label())
                 else:
                     self.to_phase(f'{self.scan} scan: turn')
 
@@ -972,7 +972,7 @@ class PipelineMission(MissionBase):
                 if self.record_scan:
                     self.map_post('/mark', f'{self.stop_label()} at heading '
                                            f'{math.degrees(self.cur_yaw) % 360:.0f}: looking {self.sweeps_per_stop} sweeps')
-                self.to_phase(f'{self.scan} scan: stop look')
+                self.to_phase(f'{self.scan} scan: stop look', self.stop_label())
 
         elif ph == 'stop look':
             # full sweeps while still: the one in progress started before the stop, so it doesn't count
@@ -991,7 +991,7 @@ class PipelineMission(MissionBase):
                     self.hold_here(self.hold[2], 'hold')
                     self.to_phase(f'{self.scan} scan: settle')
                 else:
-                    self.to_phase(f'{self.scan} scan: stop turn')
+                    self.to_phase(f'{self.scan} scan: stop turn', self.stop_label())
 
         elif ph == 'turn':
             n, e, down, _ = self.hold
@@ -1642,7 +1642,7 @@ class PipelineMission(MissionBase):
         self.get_logger().info(f'    search: {sr["n"] - self.stop_i} stop(s), {math.degrees(sr["step"]):.0f} deg apart, '
                                f'{self.sweeps_per_stop} sweeps at each'
                                + ('' if sr['kind'] == 'approach' else ', leaving out the part already followed'))
-        self.to_phase(f'{self.scan} scan: stop turn')
+        self.to_phase(f'{self.scan} scan: stop turn', self.stop_label())
 
     def stop_collect(self, m, keep=True):
         """Dots new on the map, tagged with the sweep they came in (keep=False: only noted - they
@@ -1702,11 +1702,11 @@ class PipelineMission(MissionBase):
                    f'- a closer look: {len(heads)} more stops {math.degrees(self.look_step):.0f} deg apart')
             self.get_logger().info('    ' + msg)
             self.mark(msg)
-            self.to_phase(f'{self.scan} scan: stop turn')
+            self.to_phase(f'{self.scan} scan: stop turn', self.stop_label())
             return
         self.look['k'] += 1
         if self.look['k'] < len(self.look['heads']):
-            self.to_phase(f'{self.scan} scan: stop turn')
+            self.to_phase(f'{self.scan} scan: stop turn', self.stop_label())
             return
         self.hold = (self.hold[0], self.hold[1], self.hold[2], self.cur_yaw if self.cur_yaw is not None else self.hold[3])
         self.to_phase(f'{self.scan} scan: settle')
@@ -1717,7 +1717,7 @@ class PipelineMission(MissionBase):
         if self.stop_i >= self.srch['n']:
             self.search_failed(f'nothing passed in {self.srch["n"]} stops')
             return
-        self.to_phase(f'{self.scan} scan: stop turn')
+        self.to_phase(f'{self.scan} scan: stop turn', self.stop_label())
 
     def look_judge(self, m):
         """The closer look is in: the most pipe-like shape near the promising bunch passes - then over
