@@ -1661,7 +1661,9 @@ class PipelineMission(MissionBase):
         if sr['resume'] is not None:
             self.stop_i, sr['resume'] = sr['resume'], None
         else:
-            turn = self.scan_turn if sr['kind'] == 'approach' else 2 * math.pi
+            # the same turn when the pipe was lost: the sonar looks both ways, so 180 sees every
+            # direction - a lost search's full 360 looked at each twice, 12 stops (Ruth, Oct 25)
+            turn = self.scan_turn
             sr['n'] = max(1, math.ceil(turn / self.search_step - 1e-6))
             sr['step'] = turn / sr['n']
             sr['yaw0'] = self.cur_yaw if self.cur_yaw is not None else self.hold[3]
