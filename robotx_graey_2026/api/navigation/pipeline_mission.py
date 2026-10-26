@@ -250,6 +250,8 @@ END_SEEN_S = 3.0        # light_detector:=yolo: a pipe end the camera saw this r
 END_MID_X = 0.6         # ... this near the picture's middle across (-1 to 1) ...
 END_BEHIND_Y = 0.3      # ... and no further back in it than this (-1 top/ahead to 1 bottom/behind): the end is here
 LOOK_NEAR_M = 0.5       # search: the closer look's shape passes this close to the promising bunch
+TURN_MIN_S = 4.0        # ... and an eased turn to a stop takes at least this long: the heading hold
+                        # swings ~1.6-2 s each way, and a 10 deg turn over 0.5 s set it going (Oct 25 pool)
 DENSE_M = 0.15          # ... its densest spot: the dot with the most others this close
 PATH_M = 0.35           # lost search: dots this close to where the sonar went are the part already followed
 SAME_SPOT_M = 0.5       # ... the pipe lost this close to where it was lost before: the same spot
@@ -959,7 +961,12 @@ class PipelineMission(MissionBase):
             # stop i looks at heading yaw0 + i * scan_turn / scan_stops (the first one where it is)
             want = self.stop_want()
             n, e, down, _ = self.hold
-            self.goto_ned(n, e, down, self.turn_cmd(want), self.stop_label())
+            cmd = self.turn_cmd(want)
+            if self.turn_ramp is not None and self.now() - self.turn_ramp[0] <= self.turn_ramp[4] + 0.5:
+                self.target = None          # every step of the eased turn is sent: goto_ned holds back a
+                                            # heading within ~1 deg of the last, and a slow turn's steps are
+                                            # that small - they all went at once (sim, Oct 25)
+            self.goto_ned(n, e, down, cmd, self.stop_label())
             if self.srch is not None:
                 self.stop_collect(self.map_get(), keep=False)   # dots that land while turning belong to no stop
             if self.dry and self.now() - self.state_t0 < 0.3:
@@ -1621,14 +1628,15 @@ class PipelineMission(MissionBase):
 
     def turn_cmd(self, want):
         """The heading to send on the way to a stop: from the last one sent, eased in and out over
-        |turn| / stop_turn_dps seconds, not all at once. A 10-30 deg jump set the heading hold swinging
-        +-12 deg for a whole stop, while the follow's few-degree nudges held within 0.5 (Oct 25 pool)."""
+        |turn| / stop_turn_dps seconds (at least TURN_MIN_S), not all at once. A 10-30 deg jump set the
+        heading hold swinging +-12 deg for a whole stop, while the follow's few-degree nudges held within
+        0.5 (Oct 25 pool)."""
         if self.stop_turn_rate <= 0 or self.target is None:
             return want
         if self.turn_ramp is None or self.turn_ramp[:2] != (self.state_t0, want):
             frm = self.target[3]
             by = wrap_pi(want - frm)
-            self.turn_ramp = (self.state_t0, want, frm, by, abs(by) / self.stop_turn_rate)
+            self.turn_ramp = (self.state_t0, want, frm, by, max(TURN_MIN_S, abs(by) / self.stop_turn_rate))
         _, _, frm, by, secs = self.turn_ramp
         s = (self.now() - self.state_t0) / secs if secs > 0 else 1.0
         return want if s >= 1.0 else frm + by * (1.0 - math.cos(math.pi * s)) / 2.0
