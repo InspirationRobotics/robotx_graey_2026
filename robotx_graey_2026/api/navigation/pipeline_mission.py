@@ -176,6 +176,9 @@ SETTINGS = {
     'stop_tol_deg':        10.0,       # a stop starts looking once the heading is this close to it for 2 s
                                        #   (Oct 25 pool: the sub swung +-12 deg in its heading hold; was 3,
                                        #   which also waited for the turning to stop)
+    'stop_turn_dps':       10.0,       # turn to each stop at about this speed (deg/s), easing in and out
+                                       #   (Oct 25 pool: a 10-30 deg jump set the heading swinging +-12 deg
+                                       #   for a whole stop; the follow's few-degree nudges held within 0.5)
 
     # ---- walk and follow: the sonar looks straight down ----------------------------------
     'follow_range':        6.0,        # how far the sonar listens (m); must reach past the bottom
@@ -326,6 +329,7 @@ class PipelineMission(MissionBase):
         self.hold = None                    # (n, e, down, yaw) while scanning
         self.turned = 0.0
         self.stop_i, self.stop_yaw0, self.still_t, self.look_from = 0, 0.0, None, 0
+        self.turn_ramp = None               # a stop's eased turn: (phase start, want, from, by, seconds)
         self.last_yaw = None
         self.spot = None                    # (n, e, pipe top depth) from the far scan
         self.pipe = None                    # the outline picked, in NED
@@ -501,6 +505,8 @@ class PipelineMission(MissionBase):
         p('look_min_score', 0.2)            # ... passed: a shape this pipe-like near the promising bunch
         p('stop_tol_deg', 3.0)              # a stop looks once the heading is within this for 2 s (and, at
                                             # 3 or less, turning slower than 2 deg/s)
+        p('stop_turn_dps', 0.0)             # turn to a stop eased in and out at about this speed (0: the
+                                            # whole turn sent at once)
         p('record_scan', True)              # record the scan (Map tab Record), a Mark at each stop
         p('pool_max_pick_m', 2.5)           # pick only shapes this close to the sonar: start
                                             # ~1.5 m from the pipe, so walls farther out are ignored
@@ -760,6 +766,7 @@ class PipelineMission(MissionBase):
         self.look_step = math.radians(max(2.0, float(g('look_step_deg'))))
         self.look_min_score = float(g('look_min_score'))
         self.stop_tol = math.radians(max(1.0, float(g('stop_tol_deg'))))
+        self.stop_turn_rate = math.radians(max(0.0, float(g('stop_turn_dps'))))
         self.record_scan = bool(g('record_scan'))
         self.pool_max_pick = float(g('pool_max_pick_m'))
         self.pool_alt = max(0.0, float(g('pool_alt_m'))) if self.plan == 'pool' else 0.0
@@ -952,7 +959,7 @@ class PipelineMission(MissionBase):
             # stop i looks at heading yaw0 + i * scan_turn / scan_stops (the first one where it is)
             want = self.stop_want()
             n, e, down, _ = self.hold
-            self.goto_ned(n, e, down, want, self.stop_label())
+            self.goto_ned(n, e, down, self.turn_cmd(want), self.stop_label())
             if self.srch is not None:
                 self.stop_collect(self.map_get(), keep=False)   # dots that land while turning belong to no stop
             if self.dry and self.now() - self.state_t0 < 0.3:
@@ -1611,6 +1618,20 @@ class PipelineMission(MissionBase):
         if self.look is not None:
             return self.look['heads'][self.look['k']]
         return self.stop_yaw0 + self.stop_i * self.srch['step']
+
+    def turn_cmd(self, want):
+        """The heading to send on the way to a stop: from the last one sent, eased in and out over
+        |turn| / stop_turn_dps seconds, not all at once. A 10-30 deg jump set the heading hold swinging
+        +-12 deg for a whole stop, while the follow's few-degree nudges held within 0.5 (Oct 25 pool)."""
+        if self.stop_turn_rate <= 0 or self.target is None:
+            return want
+        if self.turn_ramp is None or self.turn_ramp[:2] != (self.state_t0, want):
+            frm = self.target[3]
+            by = wrap_pi(want - frm)
+            self.turn_ramp = (self.state_t0, want, frm, by, abs(by) / self.stop_turn_rate)
+        _, _, frm, by, secs = self.turn_ramp
+        s = (self.now() - self.state_t0) / secs if secs > 0 else 1.0
+        return want if s >= 1.0 else frm + by * (1.0 - math.cos(math.pi * s)) / 2.0
 
     def stop_label(self):
         if self.srch is None:
