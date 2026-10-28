@@ -335,6 +335,24 @@ def wrap_pi(a):
     return (a + math.pi) % (2 * math.pi) - math.pi
 
 
+def latlon(s):
+    """'lat lon' (or 'lat, lon') in decimal degrees -> (lat, lon)."""
+    v = [float(x) for x in s.replace(',', ' ').split()]
+    if len(v) != 2 or abs(v[0]) > 90 or abs(v[1]) > 180:
+        raise ValueError(f'a buoy GPS is "lat lon" in degrees, not {s!r}')
+    return v[0], v[1]
+
+
+def buoy_distance(a, b):
+    """(metres, bearing deg from true north) from GPS point a to b: haversine on a 6371 km Earth (well
+    under 1 cm off over the buoys' tens of metres)."""
+    p1, p2 = math.radians(a[0]), math.radians(b[0])
+    dp, dl = p2 - p1, math.radians(b[1] - a[1])
+    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    brg = math.atan2(math.sin(dl) * math.cos(p2), math.cos(p1) * math.sin(p2) - math.sin(p1) * math.cos(p2) * math.cos(dl))
+    return 2 * 6371000.0 * math.asin(math.sqrt(h)), math.degrees(brg) % 360
+
+
 class PipelineMission(MissionBase):
     def __init__(self):
         super().__init__('pipeline_mission', component=197)
@@ -514,7 +532,9 @@ class PipelineMission(MissionBase):
                                             # until something shows, then the same closer look
         p('transit_speed', 0.10)            # transit: m/s along the heading the sub had at the start, at the
                                             # surface by the start buoy, pointed at the end buoy
-        p('end_buoy_m', 0.0)                # transit: the end buoy this far from the start buoy (m) - must be set
+        p('end_buoy_m', 0.0)                # transit: the end buoy this far from the start buoy (m) - this or
+        p('start_buoy_gps', '')             # ... the buoys' GPS (Ruth, Oct 28), 'lat lon' in degrees each:
+        p('end_buoy_gps', '')               #     the distance between them (and its bearing, logged)
         p('end_short_m', 2.0)               # ... nothing found this far short of it: surface
         p('scan_time_s', 300.0)             # pool: give up searching (turns + picks) after this
         p('retry_turn_deg', 180.0)          # pool: nothing picked -> turn this much more and look again
@@ -803,9 +823,19 @@ class PipelineMission(MissionBase):
         self.retry_turn = math.radians(g('retry_turn_deg'))
         self.transit_speed, self.end_buoy = float(g('transit_speed')), float(g('end_buoy_m'))
         self.end_short = float(g('end_short_m'))
+        gps = [str(g(k)).strip() for k in ('start_buoy_gps', 'end_buoy_gps')]
+        if any(gps):
+            if not all(gps):
+                raise ValueError('start_buoy_gps and end_buoy_gps go together (both "lat lon"), not only one')
+            if self.end_buoy > 0:
+                raise ValueError(f'end_buoy_m {self.end_buoy:.1f} and the buoys\' GPS both set - use one')
+            self.end_buoy, brg = buoy_distance(latlon(gps[0]), latlon(gps[1]))
+            self.get_logger().info(f'end buoy {self.end_buoy:.1f} m from the start buoy, bearing {brg:.0f} deg '
+                                   f'(true north), from the buoys\' GPS')
         if self.scan_mode == 'transit' and self.end_buoy <= self.end_short:
-            raise ValueError(f'scan_mode:=transit needs end_buoy_m, how far the end buoy is from the start buoy '
-                             f'(more than end_short_m {self.end_short:.1f}), not {self.end_buoy:.1f}')
+            raise ValueError(f'scan_mode:=transit needs end_buoy_m or the buoys\' GPS (start_buoy_gps, end_buoy_gps): '
+                             f'how far the end buoy is from the start buoy (more than end_short_m '
+                             f'{self.end_short:.1f}), not {self.end_buoy:.1f}')
         if self.scan_mode not in ('turn', 'stops', 'search', 'transit'):
             raise ValueError(f"scan_mode must be turn, stops, search or transit, not {self.scan_mode!r}")
         self.scan_stops = max(1, int(g('scan_stops')))
