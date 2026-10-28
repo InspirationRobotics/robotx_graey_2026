@@ -18,6 +18,13 @@ The repair magnet (Ruth, Oct 22) is drawn where it shows in the real picture
 (led_boxes.MAGNET_PX), MAG_DOWN_M under the lens on that pixel's line of sight. A RED
 light whose LED comes within REPAIR_M of it turns GREEN for 5 s, then flashes BLUE,
 RED, GREEN (1 s on, 1 s off) for 30 s, then stays GREEN, as the handbook's light does.
+
+SIM_CAM_LOOK=real (Ruth, Oct 27): closer to the real down picture, for camera_follow's pipe finder
+(api/vision/pipe_line.py), which never passes the dim grey line above: an olive floor with blotches
+fixed to the floor, the white pipe, each box a clear case with pale edges, far things fading into the
+water. Still no glare, caustics or murk. SIM_DECOY="off from to" adds a bright pipe-like stripe off m
+beside the pipe, from..to m along it, and hides the pipe there: a confident camera line that is NOT the
+pipe, for camera_follow's disagreement rule.
 """
 import math
 import os
@@ -42,6 +49,13 @@ MAG_DOWN_M, MAG_R_PX = 0.149, 49    # the magnet under the lens (Ruth's ruler) a
 REPAIR_M = 0.04                     # the LED this close to the magnet: repaired
 # the magnet in the body frame, on the line of sight of its pixel
 MAG_BODY = np.array([-(MAGNET_PX[1] - H / 2) / F, (MAGNET_PX[0] - W / 2) / F, 1.0]) * MAG_DOWN_M
+LOOK = os.environ.get("SIM_CAM_LOOK", "cartoon")
+WATER = np.array([96.0, 118.0, 92.0])       # BGR far things fade to (the Oct 24 lake's olive)
+FLOOR = np.array([74.0, 96.0, 80.0])        # the floor, blotches +-BLOTCH on it
+BLOTCH = np.array([20.0, 22.0, 18.0])
+PIPE_C = np.array([215.0, 228.0, 222.0])    # the white pipe
+FADE_M = 4.0                                # half the contrast gone this far from the lens
+DECOY = [float(v) for v in os.environ.get("SIM_DECOY", "").split()] or None
 
 _frame, _lock = None, threading.Lock()
 
@@ -88,6 +102,17 @@ class SimCamera:
             n = max(2, int(np.linalg.norm(b - a) / 0.02))
             pts.append(a + (b - a) * np.linspace(0, 1, n)[:, None])
         self.pipe = np.vstack(pts)
+        self.hidden = np.zeros(len(self.pipe), bool)
+        self.decoy = None
+        if DECOY:                           # beside the pipe, at its height, the pipe hidden there
+            off, s0, s1 = DECOY
+            s = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(self.pipe, axis=0), axis=1))])
+            tan = np.gradient(self.pipe[:, :2], axis=0)
+            side = np.column_stack([-tan[:, 1], tan[:, 0], np.zeros(len(tan))])
+            side /= np.maximum(np.linalg.norm(side, axis=1, keepdims=True), 1e-9)
+            self.hidden = (s >= s0) & (s <= s1)
+            self.decoy = self.pipe[self.hidden] + off * side[self.hidden]
+            print(f"sim_camera: decoy {off} m beside the pipe from {s0} to {s1} m along it", flush=True)
         self.rng = np.random.default_rng(3)
         self.repaired = {}                  # box index -> when the magnet reached its RED light
 
@@ -132,19 +157,49 @@ class SimCamera:
             v = H / 2 - F * b[:, 0] / z                   # forward is up in the picture
         return u, v, z
 
+    def _floor(self, cam, r):
+        """SIM_CAM_LOOK=real: the floor under each pixel (worked out on a 160x90 grid), its blotches fixed to
+        the floor so they slide past as the sub moves, fading into the water with distance."""
+        s = self.get_sonar()
+        u, v = np.meshgrid((np.arange(160) + 0.5) * 4, (np.arange(90) + 0.5) * 4)
+        w = np.stack([-(v - H / 2) / F, (u - W / 2) / F, np.ones_like(u)], -1) @ r.T     # NED rays
+        t = (s.depth - cam[2]) / np.maximum(w[..., 2], 1e-3)
+        n, e = cam[0] + t * w[..., 0], cam[1] + t * w[..., 1]
+        tex = (0.6 * np.sin(n * 7.1 + 1.3 * np.sin(e * 3.3)) * np.sin(e * 6.3 + 1.1 * np.sin(n * 2.9))
+               + 0.4 * np.sin(n * 2.3 + e * 1.7) * np.sin(e * 2.9 - n * 1.1))
+        tex = cv2.resize(tex.astype(np.float32), (W, H))[..., None]
+        k = cv2.resize(np.exp(-t * math.log(2) / FADE_M).astype(np.float32), (W, H))[..., None]
+        return WATER + (FLOOR + tex * BLOTCH - WATER) * k
+
+    @staticmethod
+    def _faded(c, z):
+        return tuple(float(x) for x in WATER + (c - WATER) * math.exp(-max(z, 0.0) * math.log(2) / FADE_M))
+
     def render(self):
-        img = np.full((H, W, 3), (22, 18, 10), np.uint8)
-        noise = self.rng.normal(0, 4, (H, W, 1)).astype(np.int16)
-        img = np.clip(img.astype(np.int16) + noise, 0, 255).astype(np.uint8)
+        real = LOOK == "real"
         pose = self._pose()
+        if real and pose is not None:
+            img = self._floor(*pose)
+            img = np.clip(img + self.rng.normal(0, 3, (H, W, 1)), 0, 255).astype(np.uint8)
+        else:
+            img = np.full((H, W, 3), (22, 18, 10), np.uint8)
+            noise = self.rng.normal(0, 4, (H, W, 1)).astype(np.int16)
+            img = np.clip(img.astype(np.int16) + noise, 0, 255).astype(np.uint8)
         if pose is not None:
             cam, r = pose
             u, v, z = self._project(self.pipe, cam, r)
-            ok = z > 0.15
+            ok = (z > 0.15) & ~self.hidden
             for i in range(len(u) - 1):
                 if ok[i] and ok[i + 1]:
                     t = max(1, int(PIPE_D * F / z[i]))
-                    cv2.line(img, (int(u[i]), int(v[i])), (int(u[i + 1]), int(v[i + 1])), (70, 76, 72), t)
+                    cv2.line(img, (int(u[i]), int(v[i])), (int(u[i + 1]), int(v[i + 1])),
+                             self._faded(PIPE_C, z[i]) if real else (70, 76, 72), t, cv2.LINE_AA if real else cv2.LINE_8)
+            if self.decoy is not None:
+                du, dv, dz = self._project(self.decoy, cam, r)
+                for i in range(len(du) - 1):
+                    if dz[i] > 0.15 and dz[i + 1] > 0.15:
+                        cv2.line(img, (int(du[i]), int(dv[i])), (int(du[i + 1]), int(dv[i + 1])),
+                                 self._faded(PIPE_C, dz[i]), max(1, int(PIPE_D * F / dz[i])), cv2.LINE_AA)   # just like it
             magnet = cam + r @ MAG_BODY
             for i, (c, d, colour) in enumerate(self.boxes):
                 across = np.cross(d, (0.0, 0.0, 1.0))
@@ -158,7 +213,14 @@ class SimCamera:
                 cu, cv_, cz = self._project(np.array(corners), cam, r)
                 if np.any(cz <= 0.1):
                     continue
-                cv2.fillPoly(img, [np.stack([cu, cv_], 1).astype(np.int32)], (48, 50, 50))
+                poly = np.stack([cu, cv_], 1).astype(np.int32)
+                if real:                        # a clear case: the floor shows through darker, its edges pale
+                    case = img.copy()
+                    cv2.fillPoly(case, [poly], (60, 70, 66))
+                    img = cv2.addWeighted(case, 0.45, img, 0.55, 0)
+                    cv2.polylines(img, [poly], True, self._faded(np.array([175.0, 190.0, 185.0]), cz[0]), 2, cv2.LINE_AA)
+                else:
+                    cv2.fillPoly(img, [poly], (48, 50, 50))
                 if colour is None:
                     continue
                 lu, lv, lz = self._project(top, cam, r)

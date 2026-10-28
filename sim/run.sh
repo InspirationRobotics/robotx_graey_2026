@@ -12,6 +12,8 @@
 # a corner at POOL_N0, POOL_E0 from home, and the pipeline hung without legs at
 # PIPE_DEPTH (default half the water depth).
 # SIM_IMAGE=graey-sitl-yolo: an image with ultralytics added, for the mission's light_detector:=yolo.
+# SIM_CAM_LOOK=real / SIM_DECOY="off from to": the down camera closer to the real one, and a fake pipe
+# beside the real one (sim/sim_camera.py) - for camera_follow.
 # Stop with:  docker rm -f graey-sitl
 set -e
 cd "$(dirname "$0")/.."
@@ -26,7 +28,7 @@ docker run -d --name graey-sitl \
     -e PIPE_N="${PIPE_N:-3}" -e PIPE_E="${PIPE_E:-2}" -e PIPE_HDG="${PIPE_HDG:-30}" \
     -e QGC="${QGC:-0}" -e SIM_WORLD="${SIM_WORLD:-harbor}" -e PIPE_DEPTH="${PIPE_DEPTH:-}" -e PIPE_SEED="${PIPE_SEED:-7}" \
     -e SIM_N_BOXES="${SIM_N_BOXES:-4}" -e SIM_BOX_COLOURS="${SIM_BOX_COLOURS:-red green blue yellow}" \
-    -e SIM_CAM_HFOV="${SIM_CAM_HFOV:-55}" \
+    -e SIM_CAM_HFOV="${SIM_CAM_HFOV:-55}" -e SIM_CAM_LOOK="${SIM_CAM_LOOK:-cartoon}" -e SIM_DECOY="${SIM_DECOY:-}" \
     -e POOL_L="${POOL_L:-11}" -e POOL_W="${POOL_W:-7}" -e POOL_N0="${POOL_N0:--3}" -e POOL_E0="${POOL_E0:--2}" \
     "${SIM_IMAGE:-graey-sitl}" bash sim/inside.sh >/dev/null
 echo "graey-sitl starting. Logs: docker exec graey-sitl tail -f /tmp/sim/sitl.log"

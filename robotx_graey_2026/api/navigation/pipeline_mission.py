@@ -241,6 +241,16 @@ MODE_POSHOLD = 16       # ArduSub custom mode number (mode.h)
 SIDE_WINDOW_DEG = 60.0  # pool plan: the pick's nearest point this close to straight out the sonar's side
 BEHIND_M = 0.5          # ... and its middle no farther behind where the scan started
 POOL_FULL_M = 0.8       # pool scan: a shape this long gets full length marks (none below 0.3 m)
+CAM_WINDOW, CAM_NEED = 6, 3     # camera_follow: a line steers once 3 of the last 6 pictures (~1 s at the camera
+                                # thread's ~5-6 a second) had it in about the same place (pipe_line.Steady)
+CAM_FRESH_S = 1.0       # ... while the newest steady line is this recent; the sonar steers after this long without
+CAM_DIR_TAU = 1.5       # s: the pipe's direction moves toward the camera's this quickly
+CAM_DOTS = 3            # sonar dots on a line: the sonar sees the pipe there
+CAM_VERDICT_DOTS = 2    # a disagreement's two fresh sweeps: held still and looking straight down, each crosses the
+                        # pipe about once (sim, Oct 27: 2 dots) - the line with more of them, at least this many
+CAM_DISPUTE_MAX_S = 30.0    # a hold for a disagreement ends after this long, two sweeps or not
+CAM_SAY = {'camera': 'steering by the camera', 'sonar': 'steering by the sonar',
+           'hold': 'holding while fresh sweeps decide'}
 CENTRE_GAIN = 0.3       # repair centring: each picture's guess of the lined-up spot counts this much
 GREEN_DONE = 0.05       # repair: the light has turned GREEN once green fills this share of the picture
 RED_SEEN = 0.02         # ... and is still the RED light while red fills at least this share
@@ -254,6 +264,9 @@ TURN_MIN_S = 4.0        # ... and an eased turn to a stop takes at least this lo
                         # swings ~1.6-2 s each way, and a 10 deg turn over 0.5 s set it going (Oct 25 pool)
 DENSE_M = 0.15          # ... its densest spot: the dot with the most others this close
 PATH_M = 0.35           # lost search: dots this close to where the sonar went are the part already followed
+TRANSIT_SWEEPS = 4      # transit: a bunch from the dots of the last this many sweeps (they slide past as it moves)
+TRANSIT_SKIP_M = 1.0    # ... a closer look that didn't pass: nothing within this of its spot stops it again
+TRANSIT_LOG_S = 10.0
 SAME_SPOT_M = 0.5       # ... the pipe lost this close to where it was lost before: the same spot
 ALIGN_GATE_M = 0.3      # align walk: dots this far either side of where the pipe was last seen count -
 ALIGN_FIRST_M = 0.6     # ... this far until it is first seen: the side-looking search places the pipe up to
@@ -497,6 +510,12 @@ class PipelineMission(MissionBase):
         p('scan_mode', 'turn')              # 'turn': one slow turn; 'stops': stop and look
                                             # (stops shelved Oct 15: the sub slid at each heading jump);
                                             # 'search': stops, and a closer look where something shows (Oct 23)
+                                            # 'transit' (Ruth, Oct 27): from the start buoy toward the end buoy
+                                            # until something shows, then the same closer look
+        p('transit_speed', 0.10)            # transit: m/s along the heading the sub had at the start, at the
+                                            # surface by the start buoy, pointed at the end buoy
+        p('end_buoy_m', 0.0)                # transit: the end buoy this far from the start buoy (m) - must be set
+        p('end_short_m', 2.0)               # ... nothing found this far short of it: surface
         p('scan_time_s', 300.0)             # pool: give up searching (turns + picks) after this
         p('retry_turn_deg', 180.0)          # pool: nothing picked -> turn this much more and look again
         p('scan_stops', 20)                 # stops: this many headings round scan_turn_deg
@@ -613,6 +632,17 @@ class PipelineMission(MissionBase):
         p('cam_f_px', 330.0)                # length (full-size px, rough: Oct 22, from where the magnet shows
                                             # 15 cm under the lens) turn pixels into metres; only the speed of
                                             # the correction depends on them
+        p('camera_follow', False)           # True (Ruth, Oct 27): while following, steer by the down camera's pipe
+                                            # line (api/vision/pipe_line.py) whenever it has a steady one; the
+                                            # sonar keeps sweeping, checks it, and steers when the camera has none
+        p('cam_disagree_m', 0.3)            # the camera's line and the sonar's pipe dots where the camera looks
+        p('cam_disagree_deg', 25.0)         # this far apart sideways, or in direction, for cam_disagree_s:
+        p('cam_disagree_s', 3.0)            # hold still for two fresh sweeps and follow the line their dots are on
+                                            # (on neither: the sonar) - Ruth, Oct 27
+        p('cam_log', '')                    # camera_follow: a CSV of every picture's line, '' = none
+        p('cam_boxes', 'lights')            # the light boxes the pipe finder leaves out: 'lights' = the light model's
+                                            # boxes, else contrast_lights' glows (sim, Oct 27: much bigger than the
+                                            # case, they hid the pipe); 'none' = no boxes
         p('watch_rise_m', 0.05)             # once GREEN: rise this much and watch the light's colours this long
         p('watch_s', 40.0)                  # (handbook: GREEN 5 s, then 30 s of flashes; the colour-sequence
                                             # reader comes later - Ruth, Oct 22)
@@ -730,6 +760,16 @@ class PipelineMission(MissionBase):
         self.centre_min_alt, self.centre_speed = float(g('centre_min_alt_m')), float(g('centre_speed'))
         self.centre_time, self.light_above_floor = float(g('centre_time_s')), float(g('light_above_floor_m'))
         self.cam_f = float(g('cam_f_px'))
+        self.cam_follow = bool(g('camera_follow'))
+        self.cam_dis_m, self.cam_dis_ang = float(g('cam_disagree_m')), math.radians(float(g('cam_disagree_deg')))
+        self.cam_dis_s, self.cam_log = float(g('cam_disagree_s')), g('cam_log').strip()
+        self.cam_boxes = g('cam_boxes').strip().lower()
+        if self.cam_boxes not in ('lights', 'none'):
+            raise ValueError(f"cam_boxes must be lights or none, not {self.cam_boxes!r}")
+        self.cam_line, self.cam_steady, self.cam_mode = None, None, 'sonar'
+        self.cam_reset()
+        self.cam_ticks = {'camera': 0, 'sonar': 0, 'hold': 0}
+        self.cam_disputes = {'camera': 0, 'sonar': 0}
         self.watch_rise, self.watch_s = float(g('watch_rise_m')), float(g('watch_s'))
         self.light_min_share = float(g('light_min_share'))
         self.light_min_frac = float(g('light_min_frac'))
@@ -761,8 +801,13 @@ class PipelineMission(MissionBase):
         self.scan_mode = g('scan_mode').strip().lower()
         self.scan_time = float(g('scan_time_s'))
         self.retry_turn = math.radians(g('retry_turn_deg'))
-        if self.scan_mode not in ('turn', 'stops', 'search'):
-            raise ValueError(f"scan_mode must be turn, stops or search, not {self.scan_mode!r}")
+        self.transit_speed, self.end_buoy = float(g('transit_speed')), float(g('end_buoy_m'))
+        self.end_short = float(g('end_short_m'))
+        if self.scan_mode == 'transit' and self.end_buoy <= self.end_short:
+            raise ValueError(f'scan_mode:=transit needs end_buoy_m, how far the end buoy is from the start buoy '
+                             f'(more than end_short_m {self.end_short:.1f}), not {self.end_buoy:.1f}')
+        if self.scan_mode not in ('turn', 'stops', 'search', 'transit'):
+            raise ValueError(f"scan_mode must be turn, stops, search or transit, not {self.scan_mode!r}")
         self.scan_stops = max(1, int(g('scan_stops')))
         self.sweeps_per_stop = min(5, max(1, int(g('sweeps_per_stop'))))
         self.search_step = math.radians(max(5.0, float(g('search_step_deg'))))
@@ -952,7 +997,10 @@ class PipelineMission(MissionBase):
                     self.map_origin = (self.cur[0], self.cur[1], self.cur_yaw)
                 self.turned, self.last_yaw = 0.0, self.cur_yaw
                 self.scan_t0, self.turn_goal, self.turn_no = self.now(), self.scan_turn, 1
-                if self.scan == 'pool' and (self.scan_mode == 'search' or self.srch is not None):
+                if self.scan == 'pool' and self.scan_mode == 'transit' and (
+                        self.srch is None or self.srch.get('transit') is not None):
+                    self.transit_start()
+                elif self.scan == 'pool' and (self.scan_mode == 'search' or self.srch is not None):
                     self.search_start()
                 elif self.scan_mode == 'stops':
                     self.stop_i, self.stop_yaw0 = 0, (self.cur_yaw if self.cur_yaw is not None else self.hold[3])
@@ -1009,6 +1057,9 @@ class PipelineMission(MissionBase):
                     self.to_phase(f'{self.scan} scan: settle')
                 else:
                     self.to_phase(f'{self.scan} scan: stop turn', self.stop_label())
+
+        elif ph == 'transit':
+            self.transit_step(self.map_get())
 
         elif ph == 'turn':
             n, e, down, _ = self.hold
@@ -1745,8 +1796,175 @@ class PipelineMission(MissionBase):
         self.hold = (self.hold[0], self.hold[1], self.hold[2], self.cur_yaw if self.cur_yaw is not None else self.hold[3])
         self.to_phase(f'{self.scan} scan: settle')
 
+    # ---- transit (Ruth, Oct 27): start buoy -> end buoy until something shows, then the closer look ----
+    def transit_start(self):
+        """From the start buoy along the heading the sub had there at the surface (pointed at the end buoy), at
+        transit_speed and the search's depth, the sonar looking down both sides (pool_sector). A bunch of dots,
+        a pipe-shaped outline on the map, or the down camera's steady pipe line (camera_follow) stops it; nothing
+        by end_short_m before the end buoy: surface. Also where it goes on from after a look that didn't pass."""
+        if self.srch is None:
+            self.srch = {'kind': 'approach', 't0': self.now(), 'resume': None, 'n': 1, 'step': 0.0,
+                         'transit': {'o': (self.start_x, self.start_y), 'yaw': self.start_yaw, 'skip': [],
+                                     'skip_cam': [], 'skip_lines': [], 'looks': 0}}
+            self.get_logger().info(f'    transit: from the start buoy heading {math.degrees(self.start_yaw) % 360:.0f} deg '
+                                   f'at {self.transit_speed:.2f} m/s, sonar {self.scans["pool"][1]}, until something shows '
+                                   f'or {self.end_buoy - self.end_short:.1f} m along ({self.end_short:.0f} m short of the end buoy)')
+        T, here = self.srch['transit'], self.cur if self.cur else self.hold
+        u = np.array([math.cos(T['yaw']), math.sin(T['yaw'])])
+        T['s'] = max(0.0, float((np.array(here[:2]) - np.array(T['o'])) @ u))
+        self.stop_dots, self.s_known, self.look, self.still_t = [], set(), None, None
+        self.last_t = self.transit_log = self.now()
+        self.to_phase(f'{self.scan} scan: transit')
+
+    def transit_skipped(self, xy_map):
+        """Map points near a spot a closer look (or the walk) already turned down."""
+        T = self.srch['transit']
+        P = np.array([self.map_to_ned(x, y) for x, y in np.asarray(xy_map, float).reshape(-1, 2)], float).reshape(-1, 2)
+        out = np.zeros(len(P), bool)
+        for q in T['skip'] + T['skip_cam']:
+            out |= np.hypot(P[:, 0] - q[0], P[:, 1] - q[1]) <= TRANSIT_SKIP_M
+        for line in T['skip_lines']:
+            out |= outlines.dist_to_polyline(P, line) <= 0.5
+        return out
+
+    def transit_step(self, m):
+        T, now = self.srch['transit'], self.now()
+        yaw = T['yaw']
+        u = np.array([math.cos(yaw), math.sin(yaw)])
+        here = self.cur if self.cur else self.hold
+        along = float((np.array(here[:2]) - np.array(T['o'])) @ u)
+        if along >= self.end_buoy - self.end_short:
+            msg = (f'transit: {along:.1f} m along, {self.end_short:.0f} m short of the end buoy, and no pipe - surfacing')
+            self.get_logger().warn(msg)
+            self.mark(msg)
+            self.srch = None
+            self.enter(S.SURFACE)
+            return
+        # a carrot along the line from the start buoy, never more than 0.5 m ahead of the sub
+        dt, self.last_t = min(now - self.last_t, 0.5), now
+        T['s'] = min(T['s'] + self.transit_speed * dt, along + 0.5)
+        tn, te = np.array(T['o']) + T['s'] * u
+        rate, _ = self.yaw_rate_to(yaw)
+        self.hold = (here[0], here[1], self.hold[2], yaw)
+        self.stream_posvel(tn, te, self.hold[2], self.transit_speed * u[0], self.transit_speed * u[1], rate, 'transit')
+        if self.dry and now - self.state_t0 < 0.3:
+            self.get_logger().info(f'    dry run: drive the sub along heading {math.degrees(yaw) % 360:.0f} deg')
+        # the sonar: the dots of the last TRANSIT_SWEEPS sweeps, less those near spots already turned down
+        self.stop_collect(m)
+        sw = m.get('sweep', 0)
+        self.stop_dots = [d for d in self.stop_dots if sw - d[3] <= TRANSIT_SWEEPS]
+        if self.stop_dots and (T['skip'] or T['skip_cam'] or T['skip_lines']):
+            keep = ~self.transit_skipped([d[:2] for d in self.stop_dots])
+            self.stop_dots = [d for d, k in zip(self.stop_dots, keep) if k]
+        sx, sy = m.get('sonar') or (0.0, 0.0)
+        found = None
+        blob = self.stop_blob(m)
+        if blob is not None:            # crossing the track, or end on: dots in one spot from 2+ sweeps
+            (bx, by), n, k, up = blob
+            found = (f'{n} dots in one spot from {k} sweeps', (bx, by), up)
+        else:                           # along the track: each sweep hits it further on - a line, not a bunch
+            cands, _, _ = pool_candidates(m.get('outlines') or [], [sx, sy], 0.0, self.pool_max_pick,
+                                          ignore_flat=self.pool_band != 'off')
+            for score, g in cands:
+                if score < self.look_min_score:
+                    break
+                sp = np.array(g['spine'], float)
+                if self.transit_skipped(sp).mean() > 0.5:
+                    continue
+                q = sp[int(np.argmin(np.hypot(sp[:, 0] - sx, sp[:, 1] - sy)))]
+                found = (f'a pipe-shaped line on the map (pipe {score:.0%}, {g["length"]:.1f} m)', (float(q[0]), float(q[1])), None)
+                break
+        if self.cam_follow:             # the down camera (Ruth, Oct 27): it sees its line before the sonar - on to it
+            self.cam_follow_watch()
+            c = self.cam_line
+            if found is None and c is not None and now - c[0] <= CAM_FRESH_S:
+                # only a spot the camera itself led to (and the walk turned down) mutes it: a sonar look that
+                # didn't pass says nothing against the camera's own line
+                near = any(math.hypot(c[1][0] - q[0], c[1][1] - q[1]) <= TRANSIT_SKIP_M for q in T['skip_cam'])
+                if not near:
+                    self.transit_camera(c, along)
+                    return
+        if found is not None:
+            self.transit_look(found, along, m)
+            return
+        if now - self.transit_log >= TRANSIT_LOG_S:
+            self.transit_log = now
+            self.get_logger().info(f'    transit: {along:.1f} of {self.end_buoy - self.end_short:.1f} m, '
+                                   f'{len(self.stop_dots)} recent dot(s), nothing yet')
+
+    def transit_hold_here(self, T, at_ned, by='sonar'):
+        """Stop the transit where the sub is: the search's spot (back here if the walk says no), and the spot
+        being looked at (turned down if it doesn't pass) and what found it."""
+        here = self.cur if self.cur else self.hold
+        sr = self.srch
+        sr['goal'], sr['yaw'], sr['z'] = (here[0], here[1]), T['yaw'], self.hold[2]
+        T['at'], T['at_by'], T['looks'] = at_ned, by, T['looks'] + 1
+        self.hold = (here[0], here[1], self.hold[2], T['yaw'])
+        self.goto_ned(*self.hold, 'hold')
+
+    def transit_look(self, found, along, m):
+        why, (bx, by), up = found
+        T = self.srch['transit']
+        self.transit_hold_here(T, self.map_to_ned(bx, by))
+        T['at_line'] = None
+        for score, g in (pool_candidates(m.get('outlines') or [], m.get('sonar') or [0.0, 0.0], 0.0, self.pool_max_pick,
+                                         ignore_flat=self.pool_band != 'off')[0]):
+            sp = np.array(g['spine'], float)
+            if float(outlines.dist_to_polyline(np.array([[bx, by]]), sp)[0]) <= LOOK_NEAR_M:
+                T['at_line'] = np.array([self.map_to_ned(x, y) for x, y in sp], float)
+                break
+        steps = max(1, int(round(self.look_span / self.look_step)))
+        heads = [T['yaw'] + i * self.look_step for i in range(-steps, steps + 1) if i != 0]
+        self.look = {'heads': heads, 'k': 0, 'blob': (bx, by), 'up': up}
+        self.stop_yaw0, self.stop_i, self.stop_dots = T['yaw'], 0, []
+        sx, sy = m.get('sonar') or (0.0, 0.0)
+        msg = (f'transit: {why}, {math.hypot(bx - sx, by - sy):.1f} m from the sonar, {along:.1f} m along - stopping '
+               f'for a closer look: {len(heads)} stops {math.degrees(self.look_step):.0f} deg apart')
+        self.get_logger().info(msg)
+        self.mark(msg)
+        self.to_phase(f'{self.scan} scan: stop turn', self.stop_label())
+
+    def transit_camera(self, c, along):
+        """The camera's steady pipe line before the sonar found anything: over it (the sonar straight down), lined
+        up along it - the same check and walk as after a closer look - then the survey."""
+        T = self.srch['transit']
+        u = np.array([math.cos(T['yaw']), math.sin(T['yaw'])])
+        pt, cd = c[1], (c[2] if c[2] @ u >= 0 else -c[2])
+        self.transit_hold_here(T, (float(pt[0]), float(pt[1])), 'camera')
+        T['at_line'] = None
+        here = self.cur if self.cur else self.hold
+        msg = (f'transit: the down camera has a steady pipe line {along:.1f} m along, the sonar nothing yet - over it '
+               f'at NED ({pt[0]:.2f}, {pt[1]:.2f}), heading {math.degrees(math.atan2(cd[1], cd[0])) % 360:.0f} deg, lining up')
+        self.get_logger().info(msg)
+        self.mark(msg)
+        self.look = None
+        self.f_dir, self.over_pt, self.spot_active, self.aligned, self.a_up = cd.copy(), (float(pt[0]), float(pt[1])), None, False, None
+        self.a_up_z = here[2] if len(here) > 2 else self.hold[2]
+        self.align_rev, self.over_checked = False, False
+        self.anchor_then('over the pipe: sonar straight down', self.go_over_start)
+
+    def transit_skip(self):
+        """The spot just looked at isn't the pipe: never stop for it again."""
+        T = self.srch['transit']
+        if T.get('at') is not None:
+            T['skip_cam' if T.get('at_by') == 'camera' else 'skip'].append(tuple(T['at']))
+        if T.get('at_line') is not None:
+            T['skip_lines'].append(T['at_line'])
+        T['at'] = T['at_line'] = None
+
+    def transit_resume(self):
+        T = self.srch['transit']
+        self.transit_skip()
+        msg = f'transit: not the pipe - on toward the end buoy ({T["looks"]} closer look(s) so far)'
+        self.get_logger().info('    ' + msg)
+        self.mark(msg)
+        self.transit_start()
+
     def next_stop(self):
         self.look = None
+        if self.srch.get('transit') is not None:     # the transit's closer look didn't pass: on along the line
+            self.transit_resume()
+            return
         self.stop_i += 1
         if self.stop_i >= self.srch['n']:
             self.search_failed(f'nothing passed in {self.srch["n"]} stops')
@@ -1840,7 +2058,9 @@ class PipelineMission(MissionBase):
     def search_go_back(self, resume_i):
         """Back to where the search turns, then on with its stops from resume_i (None: all again)."""
         sr = self.srch
-        if resume_i is not None and resume_i >= sr['n']:
+        if sr.get('transit') is not None:
+            self.transit_skip()
+        elif resume_i is not None and resume_i >= sr['n']:
             self.search_failed(f'nothing passed in {sr["n"]} stops')
             return
         sr['resume'] = resume_i
@@ -2120,6 +2340,7 @@ class PipelineMission(MissionBase):
         self.f_lost_now, self.f_prev_loss, self.f_stuck_t, self.f_hold_pt, self.f_creep0 = False, None, None, None, None
         self.f_prev = np.array([here[0] + ahead * math.cos(h), here[1] + ahead * math.sin(h)])
         self.f_known = set()
+        self.cam_reset()
         msg = (f'back on the pipe after {sr["entry"]["n"]} search(es) where it was lost - following on, heading '
                f'{math.degrees(math.atan2(self.f_dir[1], self.f_dir[0])) % 360:.0f} deg')
         self.get_logger().info(msg)
@@ -2271,6 +2492,7 @@ class PipelineMission(MissionBase):
             self.f_lost_now, self.f_prev_loss, self.f_stuck_t = False, None, None
             self.f_reversed, self.f_hold_pt, self.f_leg_t0, self.f_creep0 = False, None, self.now(), None
             self.f_start, self.f_dir0, self.f_path = (here[0], here[1]), self.f_dir.copy(), []
+            self.cam_reset()
             if self.aligned and self.align_walk > 0 and getattr(self, 'over_pt', None) is not None:
                 # the walk has just seen the pipe here: missing from the start is a lost pipe (search for
                 # it), not one that never showed (sim, Oct 25: following began past a stretch's end)
@@ -2384,13 +2606,21 @@ class PipelineMission(MissionBase):
                                     self.map_post('/mark', f'possible box {up[k] - pipe_up:.2f} m above the pipe')
                                 except OSError:
                                     pass
+        # the down camera's line, checked against the sonar's dots (camera_follow, Ruth Oct 27)
+        cam = 'sonar'
+        if self.cam_follow:
+            cam = self.cam_follow_step(now, sonar, m, sw)
+            d = self.f_dir
+            right = np.array([-d[1], d[0]])
         # done?
         self.f_dist += max(0.0, float((sonar - self.f_prev) @ d))
         self.f_prev = sonar
         why = None
         seen = self.f_seen if self.f_seen is not None else self.f_leg_t0
-        lost = self.f_seen is not None and (now - seen > self.follow_lost
-                                            or (self.f_stuck_t is not None and now - self.f_stuck_t > self.follow_lost))
+        if self.cam_seen is not None:                      # the camera steering by the pipe counts as seeing it
+            seen = max(seen, self.cam_seen)
+        lost = (self.f_seen is not None or self.cam_seen is not None) and (
+            now - seen > self.follow_lost or (self.f_stuck_t is not None and now - self.f_stuck_t > self.follow_lost))
         # the camera sees the pipe's end here (the model, Ruth Oct 25): gone from under the sonar with its end
         # in view, it is the end - no waiting follow_lost_s, no search
         at_end = (self.f_line is not None and self.pipe_missing(sw)
@@ -2435,6 +2665,7 @@ class PipelineMission(MissionBase):
             self.f_seen, self.f_leg_t0, self.f_lat, self.f_creep0, self.f_hold_pt = None, now, 0.0, None, None
             self.f_line = None
             self.f_lost_now, self.f_prev_loss, self.f_stuck_t = False, None, None
+            self.cam_reset()
             return
         if at_end:
             why = 'the camera saw the pipe\'s end'
@@ -2451,6 +2682,8 @@ class PipelineMission(MissionBase):
             poshold = self.follow_end == 'poshold' and not self.dry
             self.get_logger().info(f'follow done: {why}; {self.f_dist:.1f} m along the pipe - '
                                    + ('switching to POSHOLD, take over with the remote' if poshold else 'holding, then surfacing'))
+            if self.cam_follow:
+                self.cam_summary()
             self.stop_camera(why)
             if poshold:
                 self.end_in_poshold()
@@ -2463,7 +2696,8 @@ class PipelineMission(MissionBase):
         v = min(self.follow_speed, self.follow_step / max(self.f_period, 1.0))
         yaw_d = math.atan2(d[1], d[0])
         rate, err = self.yaw_rate_to(yaw_d)
-        waiting = self.pipe_missing(sw) or self.f_stuck_t is not None
+        # missing from under the sonar, but the camera steering by it: not waiting for it
+        waiting = (self.pipe_missing(sw) and cam != 'camera') or self.f_stuck_t is not None
         if waiting and not self.f_lost_now and self.f_line is not None:
             self.f_lost_now = True
             self.note_loss(now)
@@ -2479,7 +2713,13 @@ class PipelineMission(MissionBase):
             if self.f_creep0 is None:
                 self.f_creep0 = sonar.copy()
             creep = float(np.linalg.norm(sonar - self.f_creep0)) < 1.0
-        if creep:
+        if cam == 'hold':
+            # the camera and the sonar disagree: stay on one spot while fresh sweeps decide (Ruth, Oct 27)
+            v = 0.0
+            if self.f_hold_pt is None:
+                self.f_hold_pt = (here[0], here[1])
+            tn, te = self.f_hold_pt
+        elif creep:
             v *= 0.5
             self.f_hold_pt = None
             goal = sonar + d * v
@@ -2518,6 +2758,7 @@ class PipelineMission(MissionBase):
                 f'(sub {math.degrees(h) % 360:.0f}), pipe {abs(self.f_lat):.2f} m '
                 f'{"right" if self.f_lat >= 0 else "left"} of the sonar, {v:.2f} m/s, sweep {self.f_period:.1f} s'
                 + (f', last seen {now - seen:.0f} s ago' if now - seen > 3 else '')
+                + (f', {CAM_SAY[cam]}' if self.cam_follow else '')
                 + (' (dry run: drive it there)' if self.dry else ''))
 
     def f_up_now(self):
@@ -2695,6 +2936,193 @@ class PipelineMission(MissionBase):
                               + max(b['colours'], key=b['colours'].get))
             except OSError:
                 pass
+
+    # ---- camera_follow (Ruth, Oct 27): the down camera's pipe line steers, the sonar checks it ----
+    def cam_reset(self):
+        """A new follow, or a turn round: no hold, no distrust, nothing seen by the camera yet."""
+        self.cam_dispute, self.cam_bad_t, self.cam_distrust, self.cam_seen, self.cam_t = None, None, False, None, None
+
+    def cam_follow_watch(self):
+        """The pipe finder on every picture of the camera thread - which is started here, counting nothing,
+        if nothing else has the camera on."""
+        if self.camera is None:
+            self.camera = led_boxes.CameraWatcher(self.camera_url, self.camera_at,
+                                                  lambda t: self.get_logger().info('    ' + t), None,
+                                                  tracker=led_boxes.NoTracker(), yolo=self.yolo_lights()).start()
+            self.cam_ends_only = True
+        if self.camera.on_frame is None:
+            from robotx_graey_2026.api.vision import pipe_line     # cv2: only where the camera runs
+            self.pipe_line = pipe_line
+            self.cam_steady = pipe_line.Steady(window=CAM_WINDOW, need=CAM_NEED)
+            self.camera.on_frame = self.on_cam_frame
+            self.get_logger().info('    camera: following the pipe in the down camera too (camera_follow)')
+
+    def on_cam_frame(self, t, rgb, full, dets):
+        """The camera thread, every picture: the pipe's line in it, the light boxes left out (the light model's
+        boxes, else contrast_lights' coloured glows), placed in NED once steady: (time, a point on the pipe
+        nearest the picture's middle, its direction, confidence) in cam_line."""
+        pl = self.pipe_line
+        if self.cam_boxes == 'none':
+            boxes = []
+        elif dets is not None:
+            boxes = [d['box'] for d in dets if d['colour'] != 'pipe_end']
+        else:
+            boxes = [b['box'] for b in led_boxes.contrast_lights(rgb) if b['colour'] != 'white']
+        r = pl.detect(full, boxes)
+        steady = self.cam_steady.update(r)
+        placed = None
+        cur, yaw = self.cur, self.cur_yaw
+        if steady and cur and yaw is not None:
+            lb = self.light_below(self.floor_clearance())
+            if lb is not None:
+                dist = min(max(lb + BOX_H_M, 0.2), 3.0)          # the pipe's top below the camera (m)
+                k = full.shape[1] / pl.W                          # working px -> full-size px
+                arm = r['arms'][0]
+                a, b = np.asarray(arm['a'], float) * k, np.asarray(arm['b'], float) * k
+                mid = np.array([full.shape[1] / 2, full.shape[0] / 2])
+                ab = b - a
+                u, v = a + float(np.clip((mid - a) @ ab / max(float(ab @ ab), 1e-9), 0, 1)) * ab
+                ch, sh = math.cos(yaw), math.sin(yaw)
+                cn, ce = cur[0] + self.camera_fwd * ch, cur[1] + self.camera_fwd * sh
+                fwd, rt = -(v - mid[1]) * dist / self.cam_f, (u - mid[0]) * dist / self.cam_f   # the top is ahead
+                df, dr = -arm['dir'][1], arm['dir'][0]
+                dn = np.array([df * ch - dr * sh, df * sh + dr * ch])
+                placed = (self.now(), np.array([cn + fwd * ch - rt * sh, ce + fwd * sh + rt * ch]),
+                          dn / np.linalg.norm(dn), r['conf'])
+                self.cam_line = placed
+        if self.cam_log:
+            if getattr(self, 'cam_log_f', None) is None:
+                new = not os.path.exists(self.cam_log)
+                self.cam_log_f = open(self.cam_log, 'a')
+                if new:
+                    self.cam_log_f.write('t,conf,steady,boxes,pt_n,pt_e,dir_n,dir_e,sub_n,sub_e,yaw,mode\n')
+            self.cam_log_f.write(f'{self.now():.2f},{r["conf"]:.2f},{int(steady)},{len(boxes)},'
+                                 + (f'{placed[1][0]:.3f},{placed[1][1]:.3f},{placed[2][0]:.3f},{placed[2][1]:.3f},'
+                                    if placed else ',,,,')
+                                 + (f'{cur[0]:.3f},{cur[1]:.3f},{yaw:.4f}' if cur and yaw is not None else ',,')
+                                 + f',{self.cam_mode}\n')
+            self.cam_log_f.flush()
+
+    def cam_dots(self, m, skip=None):
+        """The sonar's dots (NED) at the pipe's height (follow_gate_up), and all the dots' keys; skip = keys
+        to leave out (dots already there)."""
+        if not m.get('crumbs'):
+            return np.zeros((0, 2)), set()
+        raw = np.array(m['crumbs'], float)
+        keys = [(round(x, 2), round(y, 2), round(z, 2)) for x, y, z in raw[:, [0, 1, 4]]]
+        ok = np.ones(len(raw), bool)
+        if self.f_up is not None and self.follow_gate_up > 0:
+            ok &= np.abs(raw[:, 4] - self.f_up_now()) <= self.follow_gate_up
+        if skip:
+            ok &= np.array([k not in skip for k in keys])
+        c = np.array([self.map_to_ned(x, y) for x, y in raw[ok, :2]], float).reshape(-1, 2)
+        return c, set(keys)
+
+    @staticmethod
+    def cam_vs_sonar(pt, cd, dots):
+        """Where the sonar's dots put the pipe at the camera's spot, against the camera's line (pt, cd):
+        (sideways m, angle rad or None, the sonar's direction there or None). None: too few dots there
+        to say. Compared where the camera looks, so at a bend - the sonar 0.2 m ahead - they don't differ."""
+        n = np.array([-cd[1], cd[0]])
+        rel = dots - pt
+        al, ac = rel @ cd, rel @ n
+        sel = (np.abs(al) <= 0.3) & (np.abs(ac) <= 1.5)
+        if sel.sum() < CAM_DOTS:
+            return None
+        across = float(np.median(ac[sel]))
+        near = (np.abs(al) <= 0.6) & (np.abs(ac - across) <= 0.3)
+        ang = sdir = None
+        if near.sum() >= 5 and np.ptp(al[near]) >= 0.4:
+            P = dots[near]
+            _, sv, vt = np.linalg.svd(P - P.mean(axis=0))
+            if sv[1] < 0.3 * sv[0]:                 # a straight line there, not an elbow's two arms
+                sdir = vt[0] if vt[0] @ cd >= 0 else -vt[0]
+                ang = math.acos(min(1.0, abs(float(sdir @ cd))))
+        return across, ang, sdir
+
+    @staticmethod
+    def dots_on(dots, pt, d, tol):
+        """How many dots lie on the line through pt along d (within tol sideways, 0.8 m along)."""
+        if not len(dots):
+            return 0
+        rel = dots - pt
+        return int(((np.abs(rel @ np.array([-d[1], d[0]])) <= tol) & (np.abs(rel @ d) <= 0.8)).sum())
+
+    def cam_set(self, mode):
+        if mode != self.cam_mode:
+            self.get_logger().info(f'    camera_follow: {CAM_SAY[mode]}')
+        self.cam_mode = mode
+        self.cam_ticks[mode] += 1
+        return mode
+
+    def cam_follow_step(self, now, sonar, m, sw):
+        """Each follow step: 'camera' when the camera's steady line steers it (the pipe's point is the
+        camera's, its direction pulls the pipe's), 'sonar' when the camera has none or isn't trusted,
+        'hold' while the two disagree and two fresh sweeps decide (Ruth, Oct 27)."""
+        self.cam_follow_watch()
+        dt = 0.0 if self.cam_t is None else min(max(now - self.cam_t, 0.0), 1.0)
+        self.cam_t = now
+        d, log = self.f_dir, self.get_logger()
+        dsp = self.cam_dispute
+        if dsp is not None:
+            if sw - dsp['sw'] < 2 and now - dsp['t'] < CAM_DISPUTE_MAX_S:
+                return self.cam_set('hold')
+            new, _ = self.cam_dots(m, skip=dsp['known'])
+            n_cam = self.dots_on(new, *dsp['cam'], self.cam_dis_m)
+            n_son = self.dots_on(new, *dsp['son'], self.cam_dis_m)
+            self.cam_dispute, self.cam_bad_t = None, None
+            if n_cam >= CAM_VERDICT_DOTS and n_cam > n_son:     # a tie: the sonar
+                self.cam_disputes['camera'] += 1
+                msg = f'camera_follow: the fresh sweeps put {n_cam} dots on the camera\'s line, {n_son} on the sonar\'s - the camera'
+            else:
+                self.cam_disputes['sonar'] += 1
+                self.cam_distrust = True
+                msg = (f'camera_follow: the fresh sweeps put {n_son} dots on the sonar\'s line, {n_cam} on the camera\'s - '
+                       + ('the sonar' if n_son >= CAM_VERDICT_DOTS else 'neither, so the sonar') + ' until the camera agrees with it')
+            log.info('    ' + msg)
+            self.mark(msg)
+            return self.cam_set('sonar')
+        c = self.cam_line
+        if c is None or now - c[0] > CAM_FRESH_S:
+            self.cam_bad_t = None
+            return self.cam_set('sonar')
+        pt, cd = c[1], (c[2] if c[2] @ d >= 0 else -c[2])
+        dots, keys = self.cam_dots(m)
+        vs = self.cam_vs_sonar(pt, cd, dots)
+        agree = vs is None or (abs(vs[0]) <= self.cam_dis_m and (vs[1] is None or vs[1] <= self.cam_dis_ang))
+        if self.cam_distrust:
+            if vs is None or not agree:
+                return self.cam_set('sonar')
+            self.cam_distrust = False
+            log.info('    camera_follow: the camera\'s line is on the sonar\'s pipe again - trusting it')
+        if agree:
+            self.cam_bad_t = None
+        else:
+            if self.cam_bad_t is None:
+                self.cam_bad_t = now
+            if now - self.cam_bad_t > self.cam_dis_s:
+                n = np.array([-cd[1], cd[0]])
+                self.cam_dispute = {'t': now, 'sw': sw, 'known': keys, 'cam': (pt.copy(), cd.copy()),
+                                    'son': (pt + vs[0] * n, vs[2] if vs[2] is not None else cd.copy())}
+                msg = (f'camera_follow: camera and sonar disagree for {self.cam_dis_s:.0f} s (the sonar\'s pipe '
+                       f'{vs[0]:+.2f} m to the side of the camera\'s'
+                       + (f', {math.degrees(vs[1]):.0f} deg off' if vs[1] is not None else '') + ') - holding for two fresh sweeps')
+                log.warn('    ' + msg)
+                self.mark(msg)
+                return self.cam_set('hold')
+        if cd @ d > 0.5:                            # never a swing of more than 60 deg from one line
+            w = 1.0 - math.exp(-dt / CAM_DIR_TAU)
+            nd = (1 - w) * d + w * cd
+            self.f_dir = nd / np.linalg.norm(nd)
+        self.f_line, self.cam_seen = pt.copy(), now
+        self.f_lat = float((pt - sonar) @ np.array([-self.f_dir[1], self.f_dir[0]]))
+        return self.cam_set('camera')
+
+    def cam_summary(self):
+        n = max(1, sum(self.cam_ticks.values()))
+        s = ', '.join(f'{k} {v / n:.0%}' for k, v in self.cam_ticks.items())
+        self.get_logger().info(f'camera_follow: steered by {s} of the follow; disagreements settled for the camera '
+                               f'{self.cam_disputes["camera"]}, for the sonar {self.cam_disputes["sonar"]}')
 
     def yolo_lights(self):
         """The YOLO model, loaded once: light_detector:=yolo's light_model (lights and pipe ends), else

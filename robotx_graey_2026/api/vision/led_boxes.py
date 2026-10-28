@@ -487,6 +487,7 @@ class CameraWatcher:
         self.frames = 0
         self.latest = None              # (time, SMALL RGB frame) of the newest picture, for centring
         self.latest_full = None         # ... and the same picture full-size BGR (a yolo detector's)
+        self.on_frame = None            # on_frame(t, rgb, full, dets) after each picture (camera_follow's pipe finder)
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self):
@@ -494,7 +495,7 @@ class CameraWatcher:
         return self
 
     def _run(self):
-        warned = False
+        warned = hook_warned = False
         while not self.stop.is_set():
             try:
                 for t, jpg in frames_from_mjpeg(self.url, self.stop):
@@ -512,7 +513,14 @@ class CameraWatcher:
                         ends = [d for d in dets if d['colour'] == 'pipe_end']
                         if ends:
                             self.end_seen = (t, max(ends, key=lambda d: d['conf']))
-                    found = (self.tracker.update(t, rgb, self.where(), full=full, dets=dets)
+                    if self.on_frame is not None:
+                        try:
+                            self.on_frame(t, rgb, full, dets)
+                        except Exception as ex:      # its failing must not stop the lights being counted
+                            if not hook_warned:
+                                self.report(f'camera: the per-picture hook failed ({ex!r}) - lights go on without it')
+                                hook_warned = True
+                    found =(self.tracker.update(t, rgb, self.where(), full=full, dets=dets)
                              if isinstance(self.tracker, LightTracker) else self.tracker.update(t, rgb, self.where()))
                     for b in found:
                         if self.on_box:
