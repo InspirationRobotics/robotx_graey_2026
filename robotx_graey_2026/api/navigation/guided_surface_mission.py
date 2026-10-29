@@ -8,7 +8,7 @@ from .geographic_frame import rotation
 class GuidedSurfaceRun(WaypointRun):
     # Jetson owns the waypoint; Cube GUIDED controls motion from its EKF.
     moving={'CHECK_SURFACE','TRANSIT','TRANSIT_CHECK','STOP'}
-    arrival_radius=1.5
+    arrival_radius=.5
     segment_length=0.
 
     def __init__(self,plan,run_id,now):
@@ -99,7 +99,7 @@ class GuidedSurfaceRun(WaypointRun):
             self.target=(*target,self.surface_down)
             distance=math.dist(local[:2],target)
             if self.settled(now,distance<=self.arrival_radius and o['speed']<=.15):
-                self.enter('STOP',now,'Estimated arrival within 1.5 m; stopping')
+                self.enter('STOP',now,'Estimated arrival within 0.5 m; stopping')
                 return self.command(now,'guided_hold',(*local[:2],self.surface_down),interval=.1)
             if distance<=self.arrival_radius:return self.command(now,'guided_hold',(*local[:2],self.surface_down),interval=.1)
             return self.command(now,'guided_target',self.target,interval=.1)
