@@ -196,6 +196,11 @@ SETTINGS = {
                                        #   'hsv' = the old fixed colour test (82% of the lake picture 'green');
                                        #   'yolo' = a trained model (light_model; contrast if it won't load)
     'light_model':         '/root/robotx_ws/src/robotx_graey_2026/models/lights.pt',   # the yolo model
+    'box_model':           '/root/robotx_ws/src/robotx_graey_2026/models/light_box.pt',
+                                       # the repair's centring: where the light BOX is (Ruth, Oct 28; trained
+                                       #   light_box_v3, daylight + dark close-ups: Oct 25 pool, box near the
+                                       #   magnet 16 of 22 held-out frames, the light finder 6; Oct 22 dark
+                                       #   touch, on the light 113 of 124); '' or no file = none
     'end_model':           '/root/robotx_ws/src/robotx_graey_2026/models/pipe_end.pt',
                                        # a yolo model with a pipe_end class, for the pipe's ends only (the
                                        #   lights stay on light_detector): '' = none, ends from the sonar
@@ -678,6 +683,10 @@ class PipelineMission(MissionBase):
         p('end_model', '')                  # a model with a pipe_end class used for the pipe's ends only, the
                                             # lights staying on light_detector (Ruth, Oct 25); '' = none
         p('end_conf', 0.25)                 # ... and the confidence a pipe end needs (either model)
+        p('box_model', '')                  # the repair's centring (Ruth, Oct 28): a model that finds light boxes
+                                            # says WHERE the box is - its middle goes under the magnet - and
+                                            # light_detector still says RED or GREEN; '' or no file: the light
+        p('box_conf', 0.4)                  # finder alone, as before ... and the confidence a box needs
         p('light_min_frac', 0.02)           # smallest blob that counts: 0.02 in the pool (camera close,
                                             # the glow breaks into pieces); ~0.0005 at the lake, where a
                                             # ring ~1 m below is 0.05-6% of the picture (Oct 18)
@@ -800,6 +809,10 @@ class PipelineMission(MissionBase):
         self.end_model, self.end_conf = g('end_model').strip(), float(g('end_conf'))
         self.yolo = None                    # the loaded model (light_detector:=yolo, or end_model), once needed
         self.yolo_failed = False
+        self.box_model, self.box_conf = g('box_model').strip(), float(g('box_conf'))
+        self.box_yolo = None                # the light-box model, loaded now if the mission will centre: loading
+        if self.box_model and (self.repair_centre or self.start_with == 'centre'):     # later froze the sub ~30 s
+            self.box_yolo = self.load_box_model()
         led_boxes.V_MIN, led_boxes.S_MIN = int(g('light_v_min')), int(g('light_s_min'))
         self.survey_backup = float(g('survey_backup_m'))
         self.survey_dir = g('survey_dir')
@@ -3172,6 +3185,40 @@ class PipelineMission(MissionBase):
                     self.light_detector = 'contrast'
         return self.yolo
 
+    def load_box_model(self):
+        """The repair's light-box model (box_model), or None - the centring then finds the light with the light
+        finder (light_detector), as before Oct 28. The file is checked first: ultralytics tries to download a
+        missing one."""
+        if not os.path.isfile(self.box_model):
+            self.get_logger().warn(f'centring: no light-box model at {self.box_model} - the light finder '
+                                   f'({self.light_detector}) says where the light is')
+            return None
+        self.get_logger().info(f'centring: loading the light-box model {self.box_model} (can take ~30 s) ...')
+        try:
+            m = led_boxes.YoloLights(self.box_model, self.box_conf)
+            blank = np.zeros((360, 640, 3), np.uint8)
+            m(blank)                        # the first picture is slow (GPU warm-up): not over the light
+            t0 = time.monotonic()
+            m(blank)
+            ms = (time.monotonic() - t0) * 1000
+        except Exception as ex:
+            self.get_logger().error(f'centring: the light-box model would not load ({ex}) - the light finder '
+                                    f'({self.light_detector}) says where the light is')
+            return None
+        self.get_logger().info(f'centring: the light-box model is loaded - {ms:.0f} ms a picture')
+        return m
+
+    def box_where(self, dets):
+        """The repair's light box from the box model's finds in a picture: ((x, y) of the biggest box's middle
+        in 640x360 px, share), or None. Any class but a pipe end counts (the sim's model has colours)."""
+        b = led_boxes.biggest_light([d for d in dets if d['colour'] != 'pipe_end'])
+        return (((b['x'] + 1) * 320, (b['y'] + 1) * 180), b['share']) if b else None
+
+    def centre_box(self, on):
+        """The camera thread runs the light-box model on each picture only while centring."""
+        if self.box_yolo is not None and self.camera is not None:
+            self.camera.latest_boxes, self.camera.box_yolo = None, (self.box_yolo if on else None)
+
     def start_end_watch(self):
         """A YOLO model (light_detector:=yolo or end_model): the camera on for pipe ends only (no lights
         counted) - on the line-up walk and on the survey's way to the buoy end, where the light list
@@ -3327,6 +3374,7 @@ class PipelineMission(MissionBase):
         picture puts the light on the magnet's line of sight; that is directly under the magnet once the
         magnet reaches it. So: line up, step down, line up again, until the light turns GREEN."""
         self.start_camera(force=True)
+        self.centre_box(True)
         here = self.cur if self.cur else self.hold[:3]
         self.c_yaw = self.cur_yaw if self.cur_yaw is not None else self.hold[3]
         self.c_top = self.c_down = here[2]                # Cube z where centring began / asked for now
@@ -3338,7 +3386,9 @@ class PipelineMission(MissionBase):
         self.c_dist = 0.5                               # the light's distance below the camera, m (until a picture)
         self.carrot, self.last_t = (here[0], here[1]), self.now()
         lb = self.light_below(self.floor_clearance())
-        self.get_logger().info(f'{why}: the light to ({self.magnet[0]:.0f}, {self.magnet[1]:.0f}) px, '
+        self.get_logger().info(f'{why}: the light'
+                               + (' box (the model; colour from the light finder)' if self.box_yolo is not None else '')
+                               + f' to ({self.magnet[0]:.0f}, {self.magnet[1]:.0f}) px, '
                                f'{self.centre_step_m * 100:.0f} cm steps down ({self.centre_first_step * 100:.0f} cm while far), '
                                f'at most {self.centre_max_down:.2f} m'
                                + (f'; the light ~{lb:.2f} m below the camera' if lb is not None else ''))
@@ -3347,6 +3397,10 @@ class PipelineMission(MissionBase):
     def centre_step(self):
         now = self.now()
         cam = self.camera.latest if self.camera else None
+        dets = None
+        if self.box_yolo is not None and self.camera is not None:
+            cb = self.camera.latest_boxes       # the newest picture the box model has done, colour from it too
+            cam, dets = ((cb[0], cb[2]), cb[1]) if cb is not None else (None, None)
         if cam is not None and cam[0] != self.c_frame:
             self.c_frame, self.c_frame_t = cam[0], now
             fr = self.light_fractions(cam[1])
@@ -3357,10 +3411,15 @@ class PipelineMission(MissionBase):
                                        f'{self.below_surface(self.cur[2]) if self.cur else float("nan"):.2f} m down')
                 self.watch_begin()
                 return
-            spot = self.light_where(cam[1]) if fr['red'] >= RED_SEEN else None
-            if spot is None and fr['red'] >= RED_SEEN and self.c_last is not None and \
-                    math.hypot(self.c_last[0] - self.magnet[0], self.c_last[1] - self.magnet[1]) <= self.centre_tol:
-                spot = (self.c_last, 0.0)       # its core just went behind the magnet (about as big as the ring)
+            if self.box_yolo is not None:
+                # the box model says where (Ruth, Oct 28): it still sees the box once the ring is mostly
+                # under the magnet, where the light finder lost it, and isn't fooled by the pipe or the drain
+                spot = self.box_where(dets)
+            else:
+                spot = self.light_where(cam[1]) if fr['red'] >= RED_SEEN else None
+                if spot is None and fr['red'] >= RED_SEEN and self.c_last is not None and \
+                        math.hypot(self.c_last[0] - self.magnet[0], self.c_last[1] - self.magnet[1]) <= self.centre_tol:
+                    spot = (self.c_last, 0.0)   # its core just went behind the magnet (about as big as the ring)
             if spot is not None:
                 (u, v), _ = spot
                 self.c_last = (u, v)
@@ -3393,12 +3452,15 @@ class PipelineMission(MissionBase):
                                            f'{self.below_surface(self.c_down):.2f} m down, floor '
                                            + (f'{alt:.2f} m' if alt is not None else 'unknown'))
             else:
+                what = 'light box' if self.box_yolo is not None else 'red light'
                 if now - self.c_seen > 3.0 and not self.c_lost_said:
                     self.c_lost_said = True
-                    self.get_logger().warn('    centre: no red light in the picture for 3 s - going on to where it was')
+                    self.get_logger().warn(f'    centre: no {what} in the picture for 3 s - going on to where it was')
                 if now - self.c_log >= 2.0:
                     self.c_log = now
-                    self.get_logger().info(f'    centre: no light core (red {fr["red"]:.0%}, green {fr["green"]:.0%})')
+                    self.get_logger().info(f'    centre: no {what} (red {fr["red"]:.0%}, green {fr["green"]:.0%})'
+                                           if self.box_yolo is not None else
+                                           f'    centre: no light core (red {fr["red"]:.0%}, green {fr["green"]:.0%})')
         elif now - self.c_frame_t > 2.0 and now - self.c_log >= 2.0:
             self.c_log = now
             self.get_logger().warn(f'    centre: no new camera picture for {now - self.c_frame_t:.0f} s '
@@ -3490,6 +3552,7 @@ class PipelineMission(MissionBase):
 
     def watch_begin(self):
         """GREEN: rise a few cm and watch the light's colours (the sequence reader comes later)."""
+        self.centre_box(False)
         here = self.cur if self.cur else (self.c_goal[0], self.c_goal[1], self.c_down)
         self.w_hold = (here[0], here[1], max(here[2] - self.watch_rise, self.z_surf))
         self.w_frame, self.w_colour, self.w_seq = None, None, []
@@ -3518,6 +3581,7 @@ class PipelineMission(MissionBase):
             self.centre_end()
 
     def centre_end(self):
+        self.centre_box(False)
         if self.start_with == 'centre':
             self.stop_camera('centring done')
             self.stop_here('centre')

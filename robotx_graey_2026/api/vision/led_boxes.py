@@ -448,6 +448,46 @@ def frames_from_mjpeg(url, stop, every=2, timeout=5.0):
                     yield time.monotonic(), jpg
 
 
+def newest_frames(url, stop, every=2, timeout=5.0):
+    """frames_from_mjpeg, but never behind the stream: a reader thread keeps only the newest picture, so a
+    consumer slower than the stream skips pictures instead of falling further behind it. Read in order, a
+    model at 0.8 s a picture (the sim's CPU) was steering by pictures seconds old and lost the light (Oct 28)."""
+    import threading
+    mine = threading.Event()                    # the reader's own stop: set when this generator is closed
+    cv = threading.Condition()
+    box = {'f': None, 'err': None, 'done': False}
+
+    def read():
+        try:
+            for f in frames_from_mjpeg(url, mine, every, timeout):
+                with cv:
+                    box['f'] = f
+                    cv.notify()
+        except Exception as ex:
+            box['err'] = ex
+        finally:
+            with cv:
+                box['done'] = True
+                cv.notify()
+
+    threading.Thread(target=read, daemon=True).start()
+    try:
+        while not stop.is_set():
+            with cv:
+                if box['f'] is None and not box['done']:
+                    cv.wait(0.5)
+                f, box['f'] = box['f'], None
+                err, done = box['err'], box['done']
+            if f is not None:
+                yield f
+            elif err is not None:
+                raise err
+            elif done:
+                return
+    finally:
+        mine.set()
+
+
 def down_half_rgb(jpg, full=False):
     """cam_pair puts DOWN on the left half, FRONT on the right: the left half, small, RGB - and with
     full, (that, the left half full-size BGR)."""
@@ -488,6 +528,9 @@ class CameraWatcher:
         self.latest = None              # (time, SMALL RGB frame) of the newest picture, for centring
         self.latest_full = None         # ... and the same picture full-size BGR (a yolo detector's)
         self.on_frame = None            # on_frame(t, rgb, full, dets) after each picture (camera_follow's pipe finder)
+        self.box_yolo = None            # the repair's light-box model, run here on each picture while it is set ...
+        self.latest_boxes = None        # ... (t, [finds], rgb) of the newest picture it has done: the mission's
+                                        # loop never waits for it (0.7 s a picture on the sim's CPU)
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self):
@@ -495,10 +538,10 @@ class CameraWatcher:
         return self
 
     def _run(self):
-        warned = hook_warned = False
+        warned = hook_warned = box_warned = False
         while not self.stop.is_set():
             try:
-                for t, jpg in frames_from_mjpeg(self.url, self.stop):
+                for t, jpg in newest_frames(self.url, self.stop):
                     rgb, full = down_half_rgb(jpg, full=True)
                     if rgb is None:
                         continue
@@ -513,6 +556,14 @@ class CameraWatcher:
                         ends = [d for d in dets if d['colour'] == 'pipe_end']
                         if ends:
                             self.end_seen = (t, max(ends, key=lambda d: d['conf']))
+                    box_yolo = self.box_yolo
+                    if box_yolo is not None:
+                        try:
+                            self.latest_boxes = (t, box_yolo(full), rgb)
+                        except Exception as ex:      # nor the light-box model's
+                            if not box_warned:
+                                self.report(f'camera: the light-box model failed ({ex!r})')
+                                box_warned = True
                     if self.on_frame is not None:
                         try:
                             self.on_frame(t, rgb, full, dets)
