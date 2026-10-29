@@ -199,6 +199,10 @@ class NavigationView:
                         source='Cube GLOBAL_POSITION_INT / ATTITUDE',
                         depth_m=supervisor.get('data', {}).get('depth_m') if supervisor.get('fresh') else None)
             bridge=streams.get('bridge',{})
+            if bridge.get('data',{}).get('coordinate_frame')=='cube_ned':
+                local=streams.get('local',{})
+                cube.update(local_valid=bool(local.get('fresh') and self.position_healthy()),
+                    map_ne=(local.get('data',{}).get('ned') or [])[:2] or None)
             if bridge.get('data',{}).get('coordinate_frame')=='fixed_local':
                 from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
                 local=streams.get('local',{})

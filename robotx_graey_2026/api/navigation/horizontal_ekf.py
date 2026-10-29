@@ -38,6 +38,16 @@ class HorizontalEKF:
         Q = np.diag([.01*dt, .01*dt, .09*dt, .09*dt, math.radians(2)**2*dt])
         self.P = F @ self.P @ F.T + Q
 
+    def rotate_frame(self, degrees, anchor):
+        """Rotate the reference about the current position, preserving body motion."""
+        a=math.radians(degrees);c,s=math.cos(a),math.sin(a)
+        R=np.array([[c,-s],[s,c]])
+        self.x[:2]=R @ (self.x[:2]-np.asarray(anchor[:2]))+anchor[:2]
+        self.x[2:4]=R @ self.x[2:4]
+        self.x[4]=wrap(self.x[4]+a)
+        T=np.eye(5);T[:2,:2]=R;T[2:4,2:4]=R
+        self.P=T @ self.P @ T.T
+
     def update(self, name, now, residual, H, R, gate=25.):
         S = H @ self.P @ H.T + R
         nis = float(residual @ np.linalg.solve(S, residual))

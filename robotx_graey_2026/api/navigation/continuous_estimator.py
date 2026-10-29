@@ -5,6 +5,8 @@ from .horizontal_ekf import HorizontalEKF
 from .bridge_estimator import rotate, yaw, yaw_rotate
 from .geographic_frame import rotation
 from .gps_quality import GPSQuality
+from .waypoint_logic import geo_to_ne
+from .geographic_frame import GeographicFrame
 
 
 class IndependentGPSQuality(GPSQuality):
@@ -37,12 +39,79 @@ class ContinuousEstimator(RelativeEstimator):
         self.track_time=None
         self.last_sample=None
         self.started=False
+        self.alignment_run_id=None
+        self.alignment_collecting=False
+        self.track_start_variance=0.
+        self.yaw_offset_deg=0.
+        self.heading_reset=None
+        self.manual_north=False
+        self.pending_manual_heading=None
+        self.north_alignment.reason="Manual heading correction available; automatic alignment disabled"
+
+    def align_known_heading(self, now, degrees):
+        if isinstance(degrees,bool) or not isinstance(degrees,(int,float)) or not math.isfinite(degrees) or not 0<=degrees<360:
+            raise ValueError('Enter a true heading from 0 inclusive to 360 exclusive')
+        if not self.filter.started:
+            self.pending_manual_heading=degrees
+            return 'Known heading stored; awaiting the first VN sample'
+        self.sync(now)
+        geographic=self.map.to_geo(self.position) if self.map.angle is not None else None
+        previous=yaw(self.orientation())
+        offset=(degrees-previous+180)%360-180
+        self.correct_heading(offset,now)
+        self.alignment_collecting=False
+        self.manual_north=self.heading_validated=True
+        a=self.north_alignment
+        a.active=a.approved=False;a.candidate=None
+        a.offset=offset;a.method='Operator measured true heading'
+        a.reference=dict(true_heading_deg=degrees,previous_heading_deg=previous,captured_monotonic=now)
+        a.reason=f'Manual north aligned: bow heading {degrees:.1f} deg true'
+        if geographic:self.map.align(*geographic,self.position,0.)
+        return a.reason
+
+    def correct_heading(self, degrees, now):
+        """Apply accepted north to Cube-bound yaw and the matching local frame."""
+        anchor=tuple(self.position)
+        self.filter.rotate_frame(degrees,anchor)
+        self.yaw_offset_deg=(self.yaw_offset_deg+degrees+180)%360-180
+        def point(p):
+            xy=rotation((p[0]-anchor[0],p[1]-anchor[1]),degrees)
+            return (xy[0]+anchor[0],xy[1]+anchor[1],*p[2:])
+        self.track_position=list(point(self.track_position))
+        for row in self.history:
+            row['position']=point(row['position'])
+            row['track_position']=point(row['track_position'])
+            row['q']=yaw_rotate(row['q'],degrees)
+            row['course_motion_ne']=(*rotation(row['course_motion_ne'],degrees),*row['course_motion_ne'][2:])
+        revision=(self.heading_reset or {}).get('revision',0)+1
+        self.heading_reset=dict(revision=revision,offset_deg=degrees,anchor=list(anchor),
+            yaw_offset_deg=self.yaw_offset_deg,at=now)
+        self.course_heading.reset_window('North applied to Cube yaw; collect motion in corrected frame')
+        self.sync(now)
+        return point
+
+    def begin_guided_alignment(self, run_id):
+        """Automatic north alignment is disabled; retain the EKF reference."""
+        return
+
+    def finish_guided_alignment(self):
+        return
 
     def sync(self, now):
         self.filter.predict(now)
         self.position[:2]=[float(v) for v in self.filter.x[:2]]
         self.horizontal_variance=float(max(self.filter.P[0,0],self.filter.P[1,1]))
         self.initialized=self.filter.started
+        if self.alignment_collecting:
+            # GPS updates are gated for this entire run. The EKF local pose is
+            # therefore independent of the GPS observations fitting north.
+            self.track_position[:2]=self.position[:2]
+            row=dict(t=now,position=tuple(self.position),track_position=tuple(self.track_position),
+                track_sigma_m=math.sqrt(max(0.,self.horizontal_variance-self.track_start_variance)),
+                q=self.orientation(),raw_velocity=self.raw_velocity,rates=self.rates,
+                course_motion_ne=tuple(self.course_heading.motion_ne),course_distance_m=self.course_heading.distance)
+            if self.history and self.history[-1]['t']==now:self.history[-1]=row
+            elif not self.history or now-self.history[-1]['t']>=.02:self.history.append(row)
 
     def imu(self, now, q, rates):
         if len(q)!=4 or len(rates)!=3 or not all(math.isfinite(v) for v in (*q,*rates)):
@@ -50,9 +119,12 @@ class ContinuousEstimator(RelativeEstimator):
         norm=math.sqrt(sum(v*v for v in q))
         if not .9<norm<1.1:return
         q=tuple(v/norm for v in q)
-        if self.filter.vn(now,math.radians(yaw(q)),rates[2]):
+        if self.filter.vn(now,math.radians(yaw(q)+self.yaw_offset_deg),rates[2]):
             self.raw_q=q;self.rates=tuple(rates);self.imu_at=now
         self.sync(now)
+        if self.pending_manual_heading is not None:
+            heading=self.pending_manual_heading;self.pending_manual_heading=None
+            self.align_known_heading(now,heading)
 
     def orientation(self):
         return yaw_rotate(self.raw_q,math.degrees(self.filter.x[4])-yaw(self.raw_q))
@@ -75,14 +147,15 @@ class ContinuousEstimator(RelativeEstimator):
         # Heading evidence uses a separate DVL-only track: GPS must not
         # manufacture the track later used to validate its own heading.
         world=rotate(self.orientation(),velocity)
-        if previous is not None and 0<now-previous<.5:
+        if not self.alignment_collecting and previous is not None and 0<now-previous<.5:
             dt=now-previous
             for i in (0,1):self.track_position[i]+=world[i]*dt
             self.distance_travelled+=math.hypot(*world[:2])*dt
         self.course_heading.motion(now,world,self.rates,True)
-        self.history.append(dict(t=now,position=tuple(self.position),track_position=tuple(self.track_position),
-            q=self.orientation(),raw_velocity=self.raw_velocity,rates=self.rates,
-            course_motion_ne=tuple(self.course_heading.motion_ne),course_distance_m=self.course_heading.distance))
+        if not self.alignment_collecting:
+            self.history.append(dict(t=now,position=tuple(self.position),track_position=tuple(self.track_position),
+                q=self.orientation(),raw_velocity=self.raw_velocity,rates=self.rates,
+                course_motion_ne=tuple(self.course_heading.motion_ne),course_distance_m=self.course_heading.distance))
 
     def at(self,stamp):
         result=super().at(stamp)
@@ -92,6 +165,7 @@ class ContinuousEstimator(RelativeEstimator):
             if a['t']<=stamp<=b['t'] and b['t']>a['t']:
                 f=(stamp-a['t'])/(b['t']-a['t'])
                 result['track_position']=tuple(x+f*(y-x) for x,y in zip(a['track_position'],b['track_position']))
+                result['track_sigma_m']=max(a.get('track_sigma_m',0.),b.get('track_sigma_m',0.))
                 break
         return result
 
@@ -106,59 +180,62 @@ class ContinuousEstimator(RelativeEstimator):
 
     def apply_gps(self, now, fix):
         sample=self.at(fix['cube_fix_time_us']/1e6+self.gps.clock.offset)
-        a=self.north_alignment
-        if sample and self.fresh(self.imu_at,now) and self.fresh(self.motion_at,now) and a.active:
-            a.observe(now,fix,rotate(sample['q'],sample['raw_velocity']),sample['rates'],sample['q'],position=sample['track_position'])
-            if a.offset is not None and self.map.angle is None:
-                self.map.align(fix['lat'],fix['lon'],sample['position'],a.offset)
-                self.heading_validated=True
-        if self.map.angle is not None:
-            point=self.map.gps_to_local(fix['lat'],fix['lon'])
-            # Delay compensation uses the predicted velocity, with latency
-            # included in observation noise; not a claim of receiver-time sync.
+        if self.map.angle is None:
             age=self.gps.clock.age(fix['cube_fix_time_us'],now) or 0.
-            point=[point[i]+self.filter.x[2+i]*age for i in (0,1)]
-            if not self.filter.gps(now,point,fix['accuracy']+age*.3):
-                self.event=dict(decision='rejected',reason='GPS EKF innovation rejected')
-                return False
-            if sample and self.fresh(self.motion_at,now) and self.fresh(self.imu_at,now):
-                transformed=dict(sample)
-                transformed['course_motion_ne']=rotation(sample['course_motion_ne'],self.map.angle)
-                world=rotation(rotate(sample['q'],sample['raw_velocity']),self.map.angle)
-                step=self.course_heading.observe(now,fix,transformed,(*world,0.))
-                distance=math.dist(self.position[:2],self.map.gps_to_local(*self.target_gps)) if self.target_gps else math.inf
-                if distance>2. and step:
-                    self.map.correct_angle(max(-.25,min(.25,step)),self.position)
-        else:
-            # An admitted fix supplies geographic evidence before registration;
-            # it cannot yet correct the fixed-local position.
-            self.filter.accepted['gps']=now
+            local=sample['position'] if sample else tuple(self.position[i]-self.filter.x[2+i]*age for i in (0,1))
+            self.map.align(fix['lat'],fix['lon'],local,0.)
+        point=self.map.gps_to_local(fix['lat'],fix['lon'])
+        # Delay compensation uses the predicted velocity, with latency
+        # included in observation noise; not a claim of receiver-time sync.
+        age=self.gps.clock.age(fix['cube_fix_time_us'],now) or 0.
+        point=[point[i]+self.filter.x[2+i]*age for i in (0,1)]
+        if not self.filter.gps(now,point,fix['accuracy']+age*.3):
+            self.event=dict(decision='rejected',reason='GPS EKF innovation rejected')
+            return False
         self.last_fix=dict(fix);self.last_correction=now
-        self.event=dict(decision='accepted',reason='GPS accepted')
+        self.event=dict(decision='accepted',reason='GPS position fused by EKF')
         self.sync(now)
         return True
 
     def coast(self,now): self.sync(now)
     def start_dvl_gap(self): pass
 
+    def cube_position(self, position):
+        """Register private EKF coordinates in Cube's geographic NED frame."""
+        if self.origin is None or self.map.angle is None:return list(position)
+        north,east=geo_to_ne(*self.map.to_geo(position),self.origin)
+        return [north,east,*position[2:]]
+
     def status(self,now):
         self.sync(now)
         health=self.filter.health(now)
-        health['gps_position_fused']=self.map.angle is not None and health['sensors']['gps']
-        if self.map.angle is None and health['usable']:health['state']='ALIGNING'
+        health['gps_position_fused']=health['sensors']['gps']
         gps=self.gps.status(now)
         gps.update(fix=self.last_fix,applied_recently=self.last_correction is not None and now-self.last_correction<2.,stationary_validated_recently=False)
         valid=health['usable'] and not self.fault
+        registered=self.origin is not None and self.map.angle is not None
+        frame=self.map.snapshot()
+        reset=self.heading_reset
+        if registered:
+            frame=GeographicFrame();frame.align(*self.origin[:2],(0.,0.),0.)
+            frame=frame.snapshot()
+            if reset:reset=dict(reset,anchor=self.cube_position(reset['anchor']))
         return dict(healthy=valid,navigation_valid=valid,local_navigation_ready=valid,
+            manual_north=self.manual_north,
+            heading_reset=reset,yaw_offset_deg=self.yaw_offset_deg,
+            alignment_run_id=self.alignment_run_id,alignment_collecting=self.alignment_collecting,
+            alignment_track_position=list(self.track_position),
             estimator_health=health,initialized=self.initialized,fault=self.fault,
-            coordinate_frame='fixed_local',map_transform=self.map.snapshot(),
-            map_position_ne=self.map.to_map(self.position) if self.map.angle is not None else None,
-            map_heading_deg=(yaw(self.orientation())+self.map.angle)%360 if self.map.angle is not None else None,
+            coordinate_frame='cube_ned' if registered else 'fixed_local',map_transform=frame,
+            cube_origin_registered=registered,estimator_map_transform=self.map.snapshot(),
+            estimator_position_ned=list(self.position),
+            map_position_ne=self.cube_position(self.position)[:2] if registered else self.map.to_map(self.position) if self.map.angle is not None else None,
+            map_heading_deg=(yaw(self.orientation())+(self.map.angle or 0.))%360 if self.filter.started else None,
             depth_m=self.depth,surfaced=self.surface,gps_eligible=self.gps_eligible(now),gps_admission=gps,
-            gps_observation=self.last_observed_gps,position_ned=list(self.position),position_sigma_m=health['position_sigma_m'],
+            gps_observation=self.last_observed_gps,position_ned=self.cube_position(self.position),position_sigma_m=health['position_sigma_m'],
             distance_travelled_m=self.distance_travelled,heading_bias_deg=0.,velocity_bias_mps=[0.,0.,0.],
             heading_reference_validated=self.heading_validated,heading_continuity_lost=False,
-            course_heading=dict(self.course_heading.status(),application_policy='every admitted fix; rolling displacement evidence'),
+            course_heading=dict(self.course_heading.status(),application_policy='manual heading only; automatic heading correction disabled'),
             north_alignment=self.north_alignment.status(),stationary_hold=dict(active=False),
             dvl_continuity=dict(recovering=False,state='AIDED' if health['sensors']['dvl'] else 'PREDICTING',
                 prediction_active=not health['sensors']['dvl'],requires_position_revalidation=False))

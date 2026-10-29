@@ -8,6 +8,14 @@ from robotx_graey_2026.api.navigation.vn_calibration import VNCalibration
 
 
 class CalibrationJobsTests(unittest.TestCase):
+    def test_manual_heading_uses_existing_manual_operation_policy_and_service(self):
+        with patch('threading.Thread') as thread:
+            self.job.request(dict(action='align_heading',true_heading_deg=90.))
+            thread.return_value.start.assert_called_once()
+        self.job.run('align_heading')
+        self.assertEqual(self.calls,[('align_heading',90.)])
+        self.assertEqual(self.job.snapshot()['phase'],'aligned')
+
     def setUp(self):
         self.calls=[]
         self.c=dict(online=True,vehicle_fresh=True,armed=False,mode='MANUAL',sa_active=True,esc_commanded_on=False,mission_claimed=False,autonomous=False)

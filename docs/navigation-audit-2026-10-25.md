@@ -31,3 +31,14 @@ The Miramar harness additionally calls GUI startup twice, requires ready acknowl
 Final Miramar run 47b8597a39 PASSED: full mission COMPLETE/disarmed, DVL innovation rejection observed, GPS loss observed and all three sensors accepted again at completion. Two GUI startup requests acknowledged; one bridge process and unchanged bridge instance. Initial track 9.90017 m; injected +40 degree VN offset fitted -40.03363 degrees. Pool fitted -40.02423 degrees. Sampled vertical inputs were exclusively 500 in both runs. Exact summaries: navigation-audit-results-2026-10-25.json. Browser rendered Miramar-area imagery with no page script errors; saved tile packaging and pool selection were separately regression tested.
 
 No new RC commands or switch assignments were introduced. User explicitly clarified that GUI commands are acceptable. Ordinary GUI navigation startup in armed MANUAL is unit/UI tested; native startup tests used the simulator's disarmed startup state. Neither is a live-vehicle certification. Current-disturbance limitations from the previous session still apply; these geographic-site runs have no lake-current model.
+
+
+## Test-distance adjustment
+User requested a 5 m initial straight alignment leg (4.9 m completion tolerance) and 1.5 m estimated arrival radius. Updated mission, GUI, API wording, and local rendered sequence diagram. Heading fit and one-second arrival dwell remain unchanged. Fourteen focused Python tests and both GUI suites pass. Local only; not deployed.
+
+
+## Tether deployment — 2026-10-25
+Deployed navigation_new code plus 5 m initial leg and 1.5 m arrival radius to Jetson. Existing source and installed runtime backed up at /home/graey/deployment-backups/navigation-new-20261024-001504 (Jetson clock date differs from session date). Overlay preserves unrelated sonar/control work and existing branch; this is not a Git branch synchronization. Core rebuilt and restarted; 159 installed Python/GUI/launch assets checked against source. Fourteen focused onboard tests pass. An initial import check without ROS workspace environment failed; rerun with sourced environment passed. Live HTTP waypoint verified 5 m /1.5 m and GPS record controls. Exactly one fused_nav_bridge and one navigation_supervisor, no august bridge. Fresh MANUAL/disarmed/kill engaged/ESC off verified before and after. Cube configuration_verified=true, profile_mismatches empty. Bridge disabled pending Start Navigation surface pressure zero; VN accepted, DVL not valid, raw GPS fix4 accuracy0.875m observed but not admitted before surface initialization. No parameter writes, arming, navigation start or physical mission test.
+
+## Deferred task
+- Clean up Jetson code and reconcile deployed overlays with Git history. User explicitly deferred this work; do not perform cleanup until requested. Local working branch verified as navigation_new.

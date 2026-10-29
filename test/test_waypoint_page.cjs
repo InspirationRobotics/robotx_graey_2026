@@ -1,18 +1,20 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const code=fs.readFileSync('tools/waypoint.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
 async function render(data,options={}){
-  const elements={},posts=[],imageSources=[],ctx2d=new Proxy({},{get:()=>()=>{}});let now=100,starts=0;
+  const elements={},posts=[],imageSources=[],ctx2d=new Proxy({},{get:()=>()=>{}});let now=100,starts=0,manualApplied=false;
   const el=id=>elements[id]??=(id==='map'?{getContext:()=>ctx2d,getBoundingClientRect:()=>({width:900,height:600,...options.viewport,left:0,top:0})}:{checked:options.corridor!==false,value:id==='maptype'?'geographic':id==='imagery'?'current':id==='depth'?'0.5':'',textContent:''});
     const storage=options.storage||{};const ctx={localStorage:{getItem:k=>storage[k]||null,setItem:(k,v)=>storage[k]=v},document:{getElementById:el},window:{},Image:class{complete=!!options.tilesLoaded;naturalWidth=options.tilesLoaded?256:0;set src(url){imageSources.push(url)}},devicePixelRatio:1,
     location:{pathname:'/waypoint'},performance:{now:()=>now},AbortSignal:{timeout:()=>null},
-    setTimeout:()=>{},fetch:async(url,request)=>{if(!request?.body)return{ok:true,json:async()=>data};const body=JSON.parse(request.body);posts.push(body);if(body.action==='start'&&++starts===1&&options.timeoutStart)throw Error('Timeout');return{ok:!options.reject,json:async()=>options.reject?{ok:false,msg:'Target rejected'}:{ok:true,plan_id:'single-plan',run_id:'run'}}}};
+    setTimeout:()=>{},fetch:async(url,request)=>{if(!request?.body)return{ok:true,json:async()=>url==='/api/calibration'?{job:{busy:false,phase:manualApplied?'aligned':options.failPreparation?'failed':'ready',message:manualApplied?'Manual north aligned':'Pressure unavailable'}}:data};const body=JSON.parse(request.body);posts.push(body);if(body.action==='align_heading')manualApplied=true;if(body.action==='prepare'&&!options.failPreparation)data={...data,capabilities:{...data.capabilities,enabled:true}};if(body.action==='start'&&++starts===1&&options.timeoutStart)throw Error('Timeout');return{ok:!options.reject,json:async()=>options.reject?{ok:false,msg:'Target rejected'}:{ok:true,plan_id:'single-plan',run_id:'run'}}}};
   vm.runInNewContext(code,ctx);await new Promise(setImmediate);elements.posts=posts;elements.imageSources=imageSources;elements.refreshAt=async t=>{now=t;await ctx.poll()};elements.tileXY=ctx.tileXY;elements.tileGeo=ctx.tileGeo;elements.tileURL=ctx.tileURL;return elements;
 }
 (async()=>{
   let e=await render({capabilities:{enabled:false},navigation:{streams:{},cube_estimate:{valid:false}}});
-  assert(e.start.disabled);assert.match(e.readiness.textContent,/Start navigation first/);
-  assert.match(e.readiness.textContent,/Cube control telemetry unavailable/);
+  assert(e.start.disabled);assert.match(e.readiness.textContent,/Select a target/);
+  assert(!e.readiness.textContent.includes('Start navigation first'));
   const ready={capabilities:{enabled:true,simulation:true},navigation:{streams:{bridge:{fresh:true,data:{estimator_health:{usable:true,state:'AIDED',sensors:{gps:true,dvl:true,vn:true},position_sigma_m:1.}}},supervisor:{fresh:true,data:{mode:'Active',configuration_verified:true,surfaced:true,state:'GPS aiding admitted'}}},cube_estimate:{valid:true,lat:32.9,lon:-117,heading_deg:0,depth_m:0}}};
+  e=await render(ready);e.manualHeading.value='90';await e.manualNorth.onclick();assert.deepEqual(e.posts.map(p=>p.action),['align_heading']);assert.equal(e.posts[0].true_heading_deg,90);assert.match(e.message.textContent,/Manual north aligned/);
+  e=await render(ready);e.manualHeading.value='360';await e.manualNorth.onclick();assert.equal(e.posts.length,0);assert.match(e.message.textContent,/less than 360/);
   e=await render(ready);
   const bow=vm.runInNewContext(code.slice(code.indexOf('function bowPoint'),code.indexOf('function mark'))+'; bowPoint');
   for(const [heading,x,y] of [[0,0,-25],[90,25,0],[180,0,25],[270,-25,0]]){const p=bow([0,0],heading,25);assert(Math.abs(p[0]-x)<1e-8&&Math.abs(p[1]-y)<1e-8)}
@@ -22,6 +24,13 @@ async function render(data,options={}){
   e.map.onclick({clientX:500,clientY:300});assert.equal(e.posts.length,0);assert(!e.start.disabled);
   await e.refreshAt(60100);assert(!e.start.disabled);await e.start.onclick();assert.deepEqual(e.posts.map(p=>p.action),['preview','start']);assert.equal(e.posts[1].plan_id,'single-plan');assert(e.start.disabled);
   assert.equal(e.posts[0].plan.mode,'surface');assert.equal(e.posts[0].plan.depth_m,0);
+  e=await render({...ready,capabilities:{...ready.capabilities,enabled:false}});
+  e.map.onclick({clientX:500,clientY:300});assert(!e.start.disabled);
+  await Promise.all([e.start.onclick(),e.start.onclick()]);
+  assert.deepEqual(e.posts.map(p=>p.action),['prepare','preview','start']);assert.equal(e.posts[0].surface_confirmed,true);
+  e=await render({...ready,capabilities:{...ready.capabilities,enabled:false}},{failPreparation:true});
+  e.map.onclick({clientX:500,clientY:300});await e.start.onclick();
+  assert.deepEqual(e.posts.map(p=>p.action),['prepare']);assert.match(e.message.textContent,/Pressure unavailable/);
   e=await render(ready,{reject:true});e.map.onclick({clientX:500,clientY:300});await e.start.onclick();assert.equal(e.posts.length,1);assert.match(e.message.textContent,/Target rejected/);
   e=await render(ready,{timeoutStart:true});e.map.onclick({clientX:500,clientY:300});await e.start.onclick();await e.start.onclick();assert.deepEqual(e.posts.map(p=>p.action),['preview','start','start']);assert.equal(e.posts[1].plan_id,e.posts[2].plan_id);
   e=await render({...ready,capabilities:{enabled:true,simulation:false}});e.maptype.value='pool';e.maptype.onchange();
@@ -65,7 +74,7 @@ async function render(data,options={}){
   assert.match(e.rawGPSStatus.textContent,/NOT AIDING/);
   e=await render({...telemetry,navigation:{...telemetry.navigation,streams:{...telemetry.navigation.streams,
     waypoint:{fresh:true,data:{stage:'WAIT_SURFACE',surface_measurement:{ready:false,reason:'Surface measurement 12/20 s'}}}}}});
-  assert.match(e.surfaceMeasurement.textContent,/First motion: 10 m/);
+  assert.match(e.surfaceMeasurement.textContent,/Direct waypoint travel using the EKF/);
   assert.equal(e.headingOffsets.textContent,'90.0° / 2.0°');assert.equal(e.cubeSpeed.textContent,'0.50');assert.equal(e.gpsSeparation.textContent,'0.00');assert.match(e.estimateAge.textContent,/local: 0.10 s/);
   e=await render({...telemetry,navigation:{...telemetry.navigation,streams:{...telemetry.navigation.streams,bridge:{fresh:false,age:4,data:telemetry.navigation.streams.bridge.data},local:{fresh:false,age:4,data:telemetry.navigation.streams.local.data}}}});
   assert.match(e.alignedHeading.textContent,/Unavailable/);assert.equal(e.headingDifference.textContent,'—');assert.equal(e.cubeSpeed.textContent,'—');assert.match(e.estimateAge.textContent,/4.00 s · stale/);
@@ -82,7 +91,7 @@ async function render(data,options={}){
   assert(e.imageSources.some(s=>s==='/vendor/miramar/19-211332-91604.jpg'));
   e.map.onclick({clientX:450,clientY:300});assert(!e.start.disabled);
   e.alignmentCorridor.checked=false;e.alignmentCorridor.onchange();assert(e.start.disabled);
-  assert.match(e.readiness.textContent,/clear 10 m corridor/);
+  assert.match(e.readiness.textContent,/supervised surface start/);
   e.alignmentCorridor.checked=true;e.alignmentCorridor.onchange();assert(!e.start.disabled);
   e.findLake.onclick();assert(e.imageSources.some(s=>s==='/vendor/miramar/16-26416-11450.jpg'));
   e=await render(ready);
@@ -102,5 +111,10 @@ async function render(data,options={}){
   e=await render(ready);e.map.onclick({clientX:550,clientY:300});e.targetDistance.value='7';e.applyDistance.onclick();
   assert.match(e.distanceStatus.textContent,/7.00 m/);const lat=Number(e.targetLat.value),lon=Number(e.targetLon.value);assert(Math.abs(lat-32.9)<1e-7);assert(lon>-117);
   e.targetDistance.value='-1';e.applyDistance.onclick();assert.match(e.message.textContent,/0.3 to 20/);
-  console.log('Waypoint map, desktop archive resolution, readiness, Start retry and estimate stats checks pass');
+  // An initialized EKF can navigate while individual GPS/DVL aiding is absent.
+  const coasting={...ready,navigation:{...ready.navigation,streams:{...ready.navigation.streams,bridge:{fresh:true,data:{enabled:true,configuration_verified:true,surface_pressure_hpa:1000,gps_admission:{qualified:false},estimator_health:{usable:true,state:'DEGRADED',sensors:{gps:false,dvl:false,vn:true},position_sigma_m:2}}}}}};
+  e=await render(coasting);e.map.onclick({clientX:500,clientY:300});await e.start.onclick();assert.deepEqual(e.posts.map(p=>p.action),['preview','start']);
+  e=await render({...ready,navigation:{...ready.navigation,streams:{...ready.navigation.streams,waypoint:{fresh:true,data:{stage:'TRANSIT',control_mode:'GUIDED',surface_leg:{stage:'waiting',reason:'Waiting for surface transit'}}}}}});
+  assert.match(e.surfaceGuidance.textContent,/Cube GUIDED waypoint control/);
+  console.log('Waypoint map, desktop archive resolution, Jetson mission, Start retry and estimate stats checks pass');
 })().catch(e=>{console.error(e);process.exit(1)});

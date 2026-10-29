@@ -113,6 +113,15 @@ class WaypointMission(Node):
         self.pilot_override_active=True
         self.last_manual_control=command
 
+    def send_guided_waypoint(self, target):
+        """Give Cube a local NED waypoint; its GUIDED controller uses the EKF."""
+        self.link.send('manual_control_send',1,0,0,500,0,0)
+        self.pilot_override_active=True
+        self.sent_target=tuple(target)
+        # Position only. Velocity, acceleration and yaw are left to Cube.
+        self.link.send('set_position_target_local_ned_send',0,1,1,1,3576,
+            *target[:3],0.,0.,0.,0.,0.,0.,0.,0.)
+
     def on_status(self, msg):
         try:
             data = json.loads(msg.data)
@@ -177,7 +186,7 @@ class WaypointMission(Node):
                     for v in (*ned,*velocity,*att.get('rpy',[None])))
             and 0<=now-getattr(self,'bridge_time',-math.inf)<1.)
         failure = ''
-        limits_ready=True  # STABILIZE sends neutral vertical; no depth controller.
+        limits_ready=self.limits_ready(now)
         if not self.sim:
             c = self.safety
             if not (0 <= now-self.safety_time < 2 and c.get('vehicle_fresh')
@@ -206,7 +215,7 @@ class WaypointMission(Node):
         fix=b.get('gps_observation') or {}
         gps_current=bool(0<=now-getattr(self,'bridge_time',-math.inf)<.3
             and b.get('gps_eligible') is True and gps.get('qualified') is True
-            and (gps.get('applied_recently') is True or gps.get('stationary_validated_recently') is True))
+            and fix.get('fix',0)>=3)
         gps_at_target=False
         if gps_current:
             try:
@@ -222,6 +231,7 @@ class WaypointMission(Node):
         return dict(fresh=fresh, failure=failure, abort=self.aborted,bridge=b,
             cube_prediction_healthy=bool(dvl_hold and not failure),
             surface_gps_current=gps_current,surface_gps_at_target=gps_at_target,
+            raw_gps=(fix.get('lat'),fix.get('lon')) if gps_current else None,
             dvl_continuity=b.get('dvl_continuity') if 0<=now-getattr(self,'bridge_time',-math.inf)<.3 else {},
             vertical_limits_verified=limits_ready,
             navigation_hold_safe=hold_safe,
@@ -251,7 +261,15 @@ class WaypointMission(Node):
         if self.logic.stage=='WAIT_SURFACE' and not o['vertical_limits_verified']:
             self.logic.reason='Waiting for shallow waypoint vertical speed/acceleration limit readback'
         for action, payload in self.logic.step(now, o):
-            if action in ('align_velocity','stop'):
+            if action in ('guided_target','guided_hold'):
+                self.send_guided_waypoint(payload)
+            elif action=='guided_alignment':
+                x,y,z,vx,vy,heading=payload
+                # Refresh ownership with neutral pilot input; GUIDED owns XYZ.
+                self.link.send('manual_control_send',1,0,0,500,0,0)
+                self.pilot_override_active=True
+                self.link.send('set_position_target_local_ned_send',0,1,1,1,0b100111000000,x,y,z,vx,vy,0.,0.,0.,0.,heading,0.)
+            elif action in ('align_velocity','stop'):
                 # Alignment and braking need the same surface protection as transit.
                 # An abort with invalid depth must still be able to send a stop.
                 depth=o.get('depth')
@@ -282,7 +300,7 @@ class WaypointMission(Node):
                     self.sent_surface_heading=heading
                 else:
                     self.link.goto_ned(*payload)
-            elif action in ('guided', 'manual'):
+            elif action in ('guided', 'stabilize', 'manual'):
                 self.get_logger().warning('MISSION_MODE_REQUEST '+json.dumps(dict(
                     run_id=self.logic.run_id,action=action,stage=self.logic.stage,
                     reason=self.logic.reason,published_monotonic=now)))
@@ -290,7 +308,7 @@ class WaypointMission(Node):
                     self.link.send('manual_control_send',1,0,0,500,0,0)
                     self.pilot_override_active=True
                 if action=='manual':self.release_surface_controls()
-                self.link.set_mode((MODE_STABILIZE if isinstance(self.logic,GuidedSurfaceRun) else MODE_GUIDED) if action=='guided' else MODE_MANUAL)
+                self.link.set_mode(MODE_GUIDED if action=='guided' else MODE_STABILIZE if action=='stabilize' else MODE_MANUAL)
             elif action in ('arm', 'disarm'):
                 self.link.command(400, 1 if action == 'arm' else 0)
         if self.logic.stage in self.logic.terminal:self.release_surface_controls()
@@ -317,7 +335,7 @@ class WaypointMission(Node):
             self.last_pause=paused
             self.get_logger().warning('MISSION_NAVIGATION_PAUSE '+json.dumps(dict(
                 run_id=self.logic.run_id,published_monotonic=now,**status['navigation_pause'])))
-        status.update(control_mode='STABILIZE' if isinstance(self.logic,GuidedSurfaceRun) else 'GUIDED', vertical_control='neutral pilot input' if isinstance(self.logic,GuidedSurfaceRun) else 'depth control',last_manual_control=getattr(self,'last_manual_control',None),simulation=self.sim, published_monotonic=now,
+        status.update(control_mode='GUIDED', vertical_control='Cube GUIDED position/depth control' if isinstance(self.logic,GuidedSurfaceRun) else 'depth control',last_manual_control=getattr(self,'last_manual_control',None),simulation=self.sim, published_monotonic=now,
                       surface_leg=self.surface_leg.state,
                       last_sent_surface_heading_rad=getattr(self,'sent_surface_heading',None),
                       bridge_course_heading=self.bridge.get('course_heading'),
@@ -365,7 +383,7 @@ class WaypointMission(Node):
             # Publish the terminal state long enough for the GUI. On a nav abort
             # continue requesting takeover until the Cube acknowledges leaving GUIDED.
             if now-self.logic.since > 3 and (self.logic.stage == 'COMPLETE'
-                    or o.get('mode') not in (None, MODE_STABILIZE if isinstance(self.logic,GuidedSurfaceRun) else MODE_GUIDED) or self.logic.pilot_takeover
+                    or o.get('mode') not in (None, MODE_GUIDED) or self.logic.pilot_takeover
                     or not self.logic.takeover_requested):
                 raise SystemExit(0)
 

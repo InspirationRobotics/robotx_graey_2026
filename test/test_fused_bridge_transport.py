@@ -19,6 +19,63 @@ from robotx_graey_2026.api.navigation.track_north import TrackNorth
 
 
 class TransportTests(unittest.TestCase):
+    def test_registered_odometry_uses_cube_origin_and_resets_once(self):
+        self.b.est=ContinuousEstimator();e=self.b.est
+        e.imu(10.,(1,0,0,0),(0,0,0))
+        e.map.align(32.9235839,-117.0385754,(0.,0.),0.)
+        e.set_origin((32.9235833,-117.0385061,215.98))
+        self.b.configured=lambda now:True
+        self.b.tick()
+        args=self.b.link.odometry.call_args
+        self.assertEqual(list(args.args[0]),e.cube_position(e.position))
+        self.assertLess(args.args[0][1],-6.)
+        self.assertEqual(args.kwargs['reset_counter'],1)
+        self.clock.now=10.1;self.b.tick()
+        self.assertEqual(self.b.link.odometry.call_args.kwargs['reset_counter'],1)
+
+    def test_manual_heading_service_works_before_navigation_output_is_enabled(self):
+        self.b.est=ContinuousEstimator();self.b.est.imu(10.,(1,0,0,0),(0,0,0))
+        self.b.output_permitted=False;self.b.get_logger=Mock(return_value=Mock())
+        request=NS(parameters=[NS(name='true_heading_deg',value=NS(type=3,double_value=90.))])
+        result=self.b.align_heading(request,NS(result=NS()))
+        self.assertTrue(result.result.successful,result.result.reason)
+        self.assertIn('output paused',result.result.reason)
+        self.assertTrue(self.b.est.manual_north)
+        self.assertAlmostEqual(yaw(self.b.est.orientation()),90.)
+        self.b.link.send.assert_not_called();self.b.link.command.assert_not_called()
+
+    def test_heading_correction_reaches_odometry_with_one_reset_counter_change(self):
+        self.b.est=ContinuousEstimator()
+        self.b.est.imu(10.,(1,0,0,0),(0,0,0))
+        self.b.est.dvl(10.,(.2,0,0),True)
+        self.b.est.pressure_depth(10.,0.)
+        self.b.est.correct_heading(40.,10.)
+        self.b.configured=lambda now:True
+        self.b.tick()
+        args=self.b.link.odometry.call_args
+        self.assertAlmostEqual(yaw(args.args[1]),40.,places=6)
+        self.assertEqual(args.kwargs['reset_counter'],1)
+        self.clock.now=10.1
+        self.b.tick()
+        self.assertEqual(self.b.link.odometry.call_args.kwargs['reset_counter'],1)
+
+    def test_legacy_alignment_messages_cannot_start_or_accept_automatic_alignment(self):
+        self.b.est=ContinuousEstimator()
+        self.b.control_received=10.
+        self.b.control_state=dict(mission_claimed=True,mode='GUIDED',armed=True,sa_active=False,esc_commanded_on=True)
+        m=dict(run_id='r',published_monotonic=10.,stage='ALIGN_GUIDED')
+        self.b.mission_alignment_status(NS(data=json.dumps(m)))
+        self.assertFalse(self.b.est.alignment_collecting)
+        self.assertIsNone(self.b.est.alignment_run_id)
+        m.update(stage='ALIGN_FINISH',alignment_stopped=True,gps_alignment=dict(offset_deg=10.,lat=33.,lon=-117.,local=[0,0,0]))
+        self.b.mission_alignment_status(NS(data=json.dumps(m)))
+        self.assertFalse(self.b.est.heading_validated)
+        self.assertIsNone(self.b.est.map.angle)
+        self.assertFalse(hasattr(self.b,'guided_alignment_run'))
+        self.b.est.heading_validated=True;self.b.est.alignment_collecting=False
+        self.b.mission_alignment_status(NS(data=json.dumps(m)))
+        self.assertFalse(hasattr(self.b,'guided_alignment_run'))
+
     def test_track_start_checks_profile_and_never_writes_parameters_or_controls(self):
         self.b.configured=lambda now:True
         self.b.est.gps_eligible=lambda now:True
@@ -249,7 +306,7 @@ class TransportTests(unittest.TestCase):
         self.b.params = {k: (10., v) for k, v in dict(PROFILE,COMPASS_LEARN=0).items()}
         self.b.est=ContinuousEstimator()
         self.b.est.imu(10.,(1.,0.,0.,0.),(0.,0.,0.))
-        self.b.est.status = lambda now: dict(healthy=True)
+        self.b.est.status = lambda now: dict(healthy=True,position_ned=self.b.est.cube_position(self.b.est.position))
         self.b.tick()
         self.clock.now = 10.01
         self.b.tick()

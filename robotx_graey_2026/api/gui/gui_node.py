@@ -54,7 +54,8 @@ FILES = {
     '/vendor/leaflet/leaflet.css': 'vendor/leaflet/leaflet.css',
     '/navigation': 'navigation.html',
     '/navigation-supervisor': 'navigation_supervisor.html',
-    '/': 'gui.html',
+    '/': 'waypoint.html',
+    '/control': 'gui.html',
     '/planner': 'pool_planner.html',
     '/pool-map': 'waypoint.html',
     '/waypoint': 'waypoint.html',
@@ -184,8 +185,8 @@ def waypoint_request(body):
     global waypoint_process, waypoint_launch
     action = body.get('action')
     nav = navigation.snapshot()
-    if action == 'preview':
-        return waypoint_api.preview(body.get('plan'), nav)
+    if action in ('preview','qgc_preview'):
+        return waypoint_api.preview(body.get('plan'), nav,source='qgc' if action=='qgc_preview' else 'gui')
     if action == 'abort':
         status = nav['streams'].get('waypoint', {}).get('data', {})
         expected = waypoint_launch['run_id'] if waypoint_launch and waypoint_process.poll() is None else status.get('run_id')

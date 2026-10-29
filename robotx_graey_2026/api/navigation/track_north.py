@@ -17,7 +17,7 @@ class TrackNorth:
         self.rows = []
         self.active = self.approved = False
         self.last_fix = None
-        self.reason = 'Prepare surface sensors, then start the mission with a clear 10 m alignment corridor'
+        self.reason = 'Prepare surface sensors, then start the mission with a clear 5 m alignment corridor'
 
     def begin(self):
         self.__init__(self.maximum_uncertainty_deg,self.maximum_gap_s)
@@ -43,7 +43,7 @@ class TrackNorth:
             self.rows.clear()
             self.reason = 'Alignment stopped without accepting north; explicitly retry after inspection'
 
-    def observe(self, now, fix, velocity, rates, q, position=None):
+    def observe(self, now, fix, velocity, rates, q, position=None, track_sigma_m=0.):
         if self.offset is not None:
             return True
         if not self.active:
@@ -52,19 +52,27 @@ class TrackNorth:
         if self.last_fix is not None and stamp <= self.last_fix:
             return self.reject('Duplicate or reversed GPS timestamp', reset=stamp < self.last_fix)
         self.last_fix = stamp
+        if not math.isfinite(track_sigma_m) or track_sigma_m<0:
+            return self.reject('Local track uncertainty unavailable')
         if self.approved and self.candidate is not None:
+            sigma=max(track_sigma_m,self.candidate.get('track_prediction_sigma_m',0.))
+            gps_sigma=max(fix['accuracy'],max(r[5] for r in self.rows))
+            uncertainty=math.degrees(math.atan2(2*math.hypot(gps_sigma,sigma),self.candidate['baseline_m']))
+            if uncertainty>self.maximum_uncertainty_deg:
+                return self.reject('Prediction uncertainty grew before acceptance; retain track and refit')
+            self.candidate.update(track_prediction_sigma_m=sigma,heading_uncertainty_deg=uncertainty)
             self.offset = self.candidate['offset_deg']
             self.reference = dict(self.candidate)
             self.reason = 'North accepted from GPS coordinate track after controlled stop'
             self.active = False
             return True
-        if position is None or any(not math.isfinite(v) for v in (*position, *rates, *q)):
+        if position is None or any(not math.isfinite(v) for v in (*position, *rates, *q,track_sigma_m)) or track_sigma_m<0:
             return self.reject('Time-matched DVL/VN track unavailable', reset=True)
         if max(abs(math.degrees(r)) for r in rates) > 5 or 1-2*(q[1]**2+q[2]**2) < math.cos(math.radians(15)):
             return self.reject('Keep level and straight during track capture')
         if self.rows and now-self.rows[-1][0] > self.maximum_gap_s:
             return self.reject('GPS track continuity interrupted; retry run', reset=True)
-        self.rows.append((now, fix['lat'], fix['lon'], *position[:2], fix['accuracy'], stamp))
+        self.rows.append((now, fix['lat'], fix['lon'], *position[:2], fix['accuracy'], stamp, track_sigma_m))
         self.rows = self.rows[-600:]
         if len(self.rows) < 20:
             return self.reject('Collecting GPS coordinate track')
@@ -87,7 +95,8 @@ class TrackNorth:
         residual = math.sqrt(sum((cs*a-sn*b-c)**2+(sn*a+cs*b-e)**2 for (a,b),(c,e) in zip(d,g))/len(d))
         # Reported accuracy is not reduced by sqrt(N): correlated GPS bias is
         # common. A 5 m run may legitimately be insufficient in poor reception.
-        uncertainty = math.degrees(math.atan2(2*max(r[5] for r in self.rows),travel))
+        prediction_sigma=max(r[7] for r in self.rows)
+        uncertainty = math.degrees(math.atan2(2*math.hypot(max(r[5] for r in self.rows),prediction_sigma),travel))
         # DVL sets metric distance; GPS contributes direction, never a scale
         # correction. Tolerate ordinary metre-level GNSS disagreement over 5 m,
         # while retaining explicit gross-fit and angular-quality limits.
@@ -97,6 +106,7 @@ class TrackNorth:
         self.candidate = dict(offset_deg=wrap(math.degrees(angle)), baseline_m=travel,
             residual_m=residual, heading_uncertainty_deg=uncertainty, gps_dvl_scale=scale,
             samples=len(d), method=self.method, gps_track=[list(r) for r in self.rows])
+        self.candidate['track_prediction_sigma_m']=prediction_sigma
         self.reason = 'Coordinate track candidate ready; waiting for maneuver stop verification'
         return False
 

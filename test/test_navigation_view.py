@@ -11,6 +11,21 @@ spec.loader.exec_module(module)
 
 
 class NavigationTests(unittest.TestCase):
+    def test_registered_frame_displays_native_cube_global_exactly_like_qgc(self):
+        self.view.put('local',dict(ned=[1.,-5.,0.],velocity=[0.,0.,0.]))
+        self.view.put('attitude',dict(rpy=[0.,0.,80.]))
+        self.view.put('ekf',dict(flags=831,horizontal_variance=.1,velocity_variance=.1))
+        self.view._geo('global',32.9235942,-117.038558,216.,dict(heading=80.))
+        # A private estimator transform must not be applied a second time.
+        self.view.put('bridge',dict(coordinate_frame='cube_ned',map_transform=dict(
+            ready=True,origin=[0.,0.],local_to_ne_deg=90.,translation_ne=[100.,100.],revision=1)))
+        snap=self.view.snapshot();c=snap['cube_estimate']
+        self.assertTrue(c['valid']);self.assertTrue(c['local_valid'])
+        self.assertEqual(c['lat'],32.9235942);self.assertEqual(c['lon'],-117.038558)
+        self.assertEqual(c['heading_deg'],80.)
+        self.assertEqual(c['source'],'Cube GLOBAL_POSITION_INT / ATTITUDE')
+        self.assertIn('global',snap['streams'])
+
     def test_fixed_local_projection_does_not_use_cube_global_heading(self):
         from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
         f=GeographicFrame();f.align(33.,-117.,(0,0),90.)

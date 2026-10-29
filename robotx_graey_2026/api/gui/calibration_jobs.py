@@ -19,6 +19,7 @@ class ServiceQueue:
         for name, path, kind in (
             ('pause','/graey/navigation/pause_odometry',Trigger),
             ('prepare','/graey/navigation/prepare',SetBool),
+            ('align_heading','/graey/navigation/align_heading',SetParametersAtomically),
             ('calibrate','/graey/vn100/calibrate_start',Trigger),
             ('cancel','/graey/vn100/calibrate_cancel',Trigger)):
             self.clients[name] = (node.create_client(kind,path),kind)
@@ -88,13 +89,13 @@ class CalibrationJobs:
 
     def request(self, body):
         action=body.get('action')
-        if action not in ('prepare','calibrate','cancel'):
-            raise ValueError('Only VN calibration and navigation startup are supported')
+        if action not in ('prepare','calibrate','cancel','align_heading'):
+            raise ValueError('Unknown calibration action')
         with self.lock:
             if action=='cancel':
                 self.job['cancel']=True
                 return self.snapshot()
-            reason=(navigation_start_reason if action=='prepare' else maintenance_reason)(self.controller())
+            reason=(navigation_start_reason if action in ('prepare','align_heading') else maintenance_reason)(self.controller())
             if reason or self.mission_running():
                 raise ValueError(reason or 'Stop the mission before calibration/startup')
             if self.job.get('busy'):raise ValueError('An operation is already running')
@@ -102,7 +103,12 @@ class CalibrationJobs:
                 raise ValueError('Confirm safe rotation for VN calibration')
             if action=='prepare' and body.get('surface_confirmed') is not True:
                 raise ValueError('Confirm floating at surface to initialize pressure zero')
+            if action=='align_heading':
+                degrees=body.get('true_heading_deg')
+                if isinstance(degrees,bool) or not isinstance(degrees,(int,float)) or not math.isfinite(degrees) or not 0<=degrees<360:
+                    raise ValueError('Enter a true heading from 0 inclusive to 360 exclusive')
             self.job=dict(action=action,phase='starting',busy=True,cancel=False,message='Starting '+action)
+            if action=='align_heading':self.job['true_heading_deg']=degrees
             threading.Thread(target=self.run,args=(action,),daemon=True).start()
             return self.snapshot()
 
@@ -112,6 +118,10 @@ class CalibrationJobs:
 
     def run(self,action):
         try:
+            if action=='align_heading':
+                message=self.service('align_heading',self.snapshot()['true_heading_deg'])
+                self.update(phase='aligned',busy=False,message=message)
+                return
             if action=='prepare':
                 message=self.service('prepare',True)
                 self.waypoint_permission=True

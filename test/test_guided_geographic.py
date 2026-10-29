@@ -119,5 +119,5 @@ class GeographicTests(unittest.TestCase):
             if e.map.angle is not None:self.assertLess(abs(e.map.angle-73.),2.)
 
     def test_no_corridor_no_mission(self):
-        with self.assertRaisesRegex(ValueError,'10 m'):
+        with self.assertRaisesRegex(ValueError,'5 m'):
             GuidedSurfaceRun(dict(lat=33.,lon=-117.,mode='surface',map='geographic'),'r',0.)

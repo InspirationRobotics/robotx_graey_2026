@@ -115,9 +115,9 @@ class StabilizeSurfaceControl:
                 -s*(target[0]-measured[0])+c*(target[1]-measured[1]))
         for i,error in enumerate(errors):
             self.integral[i]=0. if stopping else max(-100.,min(100.,self.integral[i]+120.*error*dt))
-            wanted=max(-150.,min(150.,(0. if stopping else 1000.*desired_body[i])+400.*error+self.integral[i]))
+            wanted=max(-300.,min(300.,(0. if stopping else 2000.*desired_body[i])+800.*error+self.integral[i]))
             self.output[i]=wanted if stopping else self.output[i]+max(-40.*dt,min(40.*dt,wanted-self.output[i]))
         error=(desired_yaw-yaw+math.pi)%(2*math.pi)-math.pi
         # Center yaw near the target so Cube's own heading hold takes over.
-        turn=0 if abs(error)<math.radians(2.) else round(max(-100.,min(100.,8.*math.degrees(error))))
+        turn=0 if abs(error)<math.radians(2.) else round(max(-250.,min(250.,16.*math.degrees(error))))
         return round(self.output[0]),round(self.output[1]),500,turn
