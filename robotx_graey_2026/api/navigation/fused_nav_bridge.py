@@ -472,7 +472,7 @@ class FusedNavBridge(SteadyNode):
             self.heading_reset_revision=revision
             self.reset_counter=(self.reset_counter+1)%256
         configured = self.configured(now)
-        if self.start_checked and self.output_permitted and not self.auto_recovery.pending and configured and status['healthy'] and (isinstance(self.est,ContinuousEstimator) or new_dvl_measurement(self.est, now, getattr(self, 'last_dvl_sent', None))) and (self.last_sent is None or now-self.last_sent >= .05):
+        if self.start_checked and self.output_permitted and not self.auto_recovery.pending and status['healthy'] and (isinstance(self.est,ContinuousEstimator) or new_dvl_measurement(self.est, now, getattr(self, 'last_dvl_sent', None))) and (self.last_sent is None or now-self.last_sent >= .05):
             self.link.odometry(status['position_ned'] if isinstance(self.est,ContinuousEstimator) else self.est.position, self.est.orientation(), self.est.velocity(),
                                self.est.rates if self.est.fresh(self.est.imu_at,now) else (0.,0.,0.), reset_counter=self.reset_counter, covariance=self.est.covariance(), velocity_covariance=self.est.velocity_covariance() if isinstance(self.est,ContinuousEstimator) else None,
                                quality=40 if status.get('dvl_continuity',{}).get('prediction_active') else 80)
