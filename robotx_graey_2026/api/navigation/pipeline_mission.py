@@ -265,6 +265,8 @@ CAM_SAY = {'camera': 'steering by the camera', 'sonar': 'steering by the sonar',
 CENTRE_GAIN = 0.3       # repair centring: each picture's guess of the lined-up spot counts this much
 CENTRE_LINED_N = 5      # ... lined up: the median offset of this many pictures running within centre_tol_m
 CENTRE_HIDDEN_PX = 100  # ... seen that many times, then lost this close to the magnet in the picture: behind it
+CENTRE_LOOSE_M = 0.25   # ... those two only on the way to levels this high and up; lower ones (closer, more
+                        #   precise) line up within centre_tol_m first, and a lost light holds the depth (Ruth, Oct 29)
 CENTRE_AT_M = 0.02      # ... and the sub this close to the level's depth
 FINAL_LEAD_M = 0.02     # ... the final descent's target never more than this under where the sub is
 CAM_KEEP = 5            # ... the box depth from the camera: the median of its last this many
@@ -3407,6 +3409,7 @@ class PipelineMission(MissionBase):
         self.c_errs = []                                # the last pictures' offsets, m at the box
         self.c_lined = False
         self.c_centred = False                          # centred once: from then on it goes down (Ruth, Oct 29)
+        self.c_down_ok = False                          # below CENTRE_LOOSE_M: lined up now, so the depth may change
         self.c_green_n = 0                             # contrast: pictures running the light has read green
         self.c_last, self.c_first = None, True          # the light's last place in the picture; no guess yet
         self.c_cam, self.c_cam_said = [], None          # the camera's box-top Cube z, newest last; its last say
@@ -3530,6 +3533,12 @@ class PipelineMission(MissionBase):
                 if self.c_lined and not self.c_centred:
                     self.c_centred = True
                     self.get_logger().info('    centre: centred - going down from here on, still steering by the light')
+                # below CENTRE_LOOSE_M: down once lined up, held again past twice the tolerance (a 2 cm dead zone
+                # flickered round the 2 cm line and stalled the toy)
+                if self.c_lined:
+                    self.c_down_ok = True
+                elif len(self.c_errs) >= CENTRE_LINED_N and float(np.median(self.c_errs)) > 2 * self.centre_tol:
+                    self.c_down_ok = False
                 if now - self.c_log >= 2.0:
                     self.c_log = now
                     bz, src = self.box_z()
@@ -3542,9 +3551,13 @@ class PipelineMission(MissionBase):
                            if cs is not None else ''))
             else:
                 self.c_lined = False
+                if now - self.c_seen > 1.0:                 # below CENTRE_LOOSE_M: no going down blind
+                    self.c_down_ok = False
                 # seen steadily, then gone for 1 s right by the magnet: behind it, so centred well enough
-                # (Ruth, Oct 29); gone near the picture's edge is lost, and the depth holds
-                if (not self.c_centred and now - self.c_seen > 1.0 and len(self.c_errs) >= CENTRE_LINED_N
+                # (Ruth, Oct 29) - on the way to CENTRE_LOOSE_M and up only; gone near the picture's edge is lost
+                loose = (self.c_level < len(self.centre_levels)
+                         and self.centre_levels[self.c_level] >= CENTRE_LOOSE_M - 1e-6)
+                if (loose and not self.c_centred and now - self.c_seen > 1.0 and len(self.c_errs) >= CENTRE_LINED_N
                         and self.c_last is not None and math.hypot(self.c_last[0] - self.magnet[0],
                                                                    self.c_last[1] - self.magnet[1]) <= CENTRE_HIDDEN_PX):
                     self.c_centred = True
@@ -3578,11 +3591,14 @@ class PipelineMission(MissionBase):
             L = levels[self.c_level]
             want = bz - MAGNET_BELOW_M - L                  # Cube z with the magnet L above the box's top
             speed = self.centre_speed_at(L)
-            if self.c_centred:                              # centred once, then down through the levels (Ruth,
-                self.c_down += max(-speed * dt, min(speed * dt, want - self.c_down))   # Oct 29); before: hold it
-            if abs(want - self.c_down) < 0.005 and abs(z - want) <= CENTRE_AT_M and self.c_centred:
+            # to CENTRE_LOOSE_M and up: centred once is enough (Ruth, Oct 29); lower: lined up now (or held)
+            go = self.c_centred if L >= CENTRE_LOOSE_M - 1e-6 else self.c_down_ok
+            if go:
+                self.c_down += max(-speed * dt, min(speed * dt, want - self.c_down))
+            at = self.c_centred if L >= CENTRE_LOOSE_M - 1e-6 else self.c_lined
+            if abs(want - self.c_down) < 0.005 and abs(z - want) <= CENTRE_AT_M and at:
                 self.c_level += 1
-                self.c_errs, self.c_lined = [], False
+                self.c_errs, self.c_lined, self.c_down_ok = [], False, False
                 msg = (f'centre: lined up with the magnet {L:.2f} m above the box (at {self.below_surface(z):.2f} m down) - '
                        + (f'on to {levels[self.c_level]:.2f} m' if self.c_level < len(levels) else
                           f'down at {self.final_rate * 100:.0f} cm/s for up to {self.final_s:.0f} s'))
