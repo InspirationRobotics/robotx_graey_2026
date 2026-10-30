@@ -3477,6 +3477,11 @@ class PipelineMission(MissionBase):
             cb = self.camera.latest_boxes       # the newest picture the box model has done, colour from it too
             cam, dets = ((cb[0], cb[2]), cb[1]) if cb is not None else (None, None)
         z = self.cur[2] if self.cur else self.c_down
+        if self.c_box_sonar is None and not self.c_cam:     # no DVL when it began (Oct 29 pool: the pipe-end
+            self.c_box_sonar, src = self.box_z_sonar(z)     # model's 28 s load held the DVL up): try each step
+            if self.c_box_sonar is not None:
+                self.get_logger().info(f'    centre: the box ~{self.c_box_sonar - z - MAGNET_BELOW_M:.2f} m under '
+                                       f'the magnet ({src})')
         if cam is not None and cam[0] != self.c_frame:
             self.c_frame, self.c_frame_t = cam[0], now
             fr = self.light_fractions(cam[1])
