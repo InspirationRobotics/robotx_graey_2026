@@ -158,7 +158,8 @@ SETTINGS = {
     # ---- depth ----------------------------------------------------------------------
     'pool_alt_m':          4.0,        # dive until the bottom is this far below the sub (m)
                                        #   (no dive if it already is)
-    'follow_pipe_below_m': 0.7,        # while following, keep the pipe this far below the sonar (m)
+    'follow_pipe_below_m': 1.0,        # while following, keep the pipe this far below the sonar (m)
+                                       #   (Ruth, Oct 29: was 0.7; now the same as the line-up walk)
     'follow_pipe_tol_m':   0.15,       # ... give or take this much before changing depth (m)
 
     # ---- search: the sonar looks down, both sides ----------------------------------------
@@ -208,7 +209,6 @@ SETTINGS = {
     'end_conf':            0.25,       # ... the confidence a pipe end needs (pipe_end.pt, Oct 25 held-back
                                        #   frames: 0.25 found all 28 ends, 1 false box in 139 frames; 0.4 found 13)
     'light_above_floor_m': 1.6,        # the light box's top above the bottom (m): sets the repair's first step down
-    'centre_max_down_m':   0.65,       # repair: never more than this below where centring began (m)
 
     # ---- time -----------------------------------------------------------------------------
     'phase_timeout':       1200.0,     # give up on any one step after this long (s)
@@ -229,9 +229,11 @@ PARTS = {
                {'follow_mode': 'survey', 'repair_centre': True, 'follow_end': 'surface'}),
 }
 
-# Lake and competition: how the code is set up there. Not for changing.
-FIXED = {'plan': 'pool', 'scan_mode': 'search', 'pool_band': 'none', 'pool_compact': False,
-         'survey_buoy': 'start', 'pool_max_pick_m': 0.0, 'follow_near_m': 0.45}
+# Lake and competition: how the code is set up there. Not for changing. Ruth, Oct 29: the newest
+# parts go in here, not left as options - transit to the end buoy (needs end_buoy_m or the buoys'
+# GPS) and the camera steering the follow (-p camera_follow:=false for a sonar-only run).
+FIXED = {'plan': 'pool', 'scan_mode': 'transit', 'camera_follow': True, 'pool_band': 'none',
+         'pool_compact': False, 'survey_buoy': 'start', 'pool_max_pick_m': 0.0, 'follow_near_m': 0.45}
 
 # The simulator never left the surface with unchanged targets re-sent every 3 s
 # (sim/README.md). Here a target changes when the plan does, and is otherwise
@@ -257,6 +259,11 @@ CAM_DISPUTE_MAX_S = 30.0    # a hold for a disagreement ends after this long, tw
 CAM_SAY = {'camera': 'steering by the camera', 'sonar': 'steering by the sonar',
            'hold': 'holding while fresh sweeps decide'}
 CENTRE_GAIN = 0.3       # repair centring: each picture's guess of the lined-up spot counts this much
+CENTRE_REACT_S = 2.0    # ... nudge, and more if the camera shows no reaction (Ruth, Oct 28): every this long each
+CENTRE_REACT_PX = 10.0  # axis's median offset must have moved at least this much, or that axis's moves
+CENTRE_BOOST_UP = 1.5   # grow this much (up to centre_boost_max); an axis that went past the magnet gets half,
+CENTRE_BOOST_MIN = 0.5  # down to this
+CENTRE_REACHED_M = 0.05 # ... a step down is taken only once the sub is within this of the last one
 GREEN_DONE = 0.05       # repair: the light has turned GREEN once green fills this share of the picture
 RED_SEEN = 0.02         # ... and is still the RED light while red fills at least this share
 WATCH_MIN_SHARE = 0.02  # watching the colours: less of any colour than this is 'off'
@@ -595,7 +602,7 @@ class PipelineMission(MissionBase):
                                             # Oct 23; 0 = off) ...
         p('align_turn_m', 0.4)              # ... turning as soon as the pipe is this far off the sonar's middle
                                             # (Ruth, Oct 25), before it can leave the +-30 deg view
-        p('follow_pipe_below_m', 0.7)       # while following, change depth to keep the pipe this far under the
+        p('follow_pipe_below_m', 1.0)       # while following, change depth to keep the pipe this far under the
         p('follow_pipe_tol_m', 0.15)        # sonar, give or take this (Ruth, Oct 24: the comp pipe isn't level;
                                             # too high loses it, too low bumps it). 0 = hold the depth
         p('follow_max_m', 8.0)              # stop after following this far
@@ -648,9 +655,11 @@ class PipelineMission(MissionBase):
         p('centre_step_m', 0.1)             # each step down (Ruth, Oct 24) ...
         p('centre_first_step_m', 0.4)       # ... but this much while the magnet is still more than this + 0.1 m
                                             # above the light (from the sonar's pipe height)
-        p('centre_max_down_m', 0.6)         # never more than this below where centring began ...
-        p('centre_min_alt_m', 0.3)          # ... nor closer than this to the floor (DVL)
+        p('centre_min_alt_m', 0.3)          # never a step closer than this to the floor (DVL); no other depth
+                                            # limit while centring (Ruth, Oct 29) - the light says when to stop
         p('centre_speed', 0.03)             # m/s while centring
+        p('centre_boost_max', 8.0)          # no reaction in the picture (Ruth, Oct 28): an axis's moves grow x1.5
+                                            # every 2 s, up to this many times; 1 = off (moves from the distance alone)
         p('centre_time_s', 300.0)           # no GREEN by then: give up (start_with:=centre surfaces; the survey
                                             # goes on along the pipe at its own depth)
         p('light_above_floor_m', 0.45)      # the light's top above the floor and the down camera's focal
@@ -784,9 +793,10 @@ class PipelineMission(MissionBase):
             raise ValueError(f"magnet_px must be 'x y' pixels, not {g('magnet_px')!r}")
         self.magnet = (float(mx[0]), float(mx[1]))
         self.centre_tol, self.centre_settle = float(g('centre_tol_px')), float(g('centre_settle_s'))
-        self.centre_step_m, self.centre_max_down = float(g('centre_step_m')), float(g('centre_max_down_m'))
+        self.centre_step_m = float(g('centre_step_m'))
         self.centre_first_step = float(g('centre_first_step_m'))
         self.centre_min_alt, self.centre_speed = float(g('centre_min_alt_m')), float(g('centre_speed'))
+        self.centre_boost_max = float(g('centre_boost_max'))
         self.centre_time, self.light_above_floor = float(g('centre_time_s')), float(g('light_above_floor_m'))
         self.cam_f = float(g('cam_f_px'))
         self.cam_follow = bool(g('camera_follow'))
@@ -845,7 +855,8 @@ class PipelineMission(MissionBase):
             self.end_buoy, brg = buoy_distance(latlon(gps[0]), latlon(gps[1]))
             self.get_logger().info(f'end buoy {self.end_buoy:.1f} m from the start buoy, bearing {brg:.0f} deg '
                                    f'(true north), from the buoys\' GPS')
-        if self.scan_mode == 'transit' and self.end_buoy <= self.end_short:
+        # only a run that transits needs the end buoy: follow and centre-alone runs start over the pipe
+        if self.scan_mode == 'transit' and self.start_with not in ('follow', 'centre') and self.end_buoy <= self.end_short:
             raise ValueError(f'scan_mode:=transit needs end_buoy_m or the buoys\' GPS (start_buoy_gps, end_buoy_gps): '
                              f'how far the end buoy is from the start buoy (more than end_short_m '
                              f'{self.end_short:.1f}), not {self.end_buoy:.1f}')
@@ -3377,20 +3388,22 @@ class PipelineMission(MissionBase):
         self.centre_box(True)
         here = self.cur if self.cur else self.hold[:3]
         self.c_yaw = self.cur_yaw if self.cur_yaw is not None else self.hold[3]
-        self.c_top = self.c_down = here[2]                # Cube z where centring began / asked for now
+        self.c_down = here[2]                             # Cube z asked for now
         self.c_goal = (here[0], here[1])
         self.c_frame, self.c_frame_t, self.c_seen, self.c_log, self.c_lost_said = None, self.now(), self.now(), 0.0, False
         self.c_errs, self.c_ok_since = [], self.now()   # recent offsets (px); since the last step (or the start)
         self.c_green_n = 0                              # contrast: pictures running the light has read green
         self.c_last, self.c_first = None, True          # the light's last place in the picture; no guess yet
         self.c_dist = 0.5                               # the light's distance below the camera, m (until a picture)
+        self.c_boost = [1.0, 1.0]                       # moves x this, sideways and forward (centre_react)
+        self.c_win, self.c_win_t0, self.c_prev = [], self.now(), None   # offsets this 2 s; the last 2 s's median
         self.carrot, self.last_t = (here[0], here[1]), self.now()
         lb = self.light_below(self.floor_clearance())
         self.get_logger().info(f'{why}: the light'
                                + (' box (the model; colour from the light finder)' if self.box_yolo is not None else '')
                                + f' to ({self.magnet[0]:.0f}, {self.magnet[1]:.0f}) px, '
                                f'{self.centre_step_m * 100:.0f} cm steps down ({self.centre_first_step * 100:.0f} cm while far), '
-                               f'at most {self.centre_max_down:.2f} m'
+                               f'never within {self.centre_min_alt:.2f} m of the floor'
                                + (f'; the light ~{lb:.2f} m below the camera' if lb is not None else ''))
         self.to_phase('centre')
 
@@ -3432,7 +3445,8 @@ class PipelineMission(MissionBase):
                 # it (behind) means go back. Each picture says where the sub should be (a fixed point, as
                 # the light is); the guesses are smoothed and walked to. Stepping part of the way from
                 # wherever the sub was instead chased its own lag round in circles (sim, Oct 22)
-                right, fwd = du * dist / self.cam_f, -dv * dist / self.cam_f
+                bx, by = self.centre_react(now, du, dv)
+                right, fwd = du * dist * bx / self.cam_f, -dv * dist * by / self.cam_f
                 h = self.cur_yaw if self.cur_yaw is not None else self.c_yaw
                 n0, e0 = (self.cur[0], self.cur[1]) if self.cur else self.c_goal
                 est = (n0 + fwd * math.cos(h) - right * math.sin(h), e0 + fwd * math.sin(h) + right * math.cos(h))
@@ -3450,7 +3464,8 @@ class PipelineMission(MissionBase):
                     self.get_logger().info(f'    centre: light {du:+.0f} px right, {dv:+.0f} px below the magnet '
                                            f'(~{fwd * 100:+.0f} cm ahead, {right * 100:+.0f} cm right), '
                                            f'{self.below_surface(self.c_down):.2f} m down, floor '
-                                           + (f'{alt:.2f} m' if alt is not None else 'unknown'))
+                                           + (f'{alt:.2f} m' if alt is not None else 'unknown')
+                                           + (f', moves x{bx:.2f} sideways x{by:.2f} forward' if (bx, by) != (1.0, 1.0) else ''))
             else:
                 what = 'light box' if self.box_yolo is not None else 'red light'
                 if now - self.c_seen > 3.0 and not self.c_lost_said:
@@ -3472,6 +3487,39 @@ class PipelineMission(MissionBase):
         # slower close up, where the same move shifts the light further across the picture (Ruth, Oct 24)
         speed = self.centre_speed * min(1.0, max(0.4, self.c_dist / 0.5))
         self.walk_to(self.c_goal, speed, self.c_yaw, 'centre the light on the magnet', down=self.c_down)
+
+    def centre_react(self, now, du, dv):
+        """Nudge, and more if the camera shows no reaction (Ruth, Oct 28). A move is the light's offset in
+        pixels turned into metres by its distance; with that distance wrong (Sunday run 1: the box height
+        left at 1.6 m, moves 1/8 size) or a move too small for the sub to act on (2 cm sideways, never made),
+        the light just sits there. So every CENTRE_REACT_S, an axis (sideways, forward) whose median offset is
+        still past centre_tol_px / sqrt 2 and moved less than CENTRE_REACT_PX gets bigger moves, and one that went
+        past the magnet gets smaller. Moving away isn't 'no reaction': in the sim the sub swings +-100 px sideways,
+        and growing the moves then made the swing bigger. Returns the (sideways, forward) multipliers."""
+        if self.centre_boost_max <= 1.0:
+            return 1.0, 1.0
+        if now - self.c_win_t0 > 3 * CENTRE_REACT_S:   # the light was lost a while: nothing to compare with
+            self.c_win, self.c_win_t0, self.c_prev = [], now, None
+        self.c_win.append((du, dv))
+        if now - self.c_win_t0 < CENTRE_REACT_S or len(self.c_win) < 3:
+            return self.c_boost[0], self.c_boost[1]
+        med = [float(np.median([w[i] for w in self.c_win])) for i in (0, 1)]
+        tol = self.centre_tol / math.sqrt(2)    # both axes this close = lined up
+        if self.c_prev is not None:
+            for i, axis in enumerate(('sideways', 'forward')):
+                was, now_px, b = self.c_prev[i], med[i], self.c_boost[i]
+                if abs(now_px) <= tol:
+                    continue
+                if was * now_px < 0 and abs(was) > tol:
+                    b, why = max(CENTRE_BOOST_MIN, b / 2), 'went past the magnet'
+                elif abs(now_px - was) < CENTRE_REACT_PX:     # the light didn't move; moving away is a swing
+                    b, why = min(self.centre_boost_max, b * CENTRE_BOOST_UP), 'no reaction'   # or drift, not this
+                if b != self.c_boost[i]:
+                    self.get_logger().info(f'    centre: {axis} {why} ({was:+.0f} -> {now_px:+.0f} px in '
+                                           f'{now - self.c_win_t0:.1f} s) - moves x{b:.2f}')
+                    self.c_boost[i] = b
+        self.c_prev, self.c_win, self.c_win_t0 = med, [], now
+        return self.c_boost[0], self.c_boost[1]
 
     def light_fractions(self, rgb):
         """The repair's {'red', 'green'}: shares of the picture (hsv), or (contrast) 1.0 for the colour of
@@ -3535,20 +3583,28 @@ class PipelineMission(MissionBase):
 
     def centre_lower(self, alt):
         """Lined up long enough: one step down - centre_first_step_m while the magnet is still that and
-        0.1 m more above the light (Ruth, Oct 24: less time far off), else centre_step_m - but never
-        past centre_max_down_m or near the floor."""
+        0.1 m more above the light (Ruth, Oct 24: less time far off), else centre_step_m - but never near
+        the floor, and only once the sub has got down to the last step: pressed on a box that doesn't turn
+        GREEN, asking deeper every 1.5 s would push it ever harder into the pipe (no depth cap, Ruth Oct 29)."""
+        z = self.cur[2] if self.cur else self.c_down
+        if z < self.c_down - CENTRE_REACHED_M:
+            self.get_logger().info(f'    centre: lined up, still {(self.c_down - z) * 100:.0f} cm above the last step - '
+                                   f'no new one until it gets there')
+            return
         lb = self.light_below(alt)
         gap = None if lb is None else lb - MAGNET_BELOW_M        # the magnet to the light's top
         step = self.centre_first_step if gap is not None and gap >= self.centre_first_step + 0.1 else self.centre_step_m
-        lower = min(self.c_down + step, self.c_top + self.centre_max_down)
+        lower = self.c_down + step
         if alt is not None and alt - (lower - self.c_down) < self.centre_min_alt:
             lower = self.c_down
         if lower > self.c_down + 1e-3:
             moved, self.c_down = lower - self.c_down, lower
+            self.c_win, self.c_win_t0, self.c_prev = [], self.now(), None   # lower, the picture shifts: start over
             self.get_logger().info(f'    centre: lined up - down {moved * 100:.0f} cm to {self.below_surface(lower):.2f} m'
                                    + (f' (the magnet was ~{gap:.2f} m above the light)' if gap is not None else ''))
         else:
-            self.get_logger().info('    centre: lined up, but at the lowest it may go - holding')
+            self.get_logger().info(f'    centre: lined up, but a step down would be within {self.centre_min_alt:.2f} m '
+                                   f'of the floor - holding')
 
     def watch_begin(self):
         """GREEN: rise a few cm and watch the light's colours (the sequence reader comes later)."""
