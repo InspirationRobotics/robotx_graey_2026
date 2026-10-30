@@ -3405,7 +3405,8 @@ class PipelineMission(MissionBase):
         self.c_frame, self.c_frame_t, self.c_seen, self.c_log, self.c_lost_said = None, self.now(), self.now(), 0.0, False
         self.c_errs = []                                # the last pictures' offsets, m at the box
         self.c_lined = False
-        self.c_green_n = 0                              # contrast: pictures running the light has read green
+        self.c_down_ok = False                          # centred first, then the depth (Ruth, Oct 29)
+        self.c_green_n = 0                             # contrast: pictures running the light has read green
         self.c_last, self.c_first = None, True          # the light's last place in the picture; no guess yet
         self.c_cam, self.c_cam_said = [], None          # the camera's box-top Cube z, newest last; its last say
         self.c_final_t, self.c_t = None, self.now()     # the final descent's start; the last step's clock
@@ -3520,6 +3521,12 @@ class PipelineMission(MissionBase):
                 self.c_errs = (self.c_errs + [math.hypot(right, fwd)])[-CENTRE_LINED_N:]
                 self.c_lined = (len(self.c_errs) >= CENTRE_LINED_N
                                 and float(np.median(self.c_errs)) <= self.centre_tol)
+                # depth changes once lined up, and stop again only past twice the tolerance (a 2 cm dead
+                # zone flickered round the 2 cm line and stalled the toy)
+                if self.c_lined:
+                    self.c_down_ok = True
+                elif len(self.c_errs) >= CENTRE_LINED_N and float(np.median(self.c_errs)) > 2 * self.centre_tol:
+                    self.c_down_ok = False
                 if now - self.c_log >= 2.0:
                     self.c_log = now
                     bz, src = self.box_z()
@@ -3532,6 +3539,8 @@ class PipelineMission(MissionBase):
                            if cs is not None else ''))
             else:
                 self.c_lined = False
+                if now - self.c_seen > 1.0:                 # no box for 1 s: no going down blind
+                    self.c_down_ok = False
                 what = 'light box' if self.box_yolo is not None else 'red light'
                 if now - self.c_seen > 3.0 and not self.c_lost_said:
                     self.c_lost_said = True
@@ -3560,7 +3569,8 @@ class PipelineMission(MissionBase):
             L = levels[self.c_level]
             want = bz - MAGNET_BELOW_M - L                  # Cube z with the magnet L above the box's top
             speed = self.centre_speed_at(L)
-            self.c_down += max(-speed * dt, min(speed * dt, want - self.c_down))
+            if self.c_down_ok:                              # centred first, then the depth (Ruth, Oct 29); else hold it
+                self.c_down += max(-speed * dt, min(speed * dt, want - self.c_down))
             if abs(want - self.c_down) < 0.005 and abs(z - want) <= CENTRE_AT_M and self.c_lined:
                 self.c_level += 1
                 self.c_errs, self.c_lined = [], False
