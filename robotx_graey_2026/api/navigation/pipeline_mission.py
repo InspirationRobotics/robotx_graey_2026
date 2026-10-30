@@ -666,10 +666,10 @@ class PipelineMission(MissionBase):
                                             # its distance from the camera
         p('light_above_floor_m', 0.45)      # start_with:=centre only (no sonar pipe point): the box's top above the
                                             # floor, with the DVL's altitude the rough box depth
-        p('cam_f_px', 330.0)                # the down camera's focal length in water, px at 640x360: from the
-                                            # magnet's place (14.9 cm under, 5.1 cm behind the lens) and its size
-                                            # (~ the 3.8 cm ring, ~75 px) - a wide lens; check against the
-                                            # camera's factory calibration x 1.33 for water
+        p('cam_f_px', 658.0)                # the down camera's focal length in water, px at 640x360: the OAK-D's
+                                            # factory calibration (fx 493.6 in air, HFOV 68.8, read Oct 29) x 1.333
+                                            # through the flat window; Sunday Oct 25's 12 cm box at ~0.87 m gave
+                                            # 630-750. (330 before - wrong, from rough magnet measurements)
         p('camera_follow', False)           # True (Ruth, Oct 27): while following, steer by the down camera's pipe
                                             # line (api/vision/pipe_line.py) whenever it has a steady one; the
                                             # sonar keeps sweeping, checks it, and steers when the camera has none
