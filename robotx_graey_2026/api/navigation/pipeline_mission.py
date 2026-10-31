@@ -264,7 +264,7 @@ CAM_SAY = {'camera': 'steering by the camera', 'sonar': 'steering by the sonar',
            'hold': 'holding while fresh sweeps decide'}
 CENTRE_GAIN = 0.3       # repair centring: each picture's guess of the lined-up spot counts this much
 CENTRE_LINED_N = 5      # ... lined up: the median offset of this many pictures running within centre_tol_m
-CENTRE_HIDDEN_PX = 100  # ... seen that many times, then lost this close to the magnet in the picture: behind it
+CENTRE_HIDDEN_PX = 100  # ... seen that many times, then lost this close to the picture's middle: taken as centred
 CENTRE_LOOSE_M = 0.25   # ... those two only on the way to levels this high and up; lower ones (closer, more
                         #   precise) line up within centre_tol_m first, and a lost light holds the depth (Ruth, Oct 29)
 CENTRE_AT_M = 0.02      # ... and the sub this close to the level's depth
@@ -282,6 +282,11 @@ SEARCH_GROW = 0.5       #   picture's height at the box), each next one this x t
 SEARCH_MAX_M = 0.5      #   this; this long searching in all: give up
 SEARCH_MAX_S = 120.0
 SQUARE = ((1, 1), (1, -1), (-1, -1), (-1, 1), (1, 1))   # the search square's corners (ahead, right) x its half side
+MAGNET_IGNORE_PX = 50   # a box this close to the magnet in the picture is the magnet lit up by the LED (Oct 30 pool,
+                        #   v4 at 0.5-0.6): the box is aimed at the picture's middle, so it's never there
+SHIFT_V = 0.01          # the magnet over the box at the end (Ruth, Oct 30): the camera over it, then the sub moves
+SHIFT_AT_M = 0.005      #   by the magnet's offset from the camera's middle on the DVL, this fast, to within this,
+SHIFT_MAX_S = 8.0       #   or this long at most
 CAM_CX, CAM_CY = 318.7, 174.3   # the down camera's optical middle, px at 640x360 (OAK-D factory calibration, Oct 29)
 FINAL_LEAD_M = 0.02     # ... the final descent's target never more than this under where the sub is
 CAM_KEEP = 5            # ... the box depth from the camera: the median of its last this many
@@ -673,7 +678,10 @@ class PipelineMission(MissionBase):
                                             # 640x360 down picture: lined up there, the magnet is over the light
         p('centre_levels_m', '0.5 0.25 0.15 0.05')   # the magnet this far above the box's top, in turn (Ruth,
                                             # Oct 29), lined up at each before the next
-        p('centre_tol_m', 0.02)             # lined up: the light's middle within this of the magnet's, at the box
+        p('centre_shift_m', 0.10)           # the box in the picture's middle (the camera over it) down to the magnet this
+                                            # far above it, then the magnet moved over it on the DVL and the rest of
+                                            # the way down blind, holding there (Ruth, Oct 30)
+        p('centre_tol_m', 0.02)             # lined up: the light's middle within this of the picture's, at the box
         p('centre_far_m', 0.5)              # speed, sideways and down: centre_speed_far with the magnet this far
         p('centre_speed_far', 0.08)         # above the box or more (m/s) ...
         p('centre_near_m', 0.1)             # ... centre_speed_near this far or closer, a straight line between
@@ -817,6 +825,9 @@ class PipelineMission(MissionBase):
         self.seen_srv = led_boxes.serve_seen(lambda: self.camera, self.magnet,
                                              report=lambda t: self.get_logger().warn(t))
         self.centre_levels = sorted((float(v) for v in str(g('centre_levels_m')).split()), reverse=True)
+        self.centre_shift = float(g('centre_shift_m'))
+        if all(abs(L - self.centre_shift) > 1e-6 for L in self.centre_levels):
+            self.centre_levels = sorted(self.centre_levels + [self.centre_shift], reverse=True)   # a level of its own
         self.centre_tol = float(g('centre_tol_m'))
         self.centre_far, self.centre_v_far = float(g('centre_far_m')), float(g('centre_speed_far'))
         self.centre_near, self.centre_v_near = float(g('centre_near_m')), float(g('centre_speed_near'))
@@ -3432,22 +3443,27 @@ class PipelineMission(MissionBase):
         self.c_last, self.c_first = None, True          # the light's last place in the picture; no guess yet
         self.c_cam, self.c_cam_said = [], None          # the camera's box-top Cube z, newest last; its last say
         self.c_final_t, self.c_t = None, self.now()     # the final descent's start; the last step's clock
-        self.c_box, self.c_good, self.c_odd = None, [], []   # the box's place (n, e: the sub with the magnet over
+        self.c_box, self.c_good, self.c_odd = None, [], []   # the box's place (n, e: the sub with the camera over
                                                         # it), its good sightings, good ones running that disagree
         self.c_mode, self.c_mode_goal, self.c_arrived = 'centre', None, None   # centre | return | look | search
         self.c_search, self.c_look, self.c_d = None, [], 0.4    # the search; a look's sightings; camera to box, m
+        self.c_shift_goal, self.c_shift_t, self.c_magnet_said = None, None, False   # the magnet over the box
+        self.c_shifted = False                          # ... done: the rest of the way down blind
         self.carrot, self.last_t = (here[0], here[1]), self.now()
         self.c_box_sonar, src = self.box_z_sonar(here[2])
         gap = None if self.c_box_sonar is None else self.c_box_sonar - here[2] - MAGNET_BELOW_M
         # the first level: the highest one not above where the magnet is now
         self.c_level = next((k for k, L in enumerate(self.centre_levels) if gap is None or L <= gap + CENTRE_AT_M),
                             len(self.centre_levels))
+        k_shift = next(k for k, L in enumerate(self.centre_levels) if abs(L - self.centre_shift) < 1e-6)
+        self.c_level = min(self.c_level, k_shift)        # starting lower: up to the shift's height first
         if self.c_level >= len(self.centre_levels):
             self.c_final_t = self.now()
         self.get_logger().info(
             f'{why}: the light' + (' box (the model; colour from the light finder)' if self.box_yolo is not None else '')
-            + f' to ({self.magnet[0]:.0f}, {self.magnet[1]:.0f}) px; the magnet to '
-            + ', '.join(f'{L:.2f}' for L in self.centre_levels) + ' m above the box, then down at '
+            + f' to the picture\'s middle ({CAM_CX:.0f}, {CAM_CY:.0f}) px, the camera over it; the magnet to '
+            + ', '.join(f'{L:.2f}' for L in self.centre_levels) + ' m above the box - at '
+            f'{self.centre_shift:.2f} the magnet moved over it on the DVL, blind from there - then down at '
             f'{self.final_rate * 100:.0f} cm/s for {self.final_s:.0f} s; '
             + (f'the box ~{gap:.2f} m under the magnet ({src})' if gap is not None else
                'the box\'s depth unknown until the camera sees all of it - holding the depth till then'))
@@ -3532,7 +3548,15 @@ class PipelineMission(MissionBase):
                 if spot is None and fr['red'] >= RED_SEEN and self.c_last is not None and \
                         math.hypot(self.c_last[0] - self.magnet[0], self.c_last[1] - self.magnet[1]) * mpp <= self.centre_tol:
                     spot = (self.c_last, 0.0)   # its core just went behind the magnet (about as big as the ring)
-            if spot is not None and self.c_final_t is None:
+            if spot is not None and self.c_shift_goal is not None:
+                spot = None                                 # the magnet going over the box, then blind: no steering
+            if spot is not None and math.hypot(spot[0][0] - self.magnet[0], spot[0][1] - self.magnet[1]) < MAGNET_IGNORE_PX:
+                if not self.c_magnet_said:
+                    self.c_magnet_said = True
+                    self.get_logger().info('    centre: a box on the magnet - the magnet lit up by the LED, not the box: '
+                                           'ignored (the box is aimed at the picture\'s middle)')
+                spot = None
+            if spot is not None:
                 spot = self.box_sighting(spot, det, d)     # not the box (too far from its place), or the lost search's
             if spot is not None:
                 (u, v), _ = spot
@@ -3542,15 +3566,17 @@ class PipelineMission(MissionBase):
                 self.c_seen, self.c_lost_said = now, False
                 if det is not None:
                     self.centre_camera_depth(det, z)
-                du, dv = u - self.magnet[0], v - self.magnet[1]
-                # picture top = front, right = right: a light right of the magnet means go right, one below
-                # it (behind) means go back. Each picture says where the sub should be (a fixed point, as
-                # the light is); the guesses are smoothed and walked to. Stepping part of the way from
-                # wherever the sub was instead chased its own lag round in circles (sim, Oct 22)
+                du, dv = u - CAM_CX, v - CAM_CY
+                # to the picture's middle - the camera over the box (Ruth, Oct 30): there it stays put in the picture
+                # as the sub goes down, clear of the magnet and the edges; the magnet goes over it at centre_shift_m.
+                # Picture top = front, right = right: a light right of the middle means go right, one below it
+                # (behind) means go back. Each picture says where the sub should be (a fixed point, as the light
+                # is); the guesses are smoothed and walked to. Stepping part of the way from wherever the sub was
+                # instead chased its own lag round in circles (sim, Oct 22)
                 right, fwd = du * mpp, -dv * mpp
                 h = self.cur_yaw if self.cur_yaw is not None else self.c_yaw
                 n0, e0 = (self.cur[0], self.cur[1]) if self.cur else self.c_goal
-                est = (n0 + fwd * math.cos(h) - right * math.sin(h), e0 + fwd * math.sin(h) + right * math.cos(h))
+                est = self.box_place(u, v, d, n0, e0, h)
                 g, self.c_first = (1.0 if self.c_first else CENTRE_GAIN), False
                 self.c_goal = (self.c_goal[0] + g * (est[0] - self.c_goal[0]), self.c_goal[1] + g * (est[1] - self.c_goal[1]))
                 # lined up: the median of the last CENTRE_LINED_N pictures' offsets, in m at the box
@@ -3571,7 +3597,7 @@ class PipelineMission(MissionBase):
                     bz, src = self.box_z()
                     cs = self.c_cam_said
                     self.get_logger().info(
-                        f'    centre: light {right * 100:+.1f} cm right, {fwd * 100:+.1f} cm ahead of the magnet '
+                        f'    centre: light {right * 100:+.1f} cm right, {fwd * 100:+.1f} cm ahead of the picture\'s middle '
                         f'({du:+.0f}, {dv:+.0f} px), ' + self.centre_where(z)
                         + (f'; box from the {src}' if bz is not None else '')
                         + (f' (camera {cs[0] - z - MAGNET_BELOW_M:.2f} m{"" if cs[1] else " - too far from the sonar, not used"})'
@@ -3580,21 +3606,21 @@ class PipelineMission(MissionBase):
                 self.c_lined = False
                 if now - self.c_seen > 1.0:                 # below CENTRE_LOOSE_M: no going down blind
                     self.c_down_ok = False
-                # seen steadily, then gone for 1 s right by the magnet: behind it, so centred well enough
-                # (Ruth, Oct 29) - on the way to CENTRE_LOOSE_M and up only; gone near the picture's edge is lost
+                # seen steadily, then gone for 1 s near where it is aimed: centred well enough (Ruth, Oct 29) - on
+                # the way to CENTRE_LOOSE_M and up only; gone near the picture's edge is lost
                 loose = (self.c_level < len(self.centre_levels)
                          and self.centre_levels[self.c_level] >= CENTRE_LOOSE_M - 1e-6)
                 if (loose and not self.c_centred and now - self.c_seen > 1.0 and len(self.c_errs) >= CENTRE_LINED_N
-                        and self.c_last is not None and math.hypot(self.c_last[0] - self.magnet[0],
-                                                                   self.c_last[1] - self.magnet[1]) <= CENTRE_HIDDEN_PX):
+                        and self.c_last is not None and math.hypot(self.c_last[0] - CAM_CX,
+                                                                   self.c_last[1] - CAM_CY) <= CENTRE_HIDDEN_PX):
                     self.c_centred = True
-                    self.get_logger().info('    centre: the light went out of sight by the magnet - taking it as '
-                                           'centred, going down')
+                    self.get_logger().info('    centre: the light went out of sight near the picture\'s middle - '
+                                           'taking it as centred, going down')
                 what ='light box' if self.box_yolo is not None else 'red light'
-                if now - self.c_seen > 3.0 and not self.c_lost_said:
+                if now - self.c_seen > 3.0 and not self.c_lost_said and self.c_shift_goal is None:
                     self.c_lost_said = True
                     self.get_logger().warn(f'    centre: no {what} in the picture for 3 s - going on to where it was')
-                if self.c_mode == 'centre' and self.c_final_t is None and now - self.c_seen > LOST_GO_S:
+                if self.c_mode == 'centre' and self.c_shift_goal is None and now - self.c_seen > LOST_GO_S:
                     self.box_lost()
                 if now - self.c_log >= 2.0:
                     self.c_log = now
@@ -3621,37 +3647,63 @@ class PipelineMission(MissionBase):
             want = bz - MAGNET_BELOW_M - L                  # Cube z with the magnet L above the box's top
             speed = self.centre_speed_at(L)
             # to CENTRE_LOOSE_M and up: centred once is enough (Ruth, Oct 29); lower: lined up now (or held)
-            # lost (going back to the box's place, looking, searching): the depth holds
-            go = (self.c_centred if L >= CENTRE_LOOSE_M - 1e-6 else self.c_down_ok) and self.c_mode == 'centre'
+            # lost (going back to the box's place, looking, searching) or the magnet going over the box: the depth
+            # holds; once it is over the box, the rest of the way down blind (Ruth, Oct 30)
+            go = (((self.c_centred if L >= CENTRE_LOOSE_M - 1e-6 else self.c_down_ok)
+                   and self.c_mode == 'centre' and self.c_shift_goal is None) or self.c_shifted)
             if go:
                 self.c_down += max(-speed * dt, min(speed * dt, want - self.c_down))
-            at = (self.c_centred if L >= CENTRE_LOOSE_M - 1e-6 else self.c_lined) and self.c_mode == 'centre'
+            at = ((self.c_centred if L >= CENTRE_LOOSE_M - 1e-6 else self.c_lined) and self.c_mode == 'centre') or self.c_shifted
             if abs(want - self.c_down) < 0.005 and abs(z - want) <= CENTRE_AT_M and at:
-                self.c_level += 1
-                self.c_errs, self.c_lined, self.c_down_ok = [], False, False
-                msg = (f'centre: lined up with the magnet {L:.2f} m above the box (at {self.below_surface(z):.2f} m down) - '
-                       + (f'on to {levels[self.c_level]:.2f} m' if self.c_level < len(levels) else
-                          f'down at {self.final_rate * 100:.0f} cm/s for up to {self.final_s:.0f} s'))
-                self.get_logger().info('    ' + msg)
-                self.mark(msg)
-                if self.c_level >= len(levels):
-                    self.c_final_t = now
+                if not self.c_shifted and abs(L - self.centre_shift) < 1e-6:
+                    if self.c_shift_goal is None:
+                        self.centre_shift_start(L, now)
+                else:
+                    self.c_level += 1
+                    self.c_errs, self.c_lined, self.c_down_ok = [], False, False
+                    msg = ((f'centre: the magnet over the box {L:.2f} m above it' if self.c_shifted else
+                            f'centre: lined up {L:.2f} m above the box') + f' (at {self.below_surface(z):.2f} m down) - '
+                           + (f'on to {levels[self.c_level]:.2f} m' + (' blind' if self.c_shifted else '')
+                              if self.c_level < len(levels) else
+                              f'down at {self.final_rate * 100:.0f} cm/s for up to {self.final_s:.0f} s'))
+                    self.get_logger().info('    ' + msg)
+                    self.mark(msg)
+                    if self.c_level >= len(levels):
+                        self.c_final_t = now
         else:                                               # the box's depth unknown: hold the depth
             speed = self.centre_speed_at(levels[0] if levels else 0.0)
         if self.c_mode != 'centre':
             self.box_search_step()
             return
-        self.walk_to(self.c_goal, speed, self.c_yaw, 'centre the light on the magnet', down=self.c_down)
+        if self.c_shift_goal is not None:
+            left, _ = self.walk_to(self.c_shift_goal, SHIFT_V if not self.c_shifted else speed, self.c_yaw,
+                                   'the magnet over the box', down=self.c_down)
+            if not self.c_shifted and (left < SHIFT_AT_M or now - self.c_shift_t > SHIFT_MAX_S):
+                self.c_shifted = True
+                self.get_logger().info(f'    centre: the magnet over the box ({left * 100:.1f} cm from the spot, by the '
+                                       f'DVL) - the rest of the way down blind, holding there')
+            return
+        self.walk_to(self.c_goal, speed, self.c_yaw, 'centre the light in the picture', down=self.c_down)
+
+    def centre_shift_start(self, L, now):
+        """The box in the picture's middle - the camera over it - L m above it: the sub moves by the magnet's offset
+        from the camera's middle (MAGNET_BELOW_M under the lens and (my - CAM_CY) px below the picture's middle:
+        ~2.7 cm behind), on the DVL (Ruth, Oct 30). The LED goes behind the magnet: the camera stops steering."""
+        mx, my, f, m = self.magnet[0], self.magnet[1], self.cam_f, MAGNET_BELOW_M
+        ahead, right = (my - CAM_CY) * m / f, -(mx - CAM_CX) * m / f
+        h = self.cur_yaw if self.cur_yaw is not None else self.c_yaw
+        g = self.c_goal
+        self.c_shift_goal = (g[0] + ahead * math.cos(h) - right * math.sin(h), g[1] + ahead * math.sin(h) + right * math.cos(h))
+        self.c_shift_t = now
+        self.get_logger().info(f'    centre: lined up {L:.2f} m above the box, the camera over it - moving the magnet over '
+                               f'it: {ahead * 100:.1f} cm ahead, {right * 100:+.1f} cm right, on the DVL')
 
     # ---- the box's place, and finding it again when lost (Ruth, Oct 30) ----
     def box_place(self, u, v, d, n0, e0, h):
-        """Where the sub has to be for the magnet to be over a light seen at (u, v) px, the camera d m above the
-        box top, the sub at (n0, e0) heading h: (n, e). Not quite where centring steers to: the magnet is off the
-        camera's middle, so in the picture it lines up with a point L x 0.18 behind it (L its height above the
-        box; the same at contact) - this one is right at any height, so sightings from 1 m and 0.15 m agree."""
-        mx, my, f, m = self.magnet[0], self.magnet[1], self.cam_f, MAGNET_BELOW_M
-        right = (u - CAM_CX) * d / f - (mx - CAM_CX) * m / f
-        ahead = -(v - CAM_CY) * d / f + (my - CAM_CY) * m / f
+        """Where the sub has to be for the camera to be over a light seen at (u, v) px, the camera d m above the box
+        top, the sub at (n0, e0) heading h: (n, e) - where centring steers to (the box in the picture's middle).
+        Straight under the lens, so sightings from 1 m and 0.15 m agree."""
+        right, ahead = (u - CAM_CX) * d / self.cam_f, -(v - CAM_CY) * d / self.cam_f
         return (n0 + ahead * math.cos(h) - right * math.sin(h), e0 + ahead * math.sin(h) + right * math.cos(h))
 
     def box_mode(self, mode, why, goal=None):
