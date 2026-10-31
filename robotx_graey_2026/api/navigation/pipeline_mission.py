@@ -3550,21 +3550,31 @@ class PipelineMission(MissionBase):
             if self.box_yolo is not None:
                 # the box model says where (Ruth, Oct 28): it still sees the box once the ring is mostly
                 # under the magnet, where the light finder lost it, and isn't fooled by the pipe or the drain
-                det = led_boxes.biggest_light([b for b in dets if b['colour'] != 'pipe_end'])
+                boxes = [b for b in dets if b['colour'] != 'pipe_end']
+                # a box on the magnet is the magnet lit up by the LED (Oct 30): the biggest of the others, so the real
+                # light beside the magnet still counts when the model boxes both
+                off = [b for b in boxes if math.hypot((b['x'] + 1) * 320 - self.magnet[0],
+                                                      (b['y'] + 1) * 180 - self.magnet[1]) >= MAGNET_IGNORE_PX]
+                if len(off) < len(boxes) and not self.c_magnet_said:
+                    self.c_magnet_said = True
+                    self.get_logger().info('    centre: a box on the magnet - the magnet lit up by the LED, not the box: '
+                                           'ignored (the box is aimed at the picture\'s middle)')
+                det = led_boxes.biggest_light(off)
                 spot = (((det['x'] + 1) * 320, (det['y'] + 1) * 180), det['share']) if det else None
             else:
                 spot = self.light_where(cam[1]) if fr['red'] >= RED_SEEN else None
                 if spot is None and fr['red'] >= RED_SEEN and self.c_last is not None and \
                         math.hypot(self.c_last[0] - self.magnet[0], self.c_last[1] - self.magnet[1]) * mpp <= self.centre_tol:
                     spot = (self.c_last, 0.0)   # its core just went behind the magnet (about as big as the ring)
-            if spot is not None and self.c_shift_goal is not None:
-                spot = None                                 # the magnet going over the box, then blind: no steering
             if spot is not None and math.hypot(spot[0][0] - self.magnet[0], spot[0][1] - self.magnet[1]) < MAGNET_IGNORE_PX:
                 if not self.c_magnet_said:
                     self.c_magnet_said = True
                     self.get_logger().info('    centre: a box on the magnet - the magnet lit up by the LED, not the box: '
                                            'ignored (the box is aimed at the picture\'s middle)')
                 spot = None
+            if spot is not None and self.c_shift_goal is not None:
+                self.shift_sighting(spot[0], z, now)     # the magnet going over the box, then down: the light beside
+                spot = None                              # the magnet moves its spot; no centring in the picture
             if spot is not None:
                 spot = self.box_sighting(spot, det, d)     # not the box (too far from its place), or the lost search's
             if spot is not None:
@@ -3714,9 +3724,38 @@ class PipelineMission(MissionBase):
             if not self.c_shifted and (left < SHIFT_AT_M or now - self.c_shift_t > SHIFT_MAX_S):
                 self.c_shifted, self.c_level, self.c_down = True, len(self.centre_levels), z
                 self.get_logger().info(f'    centre: the magnet over the box ({left * 100:.1f} cm from the spot, by the '
-                                       f'DVL) - slowly down to it, holding there, until it touches')
+                                       f'DVL) - slowly down to it until it touches, the light beside the magnet '
+                                       f'still moving the spot')
             return
         self.walk_to(self.c_goal, speed, self.c_yaw, 'centre the light in the picture', down=self.c_down)
+
+    def magnet_offset(self, n, e, h):
+        """(n, e) moved by the magnet's offset from the camera's middle - where the sub goes for the magnet to be
+        where the camera was over: MAGNET_BELOW_M under the lens and (my - CAM_CY) px below the picture's middle,
+        ~2.7 cm behind, so ahead by that."""
+        mx, my, f, m = self.magnet[0], self.magnet[1], self.cam_f, MAGNET_BELOW_M
+        ahead, right = (my - CAM_CY) * m / f, -(mx - CAM_CX) * m / f
+        return (n + ahead * math.cos(h) - right * math.sin(h), e + ahead * math.sin(h) + right * math.cos(h))
+
+    def shift_sighting(self, uv, z, now):
+        """The light seen beside the magnet (not on it) while the magnet goes over the box or down to it: where the
+        magnet has to be for it, from where the camera is over it - the spot moves that way (Ruth, Oct 30: the sub
+        drifted 5 cm going down blind beside a box the camera saw the whole time). Hidden behind the magnet:
+        nothing seen, the spot holds."""
+        bz, _ = self.box_z()
+        d = min(max(bz - z if bz is not None else 0.4, MAGNET_BELOW_M + 0.02), 1.5)   # the camera above the box top
+        here = self.cur if self.cur else self.carrot
+        h = self.cur_yaw if self.cur_yaw is not None else self.c_yaw
+        cam = self.box_place(uv[0], uv[1], d, here[0], here[1], h)
+        want = self.magnet_offset(cam[0], cam[1], h)
+        g = self.c_shift_goal
+        self.c_shift_goal = (g[0] + CENTRE_GAIN * (want[0] - g[0]), g[1] + CENTRE_GAIN * (want[1] - g[1]))
+        if self.camera is not None:
+            self.camera.aim = (time.monotonic(), uv[0], uv[1])
+        if now - self.c_log >= 2.0:
+            self.c_log = now
+            self.get_logger().info(f'    centre: the light beside the magnet, {math.hypot(want[0] - here[0], want[1] - here[1]) * 100:.1f} cm '
+                                   f'off - the magnet\'s spot moves that way ({self.centre_where(z)})')
 
     def centre_shift_start(self, L, now):
         """The box in the picture's middle - the camera over it - L m above it: the sub moves by the magnet's offset
@@ -3725,8 +3764,7 @@ class PipelineMission(MissionBase):
         mx, my, f, m = self.magnet[0], self.magnet[1], self.cam_f, MAGNET_BELOW_M
         ahead, right = (my - CAM_CY) * m / f, -(mx - CAM_CX) * m / f
         h = self.cur_yaw if self.cur_yaw is not None else self.c_yaw
-        g = self.c_goal
-        self.c_shift_goal = (g[0] + ahead * math.cos(h) - right * math.sin(h), g[1] + ahead * math.sin(h) + right * math.cos(h))
+        self.c_shift_goal = self.magnet_offset(self.c_goal[0], self.c_goal[1], h)
         self.c_shift_t = now
         self.get_logger().info(f'    centre: lined up {L:.2f} m above the box, the camera over it - moving the magnet over '
                                f'it: {ahead * 100:.1f} cm ahead, {right * 100:+.1f} cm right, on the DVL')
