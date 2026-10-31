@@ -292,6 +292,11 @@ SLOW_ZONE_M = 0.05      #   target never more than FINAL_LEAD_M under where the 
 TOUCH_S = 2.0           # ... on the box: the target that far ahead and the sub not this much deeper for this long
 TOUCH_MOVE_M = 0.005
 PAST_BOX_M = 0.15       # ... no touch with the magnet this far under the box's guessed top: stop going down
+NUDGE_S = 2.0           # option B (Ruth, Oct 30): Graey's position hold leaves 1.5-2 cm level, 3-5 cm going down
+NUDGE_MIN_M = 0.01      #   (Oct 30 pool, the tlog: 20 s still, 3-5 cm off its target). The sub this far from where
+NUDGE_GAIN_M = 0.005    #   it should be and not this much closer each NUDGE_S: the target put further out that way,
+NUDGE_UP = 1.5          #   x this more each time (back to none within NUDGE_MIN_M, half when it goes past), at most
+NUDGE_MAX_M = 0.10      #   this far past where it should be
 CAM_CX, CAM_CY = 318.7, 174.3   # the down camera's optical middle, px at 640x360 (OAK-D factory calibration, Oct 29)
 FINAL_LEAD_M = 0.02     # ... the final descent's target never more than this under where the sub is
 CAM_KEEP = 5            # ... the box depth from the camera: the median of its last this many
@@ -683,6 +688,7 @@ class PipelineMission(MissionBase):
                                             # 640x360 down picture: lined up there, the magnet is over the light
         p('centre_levels_m', '0.5 0.25')    # the magnet this far above the box's top, in turn (Ruth, Oct 29; only
                                             # these two, Oct 30), lined up at each before the next
+        p('centre_nudge', True)             # option B (Ruth, Oct 30): a target the sub sits short of goes further out
         p('centre_shift_m', 0.25)           # the box in the picture's middle (the camera over it) down to the magnet this
                                             # far above it, the final centring there, then the magnet moved over it on
                                             # the DVL and slowly down to the box, holding there, until it touches (Ruth,
@@ -832,6 +838,7 @@ class PipelineMission(MissionBase):
                                              report=lambda t: self.get_logger().warn(t))
         self.centre_levels = sorted((float(v) for v in str(g('centre_levels_m')).split()), reverse=True)
         self.centre_shift = float(g('centre_shift_m'))
+        self.centre_nudge = bool(g('centre_nudge'))
         if all(abs(L - self.centre_shift) > 1e-6 for L in self.centre_levels):
             self.centre_levels = sorted(self.centre_levels + [self.centre_shift], reverse=True)   # a level of its own
         self.centre_tol = float(g('centre_tol_m'))
@@ -3456,6 +3463,7 @@ class PipelineMission(MissionBase):
         self.c_shift_goal, self.c_shift_t, self.c_magnet_said = None, None, False   # the magnet over the box
         self.c_shifted = False                          # ... done: the rest of the way down blind
         self.c_touch = None                             # (time, Cube z) the sub stopped following down: touching?
+        self.c_nudge = {'t': self.now(), 'gap': None, 'boost': 1.0, 'dir': None}   # option B
         self.carrot, self.last_t = (here[0], here[1]), self.now()
         self.c_box_sonar, src = self.box_z_sonar(here[2])
         self.c_box_src = 'sonar' if src.startswith('the sonar') else 'DVL'
@@ -3719,15 +3727,48 @@ class PipelineMission(MissionBase):
             self.box_search_step()
             return
         if self.c_shift_goal is not None:
-            left, _ = self.walk_to(self.c_shift_goal, SHIFT_V if not self.c_shifted else speed, self.c_yaw,
-                                   'the magnet over the box', down=self.c_down)
+            self.walk_to(self.nudged(self.c_shift_goal, now), SHIFT_V if not self.c_shifted else speed, self.c_yaw,
+                         'the magnet over the box', down=self.c_down)
+            here = self.cur if self.cur else self.carrot
+            left = math.hypot(self.c_shift_goal[0] - here[0], self.c_shift_goal[1] - here[1])
             if not self.c_shifted and (left < SHIFT_AT_M or now - self.c_shift_t > SHIFT_MAX_S):
                 self.c_shifted, self.c_level, self.c_down = True, len(self.centre_levels), z
                 self.get_logger().info(f'    centre: the magnet over the box ({left * 100:.1f} cm from the spot, by the '
                                        f'DVL) - slowly down to it until it touches, the light beside the magnet '
                                        f'still moving the spot')
             return
-        self.walk_to(self.c_goal, speed, self.c_yaw, 'centre the light in the picture', down=self.c_down)
+        self.walk_to(self.nudged(self.c_goal, now), speed, self.c_yaw, 'centre the light in the picture', down=self.c_down)
+
+    def nudged(self, goal, now):
+        """Option B (Ruth, Oct 30): where to send the sub so it ends up at goal. Graey's position hold leaves it
+        1.5-2 cm short level and 3-5 cm going down, not moving at all (Oct 30 pool) - too little thrust for the
+        thrusters to turn. The sub NUDGE_MIN_M or more from goal and not NUDGE_GAIN_M closer in NUDGE_S: the target
+        goes further out past goal, NUDGE_UP x more each time, at most NUDGE_MAX_M; half again when it goes past
+        (the gap turns round); none within NUDGE_MIN_M."""
+        if not self.centre_nudge or not self.cur:
+            return goal
+        st = self.c_nudge
+        dn, de = goal[0] - self.cur[0], goal[1] - self.cur[1]
+        gap = math.hypot(dn, de)
+        if gap < NUDGE_MIN_M:
+            st.update(t=now, gap=gap, boost=1.0, dir=None)
+            return goal
+        u = (dn / gap, de / gap)
+        if st['dir'] is not None and u[0] * st['dir'][0] + u[1] * st['dir'][1] < 0.0:
+            st['boost'] = max(1.0, st['boost'] / NUDGE_UP)              # went past: back off
+            st.update(t=now, gap=gap)
+        elif st['gap'] is None:
+            st.update(t=now, gap=gap)
+        elif now - st['t'] >= NUDGE_S:
+            if st['gap'] - gap < NUDGE_GAIN_M:                           # not closer: push harder
+                st['boost'] = NUDGE_UP if st['boost'] <= 1.0 else st['boost'] * NUDGE_UP
+                if now - self.c_log >= 2.0:
+                    self.get_logger().info(f'    centre: the sub {gap * 100:.1f} cm from where it should be and not moving '
+                                           f'- its target {min((st["boost"] - 1.0) * gap, NUDGE_MAX_M) * 100:.1f} cm further out (option B)')
+            st.update(t=now, gap=gap)
+        st['dir'] = u
+        past = min((st['boost'] - 1.0) * gap, NUDGE_MAX_M)
+        return (goal[0] + u[0] * past, goal[1] + u[1] * past)
 
     def magnet_offset(self, n, e, h):
         """(n, e) moved by the magnet's offset from the camera's middle - where the sub goes for the magnet to be
