@@ -268,6 +268,21 @@ CENTRE_HIDDEN_PX = 100  # ... seen that many times, then lost this close to the 
 CENTRE_LOOSE_M = 0.25   # ... those two only on the way to levels this high and up; lower ones (closer, more
                         #   precise) line up within centre_tol_m first, and a lost light holds the depth (Ruth, Oct 29)
 CENTRE_AT_M = 0.02      # ... and the sub this close to the level's depth
+BOX_ROUGH_N = 5         # the box's place (Ruth, Oct 30): roughly, the middle of the first this many good sightings (the
+                        #   whole box in the picture - in a competition run from ~1 m above, where following leaves it) ...
+BOX_KEEP_N = 10         # ... then of the newest this many good ones that agree with it (old ones kept while no new come)
+BOX_GATE_M = 0.15       # ... a sighting further than this from it isn't the box (the magnet's glare, Oct 30 pool) ...
+BOX_RESEED_N = 8        # ... unless this many good ones running agree with each other: then the box is there
+LOST_GO_S = 5.0         # lost this long: back to the box's place (Ruth, Oct 30) ...
+LOOK_S = 4.0            # ... nothing there this long: a square search round it (Ruth); one likely sighting on the way:
+                        #   there, and look this long
+SEARCH_V = 0.03         # ... slowly, m/s
+SEARCH_VIEW = 0.25      # ... the first square's half side this x the camera's height above the box (about half the
+SEARCH_GROW = 0.5       #   picture's height at the box), each next one this x the first bigger, up to
+SEARCH_MAX_M = 0.5      #   this; this long searching in all: give up
+SEARCH_MAX_S = 120.0
+SQUARE = ((1, 1), (1, -1), (-1, -1), (-1, 1), (1, 1))   # the search square's corners (ahead, right) x its half side
+CAM_CX, CAM_CY = 318.7, 174.3   # the down camera's optical middle, px at 640x360 (OAK-D factory calibration, Oct 29)
 FINAL_LEAD_M = 0.02     # ... the final descent's target never more than this under where the sub is
 CAM_KEEP = 5            # ... the box depth from the camera: the median of its last this many
 CAM_EDGE_PX = 3         # ... from a box whose sides are this far clear of the picture's edges
@@ -3417,6 +3432,10 @@ class PipelineMission(MissionBase):
         self.c_last, self.c_first = None, True          # the light's last place in the picture; no guess yet
         self.c_cam, self.c_cam_said = [], None          # the camera's box-top Cube z, newest last; its last say
         self.c_final_t, self.c_t = None, self.now()     # the final descent's start; the last step's clock
+        self.c_box, self.c_good, self.c_odd = None, [], []   # the box's place (n, e: the sub with the magnet over
+                                                        # it), its good sightings, good ones running that disagree
+        self.c_mode, self.c_mode_goal, self.c_arrived = 'centre', None, None   # centre | return | look | search
+        self.c_search, self.c_look, self.c_d = None, [], 0.4    # the search; a look's sightings; camera to box, m
         self.carrot, self.last_t = (here[0], here[1]), self.now()
         self.c_box_sonar, src = self.box_z_sonar(here[2])
         gap = None if self.c_box_sonar is None else self.c_box_sonar - here[2] - MAGNET_BELOW_M
@@ -3501,6 +3520,7 @@ class PipelineMission(MissionBase):
             bz, _ = self.box_z()
             d = min(max(bz - z if bz is not None else 0.4, 0.1), 1.5)   # the camera to the box's top, m
             mpp = d / self.cam_f                                         # m a pixel there
+            self.c_d = d
             det = None
             if self.box_yolo is not None:
                 # the box model says where (Ruth, Oct 28): it still sees the box once the ring is mostly
@@ -3512,6 +3532,8 @@ class PipelineMission(MissionBase):
                 if spot is None and fr['red'] >= RED_SEEN and self.c_last is not None and \
                         math.hypot(self.c_last[0] - self.magnet[0], self.c_last[1] - self.magnet[1]) * mpp <= self.centre_tol:
                     spot = (self.c_last, 0.0)   # its core just went behind the magnet (about as big as the ring)
+            if spot is not None and self.c_final_t is None:
+                spot = self.box_sighting(spot, det, d)     # not the box (too far from its place), or the lost search's
             if spot is not None:
                 (u, v), _ = spot
                 self.c_last = (u, v)
@@ -3572,6 +3594,8 @@ class PipelineMission(MissionBase):
                 if now - self.c_seen > 3.0 and not self.c_lost_said:
                     self.c_lost_said = True
                     self.get_logger().warn(f'    centre: no {what} in the picture for 3 s - going on to where it was')
+                if self.c_mode == 'centre' and self.c_final_t is None and now - self.c_seen > LOST_GO_S:
+                    self.box_lost()
                 if now - self.c_log >= 2.0:
                     self.c_log = now
                     self.get_logger().info(f'    centre: no {what} (red {fr["red"]:.0%}, green {fr["green"]:.0%}), '
@@ -3597,10 +3621,11 @@ class PipelineMission(MissionBase):
             want = bz - MAGNET_BELOW_M - L                  # Cube z with the magnet L above the box's top
             speed = self.centre_speed_at(L)
             # to CENTRE_LOOSE_M and up: centred once is enough (Ruth, Oct 29); lower: lined up now (or held)
-            go = self.c_centred if L >= CENTRE_LOOSE_M - 1e-6 else self.c_down_ok
+            # lost (going back to the box's place, looking, searching): the depth holds
+            go = (self.c_centred if L >= CENTRE_LOOSE_M - 1e-6 else self.c_down_ok) and self.c_mode == 'centre'
             if go:
                 self.c_down += max(-speed * dt, min(speed * dt, want - self.c_down))
-            at = self.c_centred if L >= CENTRE_LOOSE_M - 1e-6 else self.c_lined
+            at = (self.c_centred if L >= CENTRE_LOOSE_M - 1e-6 else self.c_lined) and self.c_mode == 'centre'
             if abs(want - self.c_down) < 0.005 and abs(z - want) <= CENTRE_AT_M and at:
                 self.c_level += 1
                 self.c_errs, self.c_lined, self.c_down_ok = [], False, False
@@ -3613,7 +3638,130 @@ class PipelineMission(MissionBase):
                     self.c_final_t = now
         else:                                               # the box's depth unknown: hold the depth
             speed = self.centre_speed_at(levels[0] if levels else 0.0)
+        if self.c_mode != 'centre':
+            self.box_search_step()
+            return
         self.walk_to(self.c_goal, speed, self.c_yaw, 'centre the light on the magnet', down=self.c_down)
+
+    # ---- the box's place, and finding it again when lost (Ruth, Oct 30) ----
+    def box_place(self, u, v, d, n0, e0, h):
+        """Where the sub has to be for the magnet to be over a light seen at (u, v) px, the camera d m above the
+        box top, the sub at (n0, e0) heading h: (n, e). Not quite where centring steers to: the magnet is off the
+        camera's middle, so in the picture it lines up with a point L x 0.18 behind it (L its height above the
+        box; the same at contact) - this one is right at any height, so sightings from 1 m and 0.15 m agree."""
+        mx, my, f, m = self.magnet[0], self.magnet[1], self.cam_f, MAGNET_BELOW_M
+        right = (u - CAM_CX) * d / f - (mx - CAM_CX) * m / f
+        ahead = -(v - CAM_CY) * d / f + (my - CAM_CY) * m / f
+        return (n0 + ahead * math.cos(h) - right * math.sin(h), e0 + ahead * math.sin(h) + right * math.cos(h))
+
+    def box_mode(self, mode, why, goal=None):
+        self.c_mode, self.c_mode_goal, self.c_arrived = mode, goal, None
+        self.c_errs, self.c_lined, self.c_down_ok = [], False, False
+        if mode == 'centre':
+            self.c_seen, self.c_lost_said, self.c_first = self.now(), False, True
+        self.get_logger().info('    centre: ' + why)
+
+    def box_sighting(self, spot, det, d):
+        """A sighting of the light -> the spot to steer by, or None (Ruth, Oct 30). The box's place is the middle
+        of the first BOX_ROUGH_N good sightings (the whole box in the picture), then of the newest BOX_KEEP_N good
+        ones that agree with it; one further than BOX_GATE_M from it isn't the box, unless BOX_RESEED_N good ones
+        running agree with each other - then the box is there. While lost: one near the place ends it; a likely
+        one elsewhere is gone to and looked at (look), and 3 there move the place."""
+        (u, v), _ = spot
+        here = self.cur if self.cur else self.carrot
+        h = self.cur_yaw if self.cur_yaw is not None else self.c_yaw
+        p = self.box_place(u, v, d, here[0], here[1], h)
+        good = det is None or bool(det.get('whole', True))
+        gap = None if self.c_box is None else math.hypot(p[0] - self.c_box[0], p[1] - self.c_box[1])
+        if self.c_mode == 'look':
+            g = self.c_mode_goal
+            if math.hypot(p[0] - g[0], p[1] - g[1]) <= BOX_GATE_M:
+                self.c_look.append(p)
+                if len(self.c_look) >= 3:
+                    old, self.c_box = self.c_box, tuple(np.median(np.array(self.c_look), axis=0))
+                    self.c_good, self.c_odd = list(self.c_look), []
+                    moved = f', {math.hypot(self.c_box[0] - old[0], self.c_box[1] - old[1]) * 100:.0f} cm from where it was thought' \
+                        if old is not None else ''
+                    self.box_mode('centre', f'found the box again at ({self.c_box[0]:.2f}, {self.c_box[1]:.2f}){moved} - centring')
+                    return spot
+            return None
+        if self.c_mode in ('return', 'search'):
+            if gap is None or gap <= BOX_GATE_M:
+                self.box_mode('centre', 'the box is back in the picture, where it should be - centring')
+            elif math.hypot(p[0] - here[0], p[1] - here[1]) > 0.03:
+                self.c_look = [p]
+                self.box_mode('look', f'a likely sighting {gap * 100:.0f} cm from the box\'s place - going there to look', goal=p)
+                return None
+            else:
+                return None
+        elif gap is not None and gap > BOX_GATE_M:
+            self.c_odd = (self.c_odd + [p])[-BOX_RESEED_N:] if good else self.c_odd
+            if len(self.c_odd) < BOX_RESEED_N:
+                return None
+            mid = np.median(np.array(self.c_odd), axis=0)
+            if max(math.hypot(q[0] - mid[0], q[1] - mid[1]) for q in self.c_odd) > BOX_GATE_M:
+                return None
+            self.c_box, self.c_good = tuple(mid), list(self.c_odd)
+            self.get_logger().info(f'    centre: {BOX_RESEED_N} good sightings running put the box at '
+                                   f'({mid[0]:.2f}, {mid[1]:.2f}), {gap * 100:.0f} cm from where it was thought - it\'s there')
+        self.c_odd = []
+        if good:
+            self.c_good = (self.c_good + [p])[-BOX_KEEP_N:]
+            if self.c_box is None and len(self.c_good) >= BOX_ROUGH_N:
+                self.c_box = tuple(np.median(np.array(self.c_good), axis=0))
+                self.get_logger().info(f'    centre: the box roughly at ({self.c_box[0]:.2f}, {self.c_box[1]:.2f}) '
+                                       f'from {len(self.c_good)} good sightings, the magnet ~{d - MAGNET_BELOW_M:.2f} m above it')
+            elif self.c_box is not None:
+                self.c_box = tuple(np.median(np.array(self.c_good), axis=0))
+        return spot
+
+    def box_lost(self):
+        """Lost LOST_GO_S: back to the box's place (its last good sighting before it has one; where centring was
+        going before any), the depth held; nothing there in LOOK_S: the square search (box_search_step)."""
+        goal = self.c_box or (self.c_good[-1] if self.c_good else self.c_goal)
+        here = self.cur if self.cur else self.carrot
+        self.box_mode('return', f'no light box for {LOST_GO_S:.0f} s - back to the box\'s place '
+                                f'({goal[0]:.2f}, {goal[1]:.2f}), {math.hypot(goal[0] - here[0], goal[1] - here[1]) * 100:.0f} '
+                                f'cm away, the depth held', goal=goal)
+
+    def box_search_step(self):
+        """While lost: walk to the box's place or the likely sighting and look there LOOK_S; then squares round the
+        box's place, each SEARCH_GROW x the first bigger (the first's half side SEARCH_VIEW x the camera's height
+        above the box), at SEARCH_V, the depth held; SEARCH_MAX_S searching: surface (Ruth, Oct 30)."""
+        now = self.now()
+        if self.c_mode == 'search':
+            s = self.c_search
+            if now - s['t0'] > SEARCH_MAX_S:
+                self.centre_end(f'the light box not found again in {SEARCH_MAX_S:.0f} s of searching')
+                return
+            half = min(SEARCH_MAX_M, s['s0'] * (1.0 + SEARCH_GROW * s['k']))
+            a, r = SQUARE[s['i']]
+            h = self.c_yaw
+            goal = (s['c'][0] + half * (a * math.cos(h) - r * math.sin(h)), s['c'][1] + half * (a * math.sin(h) + r * math.cos(h)))
+            left, _ = self.walk_to(goal, SEARCH_V, self.c_yaw, 'searching for the light box', down=self.c_down)
+            if left < 0.03:
+                s['i'] += 1
+                if s['i'] == len(SQUARE):
+                    s['i'], s['k'] = 0, s['k'] + 1
+                    self.get_logger().info(f'    centre: search - the next square, '
+                                           f'{2 * min(SEARCH_MAX_M, s["s0"] * (1.0 + SEARCH_GROW * s["k"])) * 100:.0f} cm across')
+            return
+        left, _ = self.walk_to(self.c_mode_goal, SEARCH_V, self.c_yaw,
+                               'back to the box\'s place' if self.c_mode == 'return' else 'to the likely sighting',
+                               down=self.c_down)
+        if left >= 0.03:
+            return
+        if self.c_arrived is None:
+            self.c_arrived = now
+        if now - self.c_arrived < LOOK_S:
+            return
+        if self.c_search is None:
+            c = self.c_box or self.c_mode_goal
+            self.c_search = {'c': c, 'k': 0, 'i': 0, 't0': now, 's0': max(0.03, SEARCH_VIEW * self.c_d)}
+        s0 = self.c_search['s0']
+        self.box_mode('search', ('not there' if self.c_mode == 'return' else 'nothing at the likely sighting')
+                      + f' - searching in squares round the box\'s place, the first {2 * s0 * 100:.0f} cm across, '
+                      f'growing {SEARCH_GROW * 100:.0f}% of that each time, at {SEARCH_V * 100:.0f} cm/s')
 
     def centre_where(self, z):
         """Where the repair is, for the log: the level or the final descent, and the magnet's gap."""
