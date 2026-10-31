@@ -102,7 +102,16 @@
     <button class="act" onclick="camCmd('camera/stop')">Stop cameras</button>
     <button class="act" onclick="camCmd('record/start')">Record</button>
     <button class="act" onclick="camCmd('record/stop')">Stop recording</button>
+    <label style="margin:0 10px;cursor:pointer"><input type="checkbox" id="camDet" onchange="camDetToggle()"> Show detections</label>
     <span id="camSt"></span></div>
+  <div id="camDetBar" class="sub" style="display:none;padding:2px 0 6px">
+    <span id="camDetSt"></span> &nbsp;|&nbsp;
+    <span style="color:#ffd23f">box model</span> &middot; <span style="color:#d17bff">pipe-end model</span> &middot;
+    dashed = light finder (its colour) &middot; <span style="color:#00e5ff">cyan circle = magnet</span> &middot;
+    <span style="color:#4cc38a">+ = where centring sees the light</span></div>
+  <div id="camOv" style="display:none;position:relative">
+    <img id="camImg" alt="" style="display:block;width:100%">
+    <canvas id="camCv" style="position:absolute;left:0;top:0;pointer-events:none"></canvas></div>
   <iframe id="cam" src="about:blank" style="height:calc(100vh - 125px)"></iframe>
 </div>
 
@@ -263,6 +272,16 @@ function camShow(s){
   if (s.recording) txt += '  |  RECORDING ' + s.recFile + ', ' + (s.recBytes / 1e6).toFixed(0) + ' MB';
   else if (s.recFile) txt += '  |  last recording ' + s.recFile;
   st.textContent = (s.msg && s.msg !== 'ok' ? s.msg + '  |  ' : '') + txt;
+  var img = document.getElementById('camImg');
+  f.style.display = camDet ? 'none' : '';
+  document.getElementById('camOv').style.display = document.getElementById('camDetBar').style.display = camDet ? '' : 'none';
+  if (camDet){                               // one MJPEG connection at a time: the picture here, not the frame
+    if (f.src !== 'about:blank') f.src = 'about:blank';
+    if (s.camUp && (!img.getAttribute('src') || s.camSince !== camDetRun)){ camDetRun = s.camSince; img.src = sonarUrl(8080, 'stream'); }
+    if (!s.camUp && img.getAttribute('src')) img.removeAttribute('src');
+    return;
+  }
+  if (img.getAttribute('src')) img.removeAttribute('src');
   if (s.camUp && (f.src === 'about:blank' || s.camSince !== camRun)){ camRun = s.camSince; f.src = sonarUrl(8080); }
   if (!s.camUp && f.src !== 'about:blank') f.src = 'about:blank';
 }
@@ -279,6 +298,56 @@ function camCheck(){
 setInterval(function(){                       // only while the Camera tab is open
   if (document.getElementById('camera').style.display !== 'none') camCheck();
 }, 1500);
+
+// Show detections (Ruth, Oct 30): the stream in a picture here instead of the frame, with what the running
+// mission's down-camera detectors found drawn over its left (DOWN) half. The mission serves them on 8097
+// (led_boxes.serve_seen): the box model's boxes (only while centring), the pipe-end model's, the light
+// finder's patches (run for this while it is ticked), the magnet, and where centring last saw the light.
+var camDet = false, camDetRun = null, camDetBusy = false;
+var DET_COL = {'box model': '#ffd23f', 'model': '#d17bff'};
+var LIGHT_COL = {red: '#ff5a5a', green: '#4cc38a', blue: '#5aa9ff', other: '#ffa04d', white: '#e8e8e8'};
+function camDetToggle(){
+  camDet = document.getElementById('camDet').checked; camDetRun = null;
+  camCheck(); camDraw(null);
+}
+function camDraw(d){
+  var img = document.getElementById('camImg'), cv = document.getElementById('camCv');
+  var st = document.getElementById('camDetSt'), w = img.clientWidth, h = img.clientHeight;
+  cv.width = w; cv.height = h; cv.style.width = w + 'px'; cv.style.height = h + 'px';
+  var g = cv.getContext('2d');
+  g.clearRect(0, 0, w, h);
+  if (!camDet) return;
+  if (!d){ st.textContent = 'no detections - no mission running (nothing on port 8097)'; return; }
+  var dw = w / 2, sx = dw / 640, sy = h / 360;      // the DOWN camera: the left half, 640x360 px
+  g.save(); g.setLineDash([5, 4]); g.strokeStyle = '#00e5ff'; g.lineWidth = 1.5; g.beginPath();
+  g.ellipse(d.magnet[0] * sx, d.magnet[1] * sy, d.magnet[2] * sx, d.magnet[2] * sy, 0, 0, 2 * Math.PI);
+  g.stroke(); g.restore();
+  d.finds.forEach(function(f){
+    var finder = f.by === 'light finder', col = finder ? (LIGHT_COL[f.name] || '#e8e8e8') : (DET_COL[f.by] || '#ffd23f');
+    var x = f.box[0] * dw, y = f.box[1] * h;
+    g.save(); g.strokeStyle = g.fillStyle = col; g.lineWidth = 2;
+    if (finder) g.setLineDash([6, 4]);
+    g.strokeRect(x, y, f.box[2] * dw, f.box[3] * h);
+    g.font = '12px system-ui';
+    g.fillText(f.name + (f.conf !== null ? ' ' + f.conf.toFixed(2) : '') + (finder ? ' (finder)' : ''), x + 2, y > 14 ? y - 4 : y + 13);
+    g.restore();
+  });
+  if (d.aim){
+    var ax = d.aim[0] * sx, ay = d.aim[1] * sy;
+    g.save(); g.strokeStyle = '#4cc38a'; g.lineWidth = 2; g.beginPath();
+    g.moveTo(ax - 10, ay); g.lineTo(ax + 10, ay); g.moveTo(ax, ay - 10); g.lineTo(ax, ay + 10); g.stroke(); g.restore();
+  }
+  st.textContent = !d.camera ? 'mission running, its camera not on yet'
+    : d.age_s === null ? 'mission camera on, no picture yet'
+    : d.finds.length + ' found, picture ' + d.age_s.toFixed(1) + ' s old';
+}
+setInterval(function(){                       // only while ticked and the Camera tab is open
+  if (!camDet || camDetBusy || document.getElementById('camera').style.display === 'none') return;
+  camDetBusy = true;
+  fetch(sonarUrl(8097, 'seen'), {cache: 'no-store'}).then(function(r){ return r.json(); })
+    .then(camDraw).catch(function(){ camDraw(null); })
+    .then(function(){ camDetBusy = false; });
+}, 300);
 
 function age(a){ return (a < 0) ? '--' : a.toFixed(1) + ' s'; }
 

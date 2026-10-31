@@ -798,6 +798,9 @@ class PipelineMission(MissionBase):
         if len(mx) != 2:
             raise ValueError(f"magnet_px must be 'x y' pixels, not {g('magnet_px')!r}")
         self.magnet = (float(mx[0]), float(mx[1]))
+        # the GUI's Camera tab, Show detections (Ruth, Oct 30): what the down camera's detectors found, on SEEN_PORT
+        self.seen_srv = led_boxes.serve_seen(lambda: self.camera, self.magnet,
+                                             report=lambda t: self.get_logger().warn(t))
         self.centre_levels = sorted((float(v) for v in str(g('centre_levels_m')).split()), reverse=True)
         self.centre_tol = float(g('centre_tol_m'))
         self.centre_far, self.centre_v_far = float(g('centre_far_m')), float(g('centre_speed_far'))
@@ -3512,6 +3515,8 @@ class PipelineMission(MissionBase):
             if spot is not None:
                 (u, v), _ = spot
                 self.c_last = (u, v)
+                if self.camera is not None:
+                    self.camera.aim = (time.monotonic(), u, v)      # for the GUI
                 self.c_seen, self.c_lost_said = now, False
                 if det is not None:
                     self.centre_camera_depth(det, z)

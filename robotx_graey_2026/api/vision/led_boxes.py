@@ -76,6 +76,8 @@ def hsv_masks(rgb, hues=None):
 MAGNET_PX = (328.0, 292.0)     # the repair magnet's centre in the 640x360 down picture (Oct 22 footage: its rim
                                # in the median of 400 lit frames, radius 49 px). Picture top = the sub's front,
                                # picture right = its right (checked against the DVL the same night)
+MAGNET_R = 46.0                # its radius, px (the median of 296 lit Oct 29 pool frames; 49 on Oct 22)
+SEEN_PORT = 8097               # serve_seen: the detections for the GUI's Camera tab
 OPEN_PX = 5                    # SMALL px: wider than the red glare streaks the acrylic board throws (Oct 22)
 CORE_V = 240                   # a light's washed-out middle: the LED ring itself
 
@@ -531,6 +533,9 @@ class CameraWatcher:
         self.box_yolo = None            # the repair's light-box model, run here on each picture while it is set ...
         self.latest_boxes = None        # ... (t, [finds], rgb) of the newest picture it has done: the mission's
                                         # loop never waits for it (0.7 s a picture on the sim's CPU)
+        self.seen = None                # (t, [finds]) of the newest picture, every detector's, for the GUI (serve_seen)
+        self.watched = -1e9             # when the GUI last asked: the light finder runs for it only then
+        self.aim = None                 # (time.monotonic(), u, v): where centring last saw the light, 640x360 px
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self):
@@ -556,14 +561,16 @@ class CameraWatcher:
                         ends = [d for d in dets if d['colour'] == 'pipe_end']
                         if ends:
                             self.end_seen = (t, max(ends, key=lambda d: d['conf']))
-                    box_yolo = self.box_yolo
+                    box_yolo, boxes = self.box_yolo, None
                     if box_yolo is not None:
                         try:
-                            self.latest_boxes = (t, box_yolo(full), rgb)
+                            boxes = box_yolo(full)
+                            self.latest_boxes = (t, boxes, rgb)
                         except Exception as ex:      # nor the light-box model's
                             if not box_warned:
                                 self.report(f'camera: the light-box model failed ({ex!r})')
                                 box_warned = True
+                    self.seen = (t, self.finds_for_gui(rgb, dets, boxes))
                     if self.on_frame is not None:
                         try:
                             self.on_frame(t, rgb, full, dets)
@@ -583,9 +590,67 @@ class CameraWatcher:
                     warned = True
             self.stop.wait(5.0)
 
+    def finds_for_gui(self, rgb, dets, boxes):
+        """This picture's finds for the GUI: the models' (pipe end / lights, the light-box model's while
+        centring) and, only while the GUI is looking, the light finder's - a pass over the picture otherwise
+        not always made. box = (left, top, width, height) as shares of the down picture."""
+        out = [{'by': 'model', 'name': d['colour'], 'conf': d.get('conf'), 'box': d['box']} for d in dets or []]
+        out += [{'by': 'box model', 'name': d['colour'], 'conf': d.get('conf'), 'box': d['box']} for d in boxes or []]
+        if time.monotonic() - self.watched < 3.0:
+            out += [{'by': 'light finder', 'name': l['colour'], 'conf': None, 'box': l['box']} for l in contrast_lights(rgb)]
+        return out
+
     def close(self):
         self.stop.set()
         for b in self.tracker.flush():
             if self.on_box:
                 self.on_box(b)
         return self.tracker.boxes
+
+
+def serve_seen(watcher, magnet, port=SEEN_PORT, report=print):
+    """The GUI's Camera tab, Show detections (Ruth, Oct 30): GET /seen on this port is what the down camera's
+    detectors found in the newest picture (CameraWatcher.finds_for_gui), its age, the magnet (x, y, r px) and where
+    centring last saw the light (aim, px; 2 s at most), as JSON. watcher() is the mission's CameraWatcher now, or
+    None. Asking turns the light finder on for the GUI for 3 s. The server, or None if the port is taken."""
+    import json
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Seen(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path.split('?')[0] != '/seen':
+                self.send_error(404)
+                return
+            cam, now = watcher(), time.monotonic()
+            out = {'camera': cam is not None, 'magnet': [magnet[0], magnet[1], MAGNET_R], 'age_s': None,
+                   'finds': [], 'aim': None}
+            if cam is not None:
+                cam.watched = now
+                seen, aim = cam.seen, cam.aim
+                if seen is not None:
+                    out['age_s'] = round(now - seen[0], 2)
+                    out['finds'] = [{'by': f['by'], 'name': f['name'],
+                                     'conf': None if f['conf'] is None else round(float(f['conf']), 2),
+                                     'box': [round(float(v), 4) for v in f['box']]} for f in seen[1]]
+                if aim is not None and now - aim[0] < 2.0:
+                    out['aim'] = [round(aim[1]), round(aim[2])]
+            body = json.dumps(out).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')        # the GUI page comes from port 8090
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    try:
+        srv = ThreadingHTTPServer(('0.0.0.0', port), Seen)
+    except OSError as ex:
+        report(f'camera: no detections for the GUI - port {port} is taken ({ex})')
+        return None
+    srv.daemon_threads = True
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
