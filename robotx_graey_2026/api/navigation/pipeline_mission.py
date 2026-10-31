@@ -722,6 +722,10 @@ class PipelineMission(MissionBase):
         p('boxes_total', 0)                 # the light boxes on the pipe (competition: 5): the report takes the
                                             # ones after the RED light as GREEN (Ruth, Oct 29); 0 = only those seen
         p('light_same_m', 0.3)              # sightings this close together are one light
+        p('unlit_is_green', True)           # the survey (Ruth, Oct 31: one working light in the pool): a box the box
+                                            # model finds with no light showing is a light too, reported GREEN - and
+                                            # RED instead once red shows in it (its edge seen first, then the LED);
+                                            # runs the box model on every picture of the survey. False: lights only
         p('light_min_share', 0.10)          # a new light must once be seen whole (clear of the picture's
                                             # edge) or fill this share of it: glimpses at the edge (5-8%)
                                             # sat in the wrong place and were counted twice (Oct 16-17)
@@ -868,8 +872,10 @@ class PipelineMission(MissionBase):
         self.yolo = None                    # the loaded model (light_detector:=yolo, or end_model), once needed
         self.yolo_failed = False
         self.box_model, self.box_conf = g('box_model').strip(), float(g('box_conf'))
-        self.box_yolo = None                # the light-box model, loaded now if the mission will centre: loading
-        if self.box_model and (self.repair_centre or self.start_with == 'centre'):     # later froze the sub ~30 s
+        self.unlit_green = bool(g('unlit_is_green'))
+        self.box_yolo = None                # the light-box model, loaded now if the mission will centre (or the
+        if self.box_model and (self.repair_centre or self.start_with == 'centre'      # survey count unlit boxes):
+                               or (self.survey and self.unlit_green)):               # loading later froze the sub ~30 s
             self.box_yolo = self.load_box_model()
         led_boxes.V_MIN, led_boxes.S_MIN = int(g('light_v_min')), int(g('light_s_min'))
         self.survey_backup = float(g('survey_backup_m'))
@@ -3024,18 +3030,19 @@ class PipelineMission(MissionBase):
         """The camera thread: a sighting of a colour has just ended."""
         n = len(self.camera.tracker.boxes) if self.camera else 0
         if self.survey:
-            self.get_logger().info(f'    camera: {"NEW " if b["new"] else "again: "}{led_boxes.describe(b)}'
-                                   .replace('box', 'light') + f' - {n} sighting(s) so far')
-            if b['new'] and b['colour'] == 'red' and self.s_red is None and b['n'] is not None:
+            self.get_logger().info(f'    camera: {"NEW " if b["new"] else "now " + b["colour"].upper() + " (was unlit): " if b.get("recoloured") else "again: "}'
+                                   f'{led_boxes.describe(b)}'.replace('box', 'light') + f' - {n} sighting(s) so far')
+            if ((b['new'] or b.get('recoloured')) and b['colour'] == 'red' and self.s_red is None
+                    and b['n'] is not None):
                 self.s_red = (b['n'], b['e'])
                 self.s_red_new = True                      # the mission thread goes back to it
         else:
             self.get_logger().info(f'    camera: {"NEW " if b["new"] else "again: "}{led_boxes.describe(b)} '
                                    f'- {n} of {self.boxes_expected} boxes so far')
-        if self.recording and b['new']:
+        if self.recording and (b['new'] or b.get('recoloured')):
             try:
                 self.map_post('/mark', f'camera {"light" if self.survey else "box"} {b["number"]}: '
-                              + max(b['colours'], key=b['colours'].get))
+                              + (b['colour'] if self.survey else max(b['colours'], key=b['colours'].get)))
             except OSError:
                 pass
 
@@ -3274,9 +3281,18 @@ class PipelineMission(MissionBase):
         return (((b['x'] + 1) * 320, (b['y'] + 1) * 180), b['share']) if b else None
 
     def centre_box(self, on):
-        """The camera thread runs the light-box model on each picture only while centring."""
+        """The camera thread runs the light-box model on each picture while centring - and while the survey
+        counts lights, if unlit boxes count (unlit_is_green)."""
         if self.box_yolo is not None and self.camera is not None:
+            on = on or (self.survey and self.unlit_green and isinstance(self.camera.tracker, led_boxes.LightTracker))
             self.camera.latest_boxes, self.camera.box_yolo = None, (self.box_yolo if on else None)
+
+    def light_tracker(self):
+        """The survey's light tracker (led_boxes.LightTracker), with the unlit boxes if they count."""
+        return led_boxes.LightTracker(same_m=self.light_same, new_frac=self.light_min_share,
+                                      min_frac=self.light_min_frac, detector=self.light_detector, yolo=self.yolo,
+                                      unlit=self.unlit_green and self.box_yolo is not None,
+                                      magnet=(self.magnet[0], self.magnet[1], MAGNET_IGNORE_PX))
 
     def start_end_watch(self):
         """A YOLO model (light_detector:=yolo or end_model): the camera on for pipe ends only (no lights
@@ -3292,27 +3308,29 @@ class PipelineMission(MissionBase):
     def start_camera(self, force=False):
         if self.camera is not None and self.cam_ends_only and (force or self.camera_boxes or self.survey):
             # the pipe-end watch already runs: from here it counts the lights too
-            self.camera.tracker = (led_boxes.LightTracker(same_m=self.light_same, new_frac=self.light_min_share,
-                                                          min_frac=self.light_min_frac, detector=self.light_detector,
-                                                          yolo=self.yolo)
-                                   if self.survey else led_boxes.BoxTracker())
+            self.camera.tracker = self.light_tracker() if self.survey else led_boxes.BoxTracker()
             self.camera.on_box, self.cam_ends_only = self.on_box, False
-            self.get_logger().info('    camera: counting the lights from here')
+            self.centre_box(False)
+            self.get_logger().info('    camera: counting the lights from here' + self.unlit_note())
             return
         if (force or self.camera_boxes or self.survey) and self.camera is None:
             self.yolo_lights()
-            tracker = (led_boxes.LightTracker(same_m=self.light_same, new_frac=self.light_min_share,
-                                              min_frac=self.light_min_frac, detector=self.light_detector,
-                                              yolo=self.yolo)
-                       if self.survey else None)
-            self.get_logger().info('    camera: lights judged against the water (contrast_lights)'
-                                   if self.light_detector == 'contrast' else
-                                   '    camera: lights from the trained model' if self.light_detector == 'yolo' else
-                                   f'    camera: HSV - V >= {led_boxes.V_MIN}, S >= {led_boxes.S_MIN}, hues '
-                                   f'{led_boxes.SURVEY_HUES if self.survey else led_boxes.HUES}')
+            tracker = self.light_tracker() if self.survey else None
+            self.get_logger().info(('    camera: lights judged against the water (contrast_lights)'
+                                    if self.light_detector == 'contrast' else
+                                    '    camera: lights from the trained model' if self.light_detector == 'yolo' else
+                                    f'    camera: HSV - V >= {led_boxes.V_MIN}, S >= {led_boxes.S_MIN}, hues '
+                                    f'{led_boxes.SURVEY_HUES if self.survey else led_boxes.HUES}') + self.unlit_note())
             self.camera = led_boxes.CameraWatcher(self.camera_url, self.camera_at,
                                                   lambda t: self.get_logger().info('    ' + t), self.on_box,
                                                   tracker=tracker, yolo=self.yolo).start()
+            self.centre_box(False)
+
+    def unlit_note(self):
+        if not (self.survey and self.unlit_green):
+            return ''
+        return (' - and boxes with no light showing (the box model), taken as GREEN' if self.box_yolo is not None
+                else ' - NOT the unlit boxes: no box model loaded')
 
     def stop_camera(self, why='the mission ended early'):
         if self.camera is not None and self.cam_ends_only:      # only watching for ends: nothing to report
@@ -4042,18 +4060,23 @@ class PipelineMission(MissionBase):
             if (self.s_red is not None and self.s_repair_mono is not None and b['first_t'] >= self.s_repair_mono
                     and math.hypot(b['n'] - self.s_red[0], b['e'] - self.s_red[1]) <= 0.4):
                 continue                                   # the repaired light changing colour
-            seen.append({'colour': b['colour'], 'share': max(b['colours'].values()), 'n': b['n'], 'e': b['e'],
+            seen.append({'shares': dict(b['colours']), 'share': max(b['colours'].values()), 'n': b['n'], 'e': b['e'],
                           'sightings': b['sightings']})
         lights = []
         for s in sorted(seen, key=lambda s: -s['share']):
             near = [L for L in lights if math.hypot(L['n'] - s['n'], L['e'] - s['e']) <= self.light_same]
             if near:
                 near[0]['sightings'] += s['sightings']
-                near[0]['shares'][s['colour']] = max(near[0]['shares'].get(s['colour'], 0.0), s['share'])
+                for c, v in s['shares'].items():
+                    near[0]['shares'][c] = max(near[0]['shares'].get(c, 0.0), v)
             else:
-                lights.append({'n': s['n'], 'e': s['e'], 'sightings': s['sightings'], 'shares': {s['colour']: s['share']}})
+                lights.append({'n': s['n'], 'e': s['e'], 'sightings': s['sightings'], 'shares': dict(s['shares'])})
         for L in lights:
-            L['colour'] = max(L['shares'], key=L['shares'].get).upper()
+            # the colour it showed most; a box seen only unlit (unlit_is_green, Ruth, Oct 31) is GREEN, and any
+            # colour its light showed beats unlit
+            lit = {c: v for c, v in L['shares'].items() if c != 'unlit'}
+            L['unlit'] = not lit
+            L['colour'] = max(lit, key=lit.get).upper() if lit else 'GREEN'
             L['along_m'] = round(along(L['n'], L['e']), 2)
         lights.sort(key=lambda L: L['along_m'])
         seq = [L['colour'] for L in lights]
@@ -4067,13 +4090,13 @@ class PipelineMission(MissionBase):
             f'SURVEY REPORT, from the buoy end: {", ".join(reported) if reported else "no lights seen"} '
             f'({len(seq)} light(s) seen' + (f', the last {assumed} taken as GREEN' if assumed else '')
             + f', {surveyed:.1f} m of pipe surveyed; ended: {why})'
-            + ''.join(f'\n      {k + 1}. {L["colour"]:5s} {L["along_m"]:.2f} m along, NED ({L["n"]:.2f}, {L["e"]:.2f}), '
+            + ''.join(f'\n      {k + 1}. {L["colour"]:5s}{" (unlit)" if L["unlit"] else ""} {L["along_m"]:.2f} m along, NED ({L["n"]:.2f}, {L["e"]:.2f}), '
                       f'{L["sightings"]} sighting(s), ' + ', '.join(f'{c} {v:.0%}' for c, v in L['shares'].items())
                       for k, L in enumerate(lights)))
         report = {'order_from': 'buoy end', 'sequence': reported, 'seen': seq, 'assumed_green': assumed, 'ended': why,
                   'surveyed_m': round(surveyed, 2), 'repair_held': self.s_repair_mono is not None,
                   'red_light_ned': list(self.s_red) if self.s_red else None,
-                  'lights': [{'colour': L['colour'], 'along_m': L['along_m'], 'ned': [round(L['n'], 3), round(L['e'], 3)],
+                  'lights': [{'colour': L['colour'], 'unlit': L['unlit'], 'along_m': L['along_m'], 'ned': [round(L['n'], 3), round(L['e'], 3)],
                               'sightings': L['sightings'], 'peak_share': {c: round(v, 3) for c, v in L['shares'].items()}}
                              for L in lights]}
         try:

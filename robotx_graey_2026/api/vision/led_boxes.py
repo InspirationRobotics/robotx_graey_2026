@@ -55,6 +55,8 @@ SURVEY_HUES = {
     'red': ((0, 10), (128, 180)),
     'green': ((38, 128),),
 }
+UNLIT_PAD = 0.25               # unlit boxes (Ruth, Oct 31): a light this far (shares of the box's size) outside the
+                               # box model's box is still that box's light - the glow spills past the case
 
 
 def hsv_masks(rgb, hues=None):
@@ -321,10 +323,14 @@ class LightTracker:
     gone (sim, Oct 17: lights 0.8 m apart, 4 of 5 found). A light is placed where the
     camera was when its blob was nearest the middle of the picture - straight under the
     camera, whichever way the camera is turned. Repeat sightings of a colour within
-    same_m are that light again; boxes holds the lights, in BoxTracker's format."""
+    same_m are that light again; boxes holds the lights, in BoxTracker's format.
+    unlit (Ruth, Oct 31: one working light in the pool): the box model's boxes with no red or green light in
+    them are lights too, colour 'unlit' (the survey reports them GREEN). A box seen unlit first - its edge,
+    the LED not in view yet - takes the colour its light shows once it does, and a light already recorded
+    unlit that shows a colour later turns that colour (recoloured)."""
 
     def __init__(self, min_frac=0.02, gap_s=1.0, same_m=0.3, new_frac=0.10, link=0.6, detector='hsv',
-                 yolo=None):
+                 yolo=None, unlit=False, magnet=None):
         # A NEW light must once be seen whole - its blob clear of the picture's edge - or be big
         # (new_frac of the picture): glimpses at the edge (pool, Oct 16-17: 5-8%) sat in the wrong
         # place and were counted twice, while a lake ring ~1 m below is whole but tiny (0.03-6%,
@@ -336,8 +342,31 @@ class LightTracker:
                                     # halos), and still parts lights ~0.4 m apart
         self.detector = detector    # 'hsv': the fixed HSV test; 'contrast': judged against the water (Oct 25);
         self.yolo = yolo            # 'yolo': a YoloLights, on the full picture update() is given
+        self.unlit = unlit          # the box model's boxes update() is given count, as 'unlit' where no light shows
+        self.magnet = magnet        # (u, v, r) in 640x360 px: a box within r of the magnet is the magnet lit up
         self.boxes = []
         self._tracks = []
+
+    @staticmethod
+    def same_light(a, b):
+        """Two colours that can be one light: the same, or one of them unlit (its light not in view then)."""
+        return a == b or 'unlit' in (a, b)
+
+    def unlit_boxes(self, boxes, lights):
+        """The box model's boxes with no red or green light in or just round them, as 'unlit' finds - none on the
+        magnet."""
+        out = []
+        for d in boxes:
+            if d['colour'] == 'pipe_end':
+                continue
+            if self.magnet is not None and math.hypot((d['x'] + 1) * 320 - self.magnet[0],
+                                                      (d['y'] + 1) * 180 - self.magnet[1]) < self.magnet[2]:
+                continue
+            l, tp, w, h = d['box']
+            if not any(l - UNLIT_PAD * w <= (x + 1) / 2 <= l + (1 + UNLIT_PAD) * w
+                       and tp - UNLIT_PAD * h <= (y + 1) / 2 <= tp + (1 + UNLIT_PAD) * h for _, x, y, _, _ in lights):
+                out.append(('unlit', d['x'], d['y'], d['share'], d['whole']))
+        return out
 
     @staticmethod
     def blobs(rgb, min_frac):
@@ -358,10 +387,10 @@ class LightTracker:
                     out.append((colour, cents[k][0] / w * 2 - 1, cents[k][1] / h * 2 - 1, share, whole))
         return out
 
-    def update(self, t, rgb, pos, full=None, dets=None):
+    def update(self, t, rgb, pos, full=None, dets=None, boxes=None):
         """One frame at time t (s); pos = (north, east) of the camera, or None; full = the full-size BGR
-        picture, or dets = the yolo detector's finds in it already. Returns the lights whose sightings
-        just ended (new or seen again)."""
+        picture, or dets = the yolo detector's finds in it already; boxes = the box model's finds in it (or
+        None). Returns the lights whose sightings just ended (new or seen again)."""
         free = list(self._tracks)
         if self.detector == 'yolo' and self.yolo is not None and (dets is not None or full is not None):
             found = [(l['colour'], l['x'], l['y'], l['share'], l['whole'])
@@ -371,18 +400,23 @@ class LightTracker:
                      if l['colour'] in ('red', 'green')]
         else:
             found = self.blobs(rgb, self.min_frac)
+        if self.unlit and boxes:
+            found = found + self.unlit_boxes(boxes, found)
         for colour, x, y, share, whole in sorted(found, key=lambda b: -b[3]):
             best = None
             for tr in free:
                 dd = math.hypot(x - tr['x'], y - tr['y'])
-                if tr['colour'] == colour and dd <= self.link and (best is None or dd < best[0]):
+                if self.same_light(tr['colour'], colour) and dd <= self.link and (best is None or dd < best[0]):
                     best = (dd, tr)
             if best:
                 tr = best[1]
                 free.remove(tr)
+                if tr['colour'] == 'unlit':
+                    tr['colour'] = colour           # the box's light in view now
             else:
-                tr = {'colour': colour, 't0': t, 'best': 0.0, 'mid': 9.0, 'pos': pos, 'whole': False}
+                tr = {'colour': colour, 't0': t, 'best': 0.0, 'mid': 9.0, 'pos': pos, 'whole': False, 'shares': {}}
                 self._tracks.append(tr)
+            tr['shares'][colour] = max(tr['shares'].get(colour, 0.0), share)
             tr['x'], tr['y'], tr['last'], tr['best'] = x, y, t, max(tr['best'], share)
             tr['whole'] = tr['whole'] or whole
             if math.hypot(x, y) < tr['mid']:
@@ -403,18 +437,22 @@ class LightTracker:
     def _finish(self, tr):
         colour, pos = tr['colour'], tr['pos']
         for b in self.boxes:
-            if (b['colour'] == colour and pos is not None and b['n'] is not None
+            if (self.same_light(b['colour'], colour) and pos is not None and b['n'] is not None
                     and math.hypot(pos[0] - b['n'], pos[1] - b['e']) <= self.same_m):
                 b['sightings'] += 1
                 b['last_t'] = tr['last']
-                b['colours'][colour] = max(b['colours'][colour], tr['best'])
+                for c, s in tr['shares'].items():
+                    b['colours'][c] = max(b['colours'].get(c, 0.0), s)
                 b['new'] = False
+                b['recoloured'] = b['colour'] == 'unlit' and colour != 'unlit'
+                if b['recoloured']:
+                    b['colour'] = colour            # recorded unlit, its light seen now
                 return b
         if not tr['whole'] and tr['best'] < self.new_frac:
             return None                     # a glimpse, not a light
         b = {'n': pos[0] if pos else None, 'e': pos[1] if pos else None, 'colour': colour,
-             'colours': {colour: tr['best']}, 'sightings': 1, 'first_t': tr['t0'], 'last_t': tr['last'],
-             'new': True, 'number': len(self.boxes) + 1}
+             'colours': dict(tr['shares']), 'sightings': 1, 'first_t': tr['t0'], 'last_t': tr['last'],
+             'new': True, 'recoloured': False, 'number': len(self.boxes) + 1}
         self.boxes.append(b)
         return b
 
@@ -578,7 +616,7 @@ class CameraWatcher:
                             if not hook_warned:
                                 self.report(f'camera: the per-picture hook failed ({ex!r}) - lights go on without it')
                                 hook_warned = True
-                    found =(self.tracker.update(t, rgb, self.where(), full=full, dets=dets)
+                    found =(self.tracker.update(t, rgb, self.where(), full=full, dets=dets, boxes=boxes)
                              if isinstance(self.tracker, LightTracker) else self.tracker.update(t, rgb, self.where()))
                     for b in found:
                         if self.on_box:
