@@ -118,9 +118,11 @@ class WaypointMission(Node):
         self.link.send('manual_control_send',1,0,0,500,0,0)
         self.pilot_override_active=True
         self.sent_target=tuple(target)
-        # Position only. Velocity, acceleration and yaw are left to Cube.
-        self.link.send('set_position_target_local_ned_send',0,1,1,1,3576,
-            *target[:3],0.,0.,0.,0.,0.,0.,0.,0.)
+        # Position + yaw rate (radians/s). Three-value hold commands explicitly
+        # cancel the previous turn rate, including arrival and telemetry waits.
+        yaw_rate=target[3] if len(target)>3 else 0.
+        self.link.send('set_position_target_local_ned_send',0,1,1,1,1528,
+            *target[:3],0.,0.,0.,0.,0.,0.,0.,yaw_rate)
 
     def on_status(self, msg):
         try:
