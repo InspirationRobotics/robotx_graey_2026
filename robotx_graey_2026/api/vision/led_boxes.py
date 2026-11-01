@@ -79,6 +79,9 @@ MAGNET_PX = (364.0, 261.0)     # the repair magnet's centre in the 640x360 down 
                                # dark disc's edge fitted on 50 frames; Oct 22-30 it was at (328, 292)). Picture top =
                                # the sub's front, picture right = its right (checked against the DVL Oct 22)
 MAGNET_R = 39.0                # its radius, px (Oct 31, the dark disc; 46 lit on Oct 29, 49 on Oct 22)
+ACRYLIC_ROW = 170              # the clear board's top edge across the down picture, px (Oct 31: the box model cut the
+SPLIT_TOL_PX = 8               #   light box in two there - 225 split pairs met at rows 166-173); boxes meeting this
+                               #   close to it are one box (join_split)
 SEEN_PORT = 8097               # serve_seen: the detections for the GUI's Camera tab
 OPEN_PX = 5                    # SMALL px: wider than the red glare streaks the acrylic board throws (Oct 22)
 CORE_V = 240                   # a light's washed-out middle: the LED ring itself
@@ -246,7 +249,48 @@ class YoloLights:
                         'share': (x1 - x0) * (y1 - y0) / float(w * h), 'hue': None,
                         'box': (x0 / w, y0 / h, (x1 - x0) / w, (y1 - y0) / h),
                         'whole': x0 > 2 and y0 > 2 and x1 < w - 2 and y1 < h - 2})
-        return out
+        return join_split(out, w, h)
+
+
+def join_split(found, w, h):
+    """The box model cuts a light box in two at the clear board's top edge (ACRYLIC_ROW; Ruth, Oct 31): a box above it
+    and a box below, the biggest - the one the repair steers by - jumping between them, the sub chasing it +-8 cm. Two
+    boxes meeting at the edge, their sides overlapping by half the narrower one's width, are one: their union, at the
+    higher confidence. A box mostly the same as a joined one (the model's own whole box, less sure) goes."""
+    row, tol = ACRYLIC_ROW * h / 360.0, SPLIT_TOL_PX * h / 360.0
+
+    def px(d):
+        x0, y0, bw, bh = d['box']
+        return x0 * w, y0 * h, (x0 + bw) * w, (y0 + bh) * h
+
+    def iou(a, b):
+        ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+        return ix / ((a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - ix)
+
+    boxes = [d for d in found if d['colour'] != 'pipe_end']
+    joined = []
+    again = True
+    while again:
+        again = False
+        for a in boxes:
+            A = px(a)
+            b = next((b for b in boxes if b is not a and abs(A[3] - row) <= tol and abs(px(b)[1] - row) <= tol
+                      and min(A[2], px(b)[2]) - max(A[0], px(b)[0])
+                      >= 0.5 * min(A[2] - A[0], px(b)[2] - px(b)[0])), None)
+            if b is None:
+                continue
+            B = px(b)
+            x0, y0, x1, y1 = min(A[0], B[0]), min(A[1], B[1]), max(A[2], B[2]), max(A[3], B[3])
+            u = dict(a, conf=max(a['conf'], b['conf']), x=(x0 + x1) / w - 1, y=(y0 + y1) / h - 1,
+                     share=(x1 - x0) * (y1 - y0) / float(w * h), box=(x0 / w, y0 / h, (x1 - x0) / w, (y1 - y0) / h),
+                     whole=x0 > 2 and y0 > 2 and x1 < w - 2 and y1 < h - 2, joined=True)
+            boxes = [d for d in boxes if d is not a and d is not b] + [u]
+            joined.append(u)
+            again = True
+            break
+    boxes = [d for d in boxes if d.get('joined') or not any(iou(px(d), px(j)) >= 0.5 and d['conf'] <= j['conf']
+                                                             for j in joined)]
+    return boxes + [d for d in found if d['colour'] == 'pipe_end']
 
 
 def biggest_light(lights):

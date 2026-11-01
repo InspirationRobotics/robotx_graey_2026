@@ -291,8 +291,8 @@ STEADY_S = 2.0          #   across) for this long, by the DVL. Going down, movin
 HOLD_TOL_M = 0.01       #   off (apart from the camera's moves of the spot) holds the depth until steady again
 SMOOTH_S = 0.5          # ... judged on the DVL's position averaged over this long
 SLOW_MIN = 0.25         # ... each time it goes past the spot the sideways speed halves, down to this share at least
-CAM_CAP_M = 0.01        # ... the light beside the magnet moves the spot at most this far from the DVL's (Ruth, Oct 31:
-                        #   it moved it 3-4 cm and the magnet landed on the box's edge and slid off)
+                        # The light beside the magnet moves the spot as far as it says: no cap (Ruth, Oct 31 - a 1 cm
+                        # cap let the sub creep 10 cm going down, the DVL not noticing, the camera seeing it)
                         # Then down, holding there (Ruth, Oct 30):
 DESCEND_V = 0.03        # ... this fast, final_rate_mps once the box is SLOW_ZONE_M away by its depth guess, the
 SLOW_ZONE_M = 0.05      #   target never more than FINAL_LEAD_M under where the sub is (no hard push when it lands)
@@ -3798,8 +3798,7 @@ class PipelineMission(MissionBase):
                     self.c_shifted, self.c_level, self.c_down = True, len(self.centre_levels), z
                     self.c_base = (here, goal)
                     self.get_logger().info(f'    centre: the magnet over the box and steady ({how}) - slowly down to '
-                                           f'it until it touches, the light beside the magnet moving the spot at most '
-                                           f'{CAM_CAP_M * 100:.0f} cm')
+                                           f'it until it touches, the light beside the magnet moving the spot')
                 elif now - self.c_log >= 2.0:
                     self.c_log = now
                     self.get_logger().info(f'    centre: the magnet going over the box, not down yet ({how}; down '
@@ -3875,9 +3874,6 @@ class PipelineMission(MissionBase):
         want = self.magnet_offset(cam[0], cam[1], h)
         g, b = self.c_shift_goal, self.c_shift_base
         g = (g[0] + CENTRE_GAIN * (want[0] - g[0]), g[1] + CENTRE_GAIN * (want[1] - g[1]))
-        cap = math.hypot(g[0] - b[0], g[1] - b[1])
-        if cap > CAM_CAP_M:                     # never more than CAM_CAP_M from the DVL's spot (Ruth, Oct 31)
-            g = (b[0] + (g[0] - b[0]) * CAM_CAP_M / cap, b[1] + (g[1] - b[1]) * CAM_CAP_M / cap)
         self.c_shift_goal = g
         if self.camera is not None:
             self.camera.aim = (time.monotonic(), uv[0], uv[1])
@@ -3885,7 +3881,7 @@ class PipelineMission(MissionBase):
             self.c_log = now
             self.get_logger().info(f'    centre: the light beside the magnet, {math.hypot(want[0] - here[0], want[1] - here[1]) * 100:.1f} cm '
                                    f'off - the magnet\'s spot moves that way, now {math.hypot(g[0] - b[0], g[1] - b[1]) * 100:.1f} cm '
-                                   f'from the DVL\'s (at most {CAM_CAP_M * 100:.0f}) ({self.centre_where(z)})')
+                                   f'from the DVL\'s ({self.centre_where(z)})')
 
     def centre_shift_start(self, L, now):
         """The box in the picture's middle - the camera over it - L m above it: the sub moves by the magnet's offset
