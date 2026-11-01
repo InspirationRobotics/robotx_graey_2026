@@ -735,10 +735,11 @@ class PipelineMission(MissionBase):
         p('boxes_total', 0)                 # the light boxes on the pipe (competition: 5): the report takes the
                                             # ones after the RED light as GREEN (Ruth, Oct 29); 0 = only those seen
         p('light_same_m', 0.3)              # sightings this close together are one light
-        p('unlit_is_green', True)           # the survey (Ruth, Oct 31: one working light in the pool): a box the box
-                                            # model finds with no light showing is a light too, reported GREEN - and
-                                            # RED instead once red shows in it (its edge seen first, then the LED);
-                                            # runs the box model on every picture of the survey. False: lights only
+        p('unlit_is_green', True)           # following and the survey (Ruth, Oct 31; Nov 1): the box model finds the
+                                            # boxes - each GREEN until a red light shows in it (its edge seen first,
+                                            # then the LED), a light in no box not counted (the daylight pool's
+                                            # glints read blue and green); runs the box model on every picture.
+                                            # False: the light finder's lights only, as before Oct 31
         p('light_min_share', 0.10)          # a new light must once be seen whole (clear of the picture's
                                             # edge) or fill this share of it: glimpses at the edge (5-8%)
                                             # sat in the wrong place and were counted twice (Oct 16-17)
@@ -886,9 +887,9 @@ class PipelineMission(MissionBase):
         self.yolo_failed = False
         self.box_model, self.box_conf = g('box_model').strip(), float(g('box_conf'))
         self.unlit_green = bool(g('unlit_is_green'))
-        self.box_yolo = None                # the light-box model, loaded now if the mission will centre (or the
-        if self.box_model and (self.repair_centre or self.start_with == 'centre'      # survey count unlit boxes):
-                               or (self.survey and self.unlit_green)):               # loading later froze the sub ~30 s
+        self.box_yolo = None                # the light-box model, loaded now if the mission will centre (or count
+        if self.box_model and (self.repair_centre or self.start_with == 'centre'      # the boxes it follows past):
+                               or ((self.survey or self.camera_boxes) and self.unlit_green)):   # later froze the sub ~30 s
             self.box_yolo = self.load_box_model()
         led_boxes.V_MIN, led_boxes.S_MIN = int(g('light_v_min')), int(g('light_s_min'))
         self.survey_backup = float(g('survey_backup_m'))
@@ -3092,6 +3093,12 @@ class PipelineMission(MissionBase):
             boxes = [b['box'] for b in led_boxes.contrast_lights(rgb) if b['colour'] != 'white']
         r = pl.detect(full, boxes)
         steady = self.cam_steady.update(r)
+        if self.camera is not None:     # for the GUI's Show detections (Ruth, Nov 1), in 640x360 px
+            kx, ky = 640.0 / pl.W, 360.0 / pl.H
+            self.camera.line = (time.monotonic(), [[round(float(arm['a'][0]) * kx), round(float(arm['a'][1]) * ky),
+                                                    round(float(arm['b'][0]) * kx), round(float(arm['b'][1]) * ky)]
+                                                   for arm in r.get('arms') or []],
+                                r['conf'], bool(steady), getattr(self, 'cam_mode', None))
         placed = None
         cur, yaw = self.cur, self.cur_yaw
         if steady and cur and yaw is not None:
@@ -3294,17 +3301,19 @@ class PipelineMission(MissionBase):
         return (((b['x'] + 1) * 320, (b['y'] + 1) * 180), b['share']) if b else None
 
     def centre_box(self, on):
-        """The camera thread runs the light-box model on each picture while centring - and while the survey
-        counts lights, if unlit boxes count (unlit_is_green)."""
+        """The camera thread runs the light-box model on each picture while centring - and while following
+        counts the boxes (unlit_is_green)."""
         if self.box_yolo is not None and self.camera is not None:
-            on = on or (self.survey and self.unlit_green and isinstance(self.camera.tracker, led_boxes.LightTracker))
+            on = on or (self.unlit_green and isinstance(self.camera.tracker, led_boxes.LightTracker))
             self.camera.latest_boxes, self.camera.box_yolo = None, (self.box_yolo if on else None)
 
     def light_tracker(self):
-        """The survey's light tracker (led_boxes.LightTracker), with the unlit boxes if they count."""
+        """The light tracker (led_boxes.LightTracker): with the box model, its boxes are the lights - GREEN until a
+        red light shows in one (Ruth, Nov 1)."""
+        by_box = self.unlit_green and self.box_yolo is not None
         return led_boxes.LightTracker(same_m=self.light_same, new_frac=self.light_min_share,
                                       min_frac=self.light_min_frac, detector=self.light_detector, yolo=self.yolo,
-                                      unlit=self.unlit_green and self.box_yolo is not None)
+                                      unlit=by_box, by_box=by_box)
 
     def start_end_watch(self):
         """A YOLO model (light_detector:=yolo or end_model): the camera on for pipe ends only (no lights
@@ -3320,14 +3329,14 @@ class PipelineMission(MissionBase):
     def start_camera(self, force=False):
         if self.camera is not None and self.cam_ends_only and (force or self.camera_boxes or self.survey):
             # the pipe-end watch already runs: from here it counts the lights too
-            self.camera.tracker = self.light_tracker() if self.survey else led_boxes.BoxTracker()
+            self.camera.tracker = self.light_tracker() if self.survey or self.box_yolo is not None else led_boxes.BoxTracker()
             self.camera.on_box, self.cam_ends_only = self.on_box, False
             self.centre_box(False)
             self.get_logger().info('    camera: counting the lights from here' + self.unlit_note())
             return
         if (force or self.camera_boxes or self.survey) and self.camera is None:
             self.yolo_lights()
-            tracker = self.light_tracker() if self.survey else None
+            tracker = self.light_tracker() if self.survey or self.box_yolo is not None else None
             self.get_logger().info(('    camera: lights judged against the water (contrast_lights)'
                                     if self.light_detector == 'contrast' else
                                     '    camera: lights from the trained model' if self.light_detector == 'yolo' else
@@ -3339,10 +3348,10 @@ class PipelineMission(MissionBase):
             self.centre_box(False)
 
     def unlit_note(self):
-        if not (self.survey and self.unlit_green):
+        if not self.unlit_green:
             return ''
-        return (' - and boxes with no light showing (the box model), taken as GREEN' if self.box_yolo is not None
-                else ' - NOT the unlit boxes: no box model loaded')
+        return (' - the boxes from the box model, each GREEN until a red light shows in it (lights in no box not '
+                'counted)' if self.box_yolo is not None else ' - NOT the box model\'s boxes: none loaded')
 
     def stop_camera(self, why='the mission ended early'):
         if self.camera is not None and self.cam_ends_only:      # only watching for ends: nothing to report

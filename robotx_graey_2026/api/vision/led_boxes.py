@@ -371,10 +371,12 @@ class LightTracker:
     unlit (Ruth, Oct 31: one working light in the pool): the box model's boxes with no red or green light in
     them are lights too, colour 'unlit' (the survey reports them GREEN). A box seen unlit first - its edge,
     the LED not in view yet - takes the colour its light shows once it does, and a light already recorded
-    unlit that shows a colour later turns that colour (recoloured)."""
+    unlit that shows a colour later turns that colour (recoloured).
+    by_box (Ruth, Nov 1): the box model's boxes are the ONLY lights - each GREEN (unlit) until a red light shows
+    in it; a light in no box doesn't count (the daylight pool's glints and floor read blue and green)."""
 
     def __init__(self, min_frac=0.02, gap_s=1.0, same_m=0.3, new_frac=0.10, link=0.6, detector='hsv',
-                 yolo=None, unlit=False, magnet=None):
+                 yolo=None, unlit=False, magnet=None, by_box=False):
         # A NEW light must once be seen whole - its blob clear of the picture's edge - or be big
         # (new_frac of the picture): glimpses at the edge (pool, Oct 16-17: 5-8%) sat in the wrong
         # place and were counted twice, while a lake ring ~1 m below is whole but tiny (0.03-6%,
@@ -388,6 +390,7 @@ class LightTracker:
         self.yolo = yolo            # 'yolo': a YoloLights, on the full picture update() is given
         self.unlit = unlit          # the box model's boxes update() is given count, as 'unlit' where no light shows
         self.magnet = magnet        # (u, v, r) in 640x360 px: a box within r of the magnet is the magnet lit up
+        self.by_box = by_box        # the box model's boxes are the lights: red where a red light shows, else unlit
         self.boxes = []
         self._tracks = []
 
@@ -410,6 +413,22 @@ class LightTracker:
             if not any(l - UNLIT_PAD * w <= (x + 1) / 2 <= l + (1 + UNLIT_PAD) * w
                        and tp - UNLIT_PAD * h <= (y + 1) / 2 <= tp + (1 + UNLIT_PAD) * h for _, x, y, _, _ in lights):
                 out.append(('unlit', d['x'], d['y'], d['share'], d['whole']))
+        return out
+
+    def box_finds(self, boxes, lights):
+        """by_box: each of the box model's boxes - 'red' with a red light in or just round it, else 'unlit' - none on
+        the magnet."""
+        out = []
+        for d in boxes:
+            if d['colour'] == 'pipe_end':
+                continue
+            if self.magnet is not None and math.hypot((d['x'] + 1) * 320 - self.magnet[0],
+                                                      (d['y'] + 1) * 180 - self.magnet[1]) < self.magnet[2]:
+                continue
+            l, tp, w, h = d['box']
+            red = any(c == 'red' and l - UNLIT_PAD * w <= (x + 1) / 2 <= l + (1 + UNLIT_PAD) * w
+                      and tp - UNLIT_PAD * h <= (y + 1) / 2 <= tp + (1 + UNLIT_PAD) * h for c, x, y, _, _ in lights)
+            out.append(('red' if red else 'unlit', d['x'], d['y'], d['share'], d['whole']))
         return out
 
     @staticmethod
@@ -444,7 +463,9 @@ class LightTracker:
                      if l['colour'] in ('red', 'green')]
         else:
             found = self.blobs(rgb, self.min_frac)
-        if self.unlit and boxes:
+        if self.by_box:
+            found = self.box_finds(boxes or [], found)
+        elif self.unlit and boxes:
             found = found + self.unlit_boxes(boxes, found)
         for colour, x, y, share, whole in sorted(found, key=lambda b: -b[3]):
             best = None
@@ -618,6 +639,8 @@ class CameraWatcher:
         self.seen = None                # (t, [finds]) of the newest picture, every detector's, for the GUI (serve_seen)
         self.watched = -1e9             # when the GUI last asked: the light finder runs for it only then
         self.aim = None                 # (time.monotonic(), u, v): where centring last saw the light, 640x360 px
+        self.line = None                # (time.monotonic(), [[x0, y0, x1, y1], ...] px, conf, steady, steering by):
+                                        # camera_follow's pipe line in the newest picture, for the GUI (Ruth, Nov 1)
         self.thread = threading.Thread(target=self._run, daemon=True)
 
     def start(self):
@@ -692,8 +715,8 @@ class CameraWatcher:
 
 def serve_seen(watcher, magnet, port=SEEN_PORT, report=print):
     """The GUI's Camera tab, Show detections (Ruth, Oct 30): GET /seen on this port is what the down camera's
-    detectors found in the newest picture (CameraWatcher.finds_for_gui), its age, the magnet (x, y, r px) and where
-    centring last saw the light (aim, px; 2 s at most), as JSON. watcher() is the mission's CameraWatcher now, or
+    detectors found in the newest picture (CameraWatcher.finds_for_gui), its age, the magnet (x, y, r px), where
+    centring last saw the light (aim, px; 2 s at most) and camera_follow's pipe line (line; 1 s at most), as JSON. watcher() is the mission's CameraWatcher now, or
     None. Asking turns the light finder on for the GUI for 3 s. The server, or None if the port is taken."""
     import json
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -705,10 +728,13 @@ def serve_seen(watcher, magnet, port=SEEN_PORT, report=print):
                 return
             cam, now = watcher(), time.monotonic()
             out = {'camera': cam is not None, 'magnet': [magnet[0], magnet[1], MAGNET_R], 'age_s': None,
-                   'finds': [], 'aim': None}
+                   'finds': [], 'aim': None, 'line': None}
             if cam is not None:
                 cam.watched = now
-                seen, aim = cam.seen, cam.aim
+                seen, aim, line = cam.seen, cam.aim, getattr(cam, 'line', None)
+                if line is not None and now - line[0] < 1.0:
+                    out['line'] = {'segs': line[1], 'conf': round(float(line[2]), 2), 'steady': bool(line[3]),
+                                   'by': line[4]}
                 if seen is not None:
                     out['age_s'] = round(now - seen[0], 2)
                     out['finds'] = [{'by': f['by'], 'name': f['name'],
