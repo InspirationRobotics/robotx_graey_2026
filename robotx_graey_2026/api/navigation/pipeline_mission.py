@@ -287,10 +287,15 @@ MAGNET_IGNORE_PX = 50   # a box this close to the magnet in the picture is the m
 SHIFT_V = 0.01          # the magnet over the box at the end (Ruth, Oct 30): the camera over it, then the sub moves
                         #   by the magnet's offset from the camera's middle on the DVL, this fast
 STEADY_R_M = 0.0075     # ... then steady before going down (Ruth, Oct 31): inside a circle this far round (1.5 cm
-STEADY_S = 2.0          #   across) for this long, by the DVL. Going down, moving more than HOLD_TOL_M since it set
-HOLD_TOL_M = 0.01       #   off (apart from the camera's moves of the spot) holds the depth until steady again
+STEADY_S = 2.0          #   across) for this long, by the DVL
+CAM_HOLD_M = 0.015      # ... going down, the depth held while the camera sees the LED more than this from the magnet
+CAM_SEEN_S = 1.0        #   (seen this lately); within it or hidden under the magnet: on down (Ruth, Oct 31 - the DVL
+                        #   creeps ~2 mm/s there, its "moved 1 cm" holds fought the camera and hid the touch)
 SMOOTH_S = 0.5          # ... judged on the DVL's position averaged over this long
-SLOW_MIN = 0.25         # ... each time it goes past the spot the sideways speed halves, down to this share at least
+SLOW_MIN = 0.25         # ... the sideways speed by the camera (Ruth, Oct 31): halved each time the LED goes past the
+FAST_MAX = 3.0          #   magnet (this share at least), x1.5 each REACT_S the LED isn't REACT_GAIN_M closer (this
+REACT_S = 2.0           #   many times at most)
+REACT_GAIN_M = 0.005
                         # The light beside the magnet moves the spot as far as it says: no cap (Ruth, Oct 31 - a 1 cm
                         # cap let the sub creep 10 cm going down, the DVL not noticing, the camera seeing it)
                         # Then down, holding there (Ruth, Oct 30):
@@ -3488,8 +3493,10 @@ class PipelineMission(MissionBase):
         self.c_shift_goal, self.c_shift_t, self.c_magnet_said = None, None, False   # the magnet over the box
         self.c_shifted = False                          # ... done: the rest of the way down blind
         self.c_shift_base, self.c_xy = None, []         # the DVL's spot for the magnet; the sub's (t, n, e) lately
-        self.c_slow, self.c_xy_dir = 1.0, None          # the sideways speed's share (halved past the spot); the way to it
-        self.c_paused, self.c_base = False, None        # going down: moved, the depth held; (here, spot) as it set off
+        self.c_slow = 1.0                               # the sideways speed's share (camera: /2 past, x1.5 not moving)
+        self.c_cam_off = None                           # (t, north, east): the LED from the magnet, the camera's newest
+        self.c_react = {'t': None, 'd': None}           # ... and that distance REACT_S ago
+        self.c_paused = False                           # going down: the LED off the magnet, the depth held
         self.c_touch = None                             # (time, Cube z) the sub stopped following down: touching?
         self.c_hold_z = None                            # on the box: the Cube z it holds there
         self.c_nudge = {'t': self.now(), 'gap': None, 'boost': 1.0, 'dir': None}   # option B
@@ -3509,8 +3516,9 @@ class PipelineMission(MissionBase):
             + f' to the picture\'s middle ({CAM_CX:.0f}, {CAM_CY:.0f}) px, the camera over it; the magnet to '
             + ', '.join(f'{L:.2f}' for L in self.centre_levels) + ' m above the box - at '
             f'{self.centre_shift:.2f} the magnet moved over it on the DVL and steady there (inside '
-            f'{2 * STEADY_R_M * 100:.1f} cm for {STEADY_S:.0f} s) before going down, the depth held whenever it moves '
-            f'more than {HOLD_TOL_M * 100:.0f} cm - on the box it holds there up to {self.final_s:.0f} s; '
+            f'{2 * STEADY_R_M * 100:.1f} cm for {STEADY_S:.0f} s) before going down, the depth held while the camera '
+            f'sees the LED more than {CAM_HOLD_M * 100:.1f} cm from the magnet - on the box it holds there up to '
+            f'{self.final_s:.0f} s; '
             + (f'the box ~{gap:.2f} m under the magnet ({src})' if gap is not None else
                'the box\'s depth unknown until the camera sees all of it - holding the depth till then'))
         self.to_phase('centre')
@@ -3709,7 +3717,7 @@ class PipelineMission(MissionBase):
             # FINAL_LEAD_M under where the sub is; on the box when the sub stops following (Ruth, Oct 30)
             contact = bz - MAGNET_BELOW_M if bz is not None else None   # Cube z with the magnet on the box, guessed
             v = self.final_rate if contact is None or z >= contact - SLOW_ZONE_M else DESCEND_V
-            if not self.c_paused:                       # off the spot: the depth held (Ruth, Oct 31)
+            if not self.c_paused:                       # the LED off the magnet: the depth held (Ruth, Oct 31)
                 self.c_down = min(self.c_down + v * dt, z + FINAL_LEAD_M)
             speed = self.centre_speed_at(0.0)
             if self.c_down - z >= FINAL_LEAD_M - 0.005:
@@ -3764,8 +3772,8 @@ class PipelineMission(MissionBase):
             self.box_search_step()
             return
         if self.c_shift_goal is not None:
-            # the magnet over the box (Ruth, Oct 31): steady on the spot by the DVL before going down, the sideways
-            # speed halved each time it goes past the spot; going down, off the spot holds the depth
+            # the magnet over the box (Ruth, Oct 31): steady by the DVL before going down; the sideways speed set by the
+            # camera (shift_sighting); going down, the LED seen off the magnet holds the depth
             here = self.cur if self.cur else self.carrot
             goal = self.c_shift_goal
             self.c_xy = [p for p in self.c_xy if now - p[0] <= STEADY_S] + [(now, here[0], here[1])]
@@ -3781,14 +3789,6 @@ class PipelineMission(MissionBase):
             spread = max(math.hypot(b[0] - mn, b[1] - me) for b in blocks)
             steady = now - self.c_xy[0][0] >= STEADY_S - 0.1 and spread <= STEADY_R_M
             left = math.hypot(goal[0] - here[0], goal[1] - here[1])
-            if left >= STEADY_R_M:                      # the spot the other way now: it went past
-                u = ((goal[0] - here[0]) / left, (goal[1] - here[1]) / left)
-                if self.c_xy_dir is not None and u[0] * self.c_xy_dir[0] + u[1] * self.c_xy_dir[1] < 0.0 \
-                        and self.c_slow > SLOW_MIN:
-                    self.c_slow = max(SLOW_MIN, self.c_slow / 2)
-                    self.get_logger().info(f'    centre: went past the spot ({left * 100:.1f} cm the other side) - '
-                                           f'sideways at half the speed ({self.c_slow:.0%})')
-                self.c_xy_dir = u
             self.walk_to(self.nudged(goal, now), (SHIFT_V if not self.c_shifted else speed) * self.c_slow, self.c_yaw,
                          'the magnet over the box', down=self.c_down)
             how = (f'{left * 100:.1f} cm from the spot, within {2 * spread * 100:.1f} cm the last '
@@ -3796,7 +3796,6 @@ class PipelineMission(MissionBase):
             if not self.c_shifted:
                 if steady:
                     self.c_shifted, self.c_level, self.c_down = True, len(self.centre_levels), z
-                    self.c_base = (here, goal)
                     self.get_logger().info(f'    centre: the magnet over the box and steady ({how}) - slowly down to '
                                            f'it until it touches, the light beside the magnet moving the spot')
                 elif now - self.c_log >= 2.0:
@@ -3804,21 +3803,22 @@ class PipelineMission(MissionBase):
                     self.get_logger().info(f'    centre: the magnet going over the box, not down yet ({how}; down '
                                            f'once inside {2 * STEADY_R_M * 100:.1f} cm for {STEADY_S:.0f} s)')
             elif self.c_final_t is None:
-                # going down: moved more than HOLD_TOL_M since it set off, apart from the camera's moves of the spot
-                (bn, be), (gn, ge) = self.c_base
-                moved = math.hypot(here[0] - bn - (goal[0] - gn), here[1] - be - (goal[1] - ge))
-                if not self.c_paused and moved > HOLD_TOL_M:
-                    self.c_paused, self.c_down = True, z
-                    self.c_xy = []                              # steady counts from here on
-                    self.get_logger().warn(f'    centre: moved {moved * 100:.1f} cm going down (DVL, apart from the '
-                                           f'camera\'s moves of the spot; {left * 100:.1f} cm from it) - holding the '
-                                           f'depth until steady again')
-                elif self.c_paused and steady:
-                    self.c_paused, self.c_base = False, (here, goal)
-                    self.get_logger().info(f'    centre: steady again ({how}) - on down')
+                # going down: the LED seen more than CAM_HOLD_M from the magnet holds the depth where it was going (not
+                # where the sub is, so a touch still shows); within it, or hidden under the magnet: on down
+                c = self.c_cam_off
+                off = math.hypot(c[1], c[2]) if c is not None and now - c[0] <= CAM_SEEN_S else None
+                if not self.c_paused and off is not None and off > CAM_HOLD_M:
+                    self.c_paused = True
+                    self.get_logger().warn(f'    centre: the LED {off * 100:.1f} cm from the magnet (camera) - holding '
+                                           f'the depth until it is within {CAM_HOLD_M * 100:.1f} cm')
+                elif self.c_paused and (off is None or off <= CAM_HOLD_M):
+                    self.c_paused = False
+                    self.get_logger().info('    centre: the LED ' + (f'{off * 100:.1f} cm from the magnet' if off is not None
+                                                                     else 'hidden under the magnet') + ' - on down')
                 elif self.c_paused and now - self.c_log >= 2.0:
                     self.c_log = now
-                    self.get_logger().info(f'    centre: the depth held until steady ({how})')
+                    self.get_logger().info(f'    centre: the depth held, the LED {off * 100:.1f} cm from the magnet '
+                                           f'({self.c_slow:.0%} speed sideways)')
             return
         self.walk_to(self.nudged(self.c_goal, now), speed, self.c_yaw, 'centre the light in the picture', down=self.c_down)
 
@@ -3875,6 +3875,25 @@ class PipelineMission(MissionBase):
         g, b = self.c_shift_goal, self.c_shift_base
         g = (g[0] + CENTRE_GAIN * (want[0] - g[0]), g[1] + CENTRE_GAIN * (want[1] - g[1]))
         self.c_shift_goal = g
+        # the sideways speed by the camera (Ruth, Oct 31): the LED gone past the magnet (it lies the other way now)
+        # halves it; not REACT_GAIN_M closer in REACT_S: x1.5
+        o = (want[0] - here[0], want[1] - here[1])
+        dist, prev, r = math.hypot(*o), self.c_cam_off, self.c_react
+        if prev is not None and dist >= STEADY_R_M and math.hypot(prev[1], prev[2]) >= STEADY_R_M \
+                and o[0] * prev[1] + o[1] * prev[2] < 0.0 and self.c_slow > SLOW_MIN:
+            self.c_slow = max(SLOW_MIN, self.c_slow / 2)
+            r.update(t=now, d=dist)
+            self.get_logger().info(f'    centre: the LED went past the magnet ({dist * 100:.1f} cm the other side) - '
+                                   f'sideways at half the speed ({self.c_slow:.0%})')
+        elif r['t'] is None:
+            r.update(t=now, d=dist)
+        elif now - r['t'] >= REACT_S:
+            if dist >= STEADY_R_M and r['d'] - dist < REACT_GAIN_M and self.c_slow < FAST_MAX:
+                self.c_slow = min(FAST_MAX, self.c_slow * 1.5)
+                self.get_logger().info(f'    centre: the LED {dist * 100:.1f} cm from the magnet and not getting closer '
+                                       f'- sideways x1.5 ({self.c_slow:.0%})')
+            r.update(t=now, d=dist)
+        self.c_cam_off = (now, o[0], o[1])
         if self.camera is not None:
             self.camera.aim = (time.monotonic(), uv[0], uv[1])
         if now - self.c_log >= 2.0:
@@ -3891,7 +3910,8 @@ class PipelineMission(MissionBase):
         ahead, right = (my - CAM_CY) * m / f, -(mx - CAM_CX) * m / f
         h = self.cur_yaw if self.cur_yaw is not None else self.c_yaw
         self.c_shift_goal = self.c_shift_base = self.magnet_offset(self.c_goal[0], self.c_goal[1], h)
-        self.c_shift_t, self.c_xy, self.c_slow, self.c_xy_dir, self.c_paused = now, [], 1.0, None, False
+        self.c_shift_t, self.c_xy, self.c_slow, self.c_paused = now, [], 1.0, False
+        self.c_cam_off, self.c_react = None, {'t': None, 'd': None}
         self.get_logger().info(f'    centre: lined up {L:.2f} m above the box, the camera over it - moving the magnet over '
                                f'it: {ahead * 100:.1f} cm ahead, {right * 100:+.1f} cm right, on the DVL')
 
