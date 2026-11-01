@@ -75,10 +75,10 @@ def hsv_masks(rgb, hues=None):
     return out
 
 
-MAGNET_PX = (328.0, 292.0)     # the repair magnet's centre in the 640x360 down picture (Oct 22 footage: its rim
-                               # in the median of 400 lit frames, radius 49 px). Picture top = the sub's front,
-                               # picture right = its right (checked against the DVL the same night)
-MAGNET_R = 46.0                # its radius, px (the median of 296 lit Oct 29 pool frames; 49 on Oct 22)
+MAGNET_PX = (364.0, 261.0)     # the repair magnet's centre in the 640x360 down picture (Ruth moved it, Oct 31: its
+                               # dark disc's edge fitted on 50 frames; Oct 22-30 it was at (328, 292)). Picture top =
+                               # the sub's front, picture right = its right (checked against the DVL Oct 22)
+MAGNET_R = 39.0                # its radius, px (Oct 31, the dark disc; 46 lit on Oct 29, 49 on Oct 22)
 SEEN_PORT = 8097               # serve_seen: the detections for the GUI's Camera tab
 OPEN_PX = 5                    # SMALL px: wider than the red glare streaks the acrylic board throws (Oct 22)
 CORE_V = 240                   # a light's washed-out middle: the LED ring itself
@@ -137,7 +137,7 @@ C_GLOW_S = 90          # ... its pixels this strongly coloured (S) ...
 C_GLOW_DV = 20         # ... and this much brighter than the water
 C_GLOW_N = 4           # fewer coloured glow pixels than this: 'white'
 C_LABEL = (50, 18)     # SMALL px: tools/cam_pair.py writes 'DOWN' in the top-left corner
-C_MAGNET = (164, 146, 34)   # SMALL px (x, y, r): the magnet and the bright tab on its rim
+C_MAGNET = (182, 130, 29)   # SMALL px (x, y, r): the magnet and the bright tab on its rim (Oct 31; was 164, 146, 34)
 C_RED_H = ((0, 25), (165, 180))   # red LEDs 175-179 and 0-4 (pool); their glow 9-21 in the lake's green
                                   # water. Orange tags (Oct 18) don't glow, so they can't be a light here
 C_GREEN_H = ((60, 92),)           # green LEDs 65-90 (pool videos); the lake water is 40-63, below this
