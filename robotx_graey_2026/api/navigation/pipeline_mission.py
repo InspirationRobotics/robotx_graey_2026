@@ -235,9 +235,12 @@ PARTS = {
 
 # Lake and competition: how the code is set up there. Not for changing. Ruth, Oct 29: the newest
 # parts go in here, not left as options - transit to the end buoy (needs end_buoy_m or the buoys'
-# GPS) and the camera steering the follow (-p camera_follow:=false for a sonar-only run).
+# GPS) and the camera steering the follow (-p camera_follow:=false for a sonar-only run). Ruth, Nov 1:
+# the survey starts where the sonar first finds the pipe (survey_buoy 'here') - the buoys sit near the
+# pipe's ends and the sub starts at the active one; going back to the buoy end cost 2.5 min of turns in
+# the pool and backed the sonar off the pipe's end.
 FIXED = {'plan': 'pool', 'scan_mode': 'transit', 'camera_follow': True, 'pool_band': 'none',
-         'pool_compact': False, 'survey_buoy': 'start', 'pool_max_pick_m': 0.0, 'follow_near_m': 0.45}
+         'pool_compact': False, 'survey_buoy': 'here', 'pool_max_pick_m': 0.0, 'follow_near_m': 0.45}
 
 # The simulator never left the surface with unchanged targets re-sent every 3 s
 # (sim/README.md). Here a target changes when the plan does, and is otherwise
