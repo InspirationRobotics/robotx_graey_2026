@@ -713,11 +713,13 @@ class CameraWatcher:
         return self.tracker.boxes
 
 
-def serve_seen(watcher, magnet, port=SEEN_PORT, report=print):
+def serve_seen(watcher, magnet, port=SEEN_PORT, report=print, retry_s=3.0):
     """The GUI's Camera tab, Show detections (Ruth, Oct 30): GET /seen on this port is what the down camera's
     detectors found in the newest picture (CameraWatcher.finds_for_gui), its age, the magnet (x, y, r px), where
     centring last saw the light (aim, px; 2 s at most) and camera_follow's pipe line (line; 1 s at most), as JSON. watcher() is the mission's CameraWatcher now, or
-    None. Asking turns the light finder on for the GUI for 3 s. The server, or None if the port is taken."""
+    None. Asking turns the light finder on for the GUI for 3 s. The server, or None if the port is taken - then it
+    tries again every retry_s (Ruth, Nov 1: a run stopped with Ctrl-C held it a while, and the next run's GUI showed
+    nothing all run)."""
     import json
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -754,11 +756,26 @@ def serve_seen(watcher, magnet, port=SEEN_PORT, report=print):
         def log_message(self, *a):
             pass
 
-    try:
+    def bind():
         srv = ThreadingHTTPServer(('0.0.0.0', port), Seen)
+        srv.daemon_threads = True
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv
+
+    try:
+        return bind()
     except OSError as ex:
-        report(f'camera: no detections for the GUI - port {port} is taken ({ex})')
-        return None
-    srv.daemon_threads = True
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    return srv
+        report(f'camera: no detections for the GUI yet - port {port} is taken ({ex})'
+               + (f' - trying again every {retry_s:.0f} s' if retry_s else ''))
+    if retry_s:
+        def retry():
+            while True:
+                time.sleep(retry_s)
+                try:
+                    bind()
+                except OSError:
+                    continue
+                report(f'camera: detections for the GUI on port {port} now')
+                return
+        threading.Thread(target=retry, daemon=True).start()
+    return None
