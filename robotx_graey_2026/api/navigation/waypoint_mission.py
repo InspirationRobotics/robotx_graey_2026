@@ -118,11 +118,17 @@ class WaypointMission(Node):
         self.link.send('manual_control_send',1,0,0,500,0,0)
         self.pilot_override_active=True
         self.sent_target=tuple(target)
-        # Position + yaw rate (radians/s). Three-value hold commands explicitly
-        # cancel the previous turn rate, including arrival and telemetry waits.
-        yaw_rate=target[3] if len(target)>3 else 0.
-        self.link.send('set_position_target_local_ned_send',0,1,1,1,1528,
-            *target[:3],0.,0.,0.,0.,0.,0.,0.,yaw_rate)
+        # Position only: original GUIDED transit command.
+        self.link.send('set_position_target_local_ned_send',0,1,1,1,3576,
+            *target[:3],0.,0.,0.,0.,0.,0.,0.,0.)
+
+    def send_guided_orientation(self,target):
+        self.link.send('manual_control_send',1,0,0,500,0,0)
+        self.pilot_override_active=True
+        self.sent_target=tuple(target)
+        # Position + absolute local yaw; Cube performs the turn while holding XYZ.
+        self.link.send('set_position_target_local_ned_send',0,1,1,1,2552,
+            *target[:3],0.,0.,0.,0.,0.,0.,target[3],0.)
 
     def on_status(self, msg):
         try:
@@ -265,6 +271,8 @@ class WaypointMission(Node):
         for action, payload in self.logic.step(now, o):
             if action in ('guided_target','guided_hold'):
                 self.send_guided_waypoint(payload)
+            elif action=='guided_orient':
+                self.send_guided_orientation(payload)
             elif action=='guided_alignment':
                 x,y,z,vx,vy,heading=payload
                 # Refresh ownership with neutral pilot input; GUIDED owns XYZ.

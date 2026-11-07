@@ -34,13 +34,15 @@ class CubeHeadingTests(unittest.TestCase):
         self.assertTrue(e.manual_north)
         self.assertAlmostEqual(yaw(e.orientation())%360,270.,places=6)
 
-    def test_manual_north_bypasses_alignment_motion_leg(self):
+    def test_manual_north_still_orients_before_travel(self):
         r=GuidedSurfaceRun(dict(lat=33.,lon=-117.,mode='surface',map='geographic',alignment_corridor_confirmed=True),'run',0.)
         r.stage='ARM'
-        b=dict(manual_north=True,heading_reference_validated=True)
+        from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
+        frame=GeographicFrame();frame.align(33.,-117.,(0.,0.),0.)
+        b=dict(manual_north=True,heading_reference_validated=True,map_transform=frame.snapshot())
         o=dict(fresh=True,mode=4,armed=True,bridge=b,local=(2.,3.,0.),yaw=0.,speed=0.,depth=0.)
         self.assertEqual(r.step(.1,o),[])
-        self.assertEqual(r.stage,'TRANSIT')
+        self.assertEqual(r.stage,'ORIENT')
         self.assertFalse(r.alignment_collecting if hasattr(r,'alignment_collecting') else False)
 
     def test_corrected_yaw_preserves_position_body_velocity_and_covariance(self):

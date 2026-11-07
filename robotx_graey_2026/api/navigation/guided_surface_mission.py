@@ -3,11 +3,12 @@ import math
 from .waypoint_logic import WaypointRun
 from .geographic_frame import GeographicFrame
 from .geographic_frame import rotation
+from .guided_orientation import GuidedOrientation
 
 
 class GuidedSurfaceRun(WaypointRun):
     # Jetson owns the waypoint; Cube GUIDED controls motion from its EKF.
-    moving={'CHECK_SURFACE','TRANSIT','TRANSIT_CHECK','STOP'}
+    moving={'ORIENT','CHECK_SURFACE','TRANSIT','TRANSIT_CHECK','STOP'}
     arrival_radius=1.5
     segment_length=0.
 
@@ -22,22 +23,7 @@ class GuidedSurfaceRun(WaypointRun):
         self.alignment_stopped=False
         self.heading_reset_revision=0
         self.last_local=None
-        self.turning_to_target=False
-        self.waypoint_heading_error=0.
-        self.waypoint_yaw_rate=0.
-
-    def forward_target(self, local, target, yaw):
-        """Same local NED frame as Cube yaw; proportional shortest-path turn."""
-        bearing=math.atan2(target[1]-local[1],target[0]-local[0])
-        error=(bearing-yaw+math.pi)%(2*math.pi)-math.pi
-        self.waypoint_heading_error=error
-        magnitude=abs(error)
-        rate=min(math.radians(20.), .5*max(0.,magnitude-math.radians(3.)))
-        self.waypoint_yaw_rate=math.copysign(rate,error)
-        if magnitude>math.radians(45.):self.turning_to_target=True
-        elif magnitude<math.radians(25.):self.turning_to_target=False
-        xy=local[:2] if self.turning_to_target else target[:2]
-        return (*xy,self.surface_down,self.waypoint_yaw_rate)
+        self.orientation=None
 
     def apply_heading_reset(self, reset):
         revision=(reset or {}).get('revision',0)
@@ -100,10 +86,17 @@ class GuidedSurfaceRun(WaypointRun):
                 self.surface_down=local[2]
                 self.gps_start=tuple(o['raw_gps']) if o.get('surface_gps_current') and o.get('raw_gps') else self.gps_start
                 self.alignment_complete=True
-                self.enter('TRANSIT',now,'EKF surface waypoint navigation')
+                target=frame.gps_to_local(self.plan['lat'],self.plan['lon'])
+                self.orientation=GuidedOrientation((*local[:2],self.surface_down),target)
+                self.enter('ORIENT',now,'Orienting toward waypoint before travel')
             elif self.plan.get('qgc_goto'):
                 self.abort(now,'QGC Go-to cancelled by disarm',pilot=True);return []
             else:return self.command(now,'arm')
+        elif self.stage=='ORIENT':
+            if self.orientation.ready(o['yaw']):
+                self.enter('TRANSIT',now,'Orientation complete; position-only GUIDED travel')
+                return self.command(now,'guided_target',(*frame.gps_to_local(self.plan['lat'],self.plan['lon']),self.surface_down),interval=.1)
+            return self.command(now,'guided_orient',self.orientation.target(),interval=.1)
         elif self.stage in ('TRANSIT','TRANSIT_CHECK'):
             if frame.angle is None:
                 self.reason='Waiting for EKF geographic position; waypoint retained'
@@ -118,10 +111,7 @@ class GuidedSurfaceRun(WaypointRun):
                 self.enter('STOP',now,'Estimated arrival within 1.5 m; stopping')
                 return self.command(now,'guided_hold',(*local[:2],self.surface_down),interval=.1)
             if distance<=self.arrival_radius:return self.command(now,'guided_hold',(*local[:2],self.surface_down),interval=.1)
-            command_target=self.forward_target(local,self.target,o['yaw'])
-            self.reason=('Turning toward waypoint before forward travel' if self.turning_to_target
-                         else 'GUIDED travel with proportional waypoint heading correction')
-            return self.command(now,'guided_target',command_target,interval=.1)
+            return self.command(now,'guided_target',self.target,interval=.1)
         elif self.stage=='STOP':
             if self.settled(now,o['speed']<=.08):self.enter('DISARM',now,'Stopped at waypoint')
             return self.command(now,'guided_hold',(*local[:2],self.surface_down),interval=.1)
@@ -133,9 +123,7 @@ class GuidedSurfaceRun(WaypointRun):
 
     def snapshot(self):
         s=super().snapshot()
-        s.update(turning_to_target=self.turning_to_target,
-                 waypoint_heading_error_deg=math.degrees(self.waypoint_heading_error),
-                 waypoint_yaw_rate_deg_s=math.degrees(self.waypoint_yaw_rate))
+        s.update(orientation_heading_deg=math.degrees(self.orientation.heading) if self.orientation else None)
         s.update(gps_alignment=self.gps_alignment,alignment_stopped=self.alignment_stopped,alignment_method='manual_only',sample_check_ready=self.sample_check_ready,alignment_distance_m=self.alignment_distance,
             coordinate_frame='fixed_local',jetson_map_axes='x=north, y=east',arrival_radius_m=self.arrival_radius,
             segment_length_m=0.,segment_checks=0,segment_check_dwell_s=0.)
