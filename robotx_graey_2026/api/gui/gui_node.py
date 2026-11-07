@@ -54,7 +54,8 @@ FILES = {
     '/vendor/leaflet/leaflet.css': 'vendor/leaflet/leaflet.css',
     '/navigation': 'navigation.html',
     '/navigation-supervisor': 'navigation_supervisor.html',
-    '/': 'gui.html',
+    '/': 'waypoint.html',
+    '/control': 'gui.html',
     '/planner': 'pool_planner.html',
     '/pool-map': 'waypoint.html',
     '/waypoint': 'waypoint.html',
@@ -172,9 +173,8 @@ def waypoint_simulation():
 
 def waypoint_capabilities():
     sim = waypoint_simulation()
-    enabled = sim or os.environ.get('GRAEY_WAYPOINT_ENABLED') == '1'
-    if calibration_jobs is not None and calibration_jobs.snapshot().get('action'):
-        enabled = calibration_jobs.waypoint_permission and not calibration_jobs.snapshot().get('busy')
+    bridge=navigation.snapshot()['streams'].get('bridge',{})
+    enabled=bool(bridge.get('age',float('inf'))<1. and bridge.get('data',{}).get('enabled'))
     return dict(simulation=sim, enabled=enabled,
                 pool_registration='approximate',
                 mapping_note=('Screenshot scale/anchor are approximate, not surveyed. Live pool-image starts are blocked.'
@@ -185,8 +185,8 @@ def waypoint_request(body):
     global waypoint_process, waypoint_launch
     action = body.get('action')
     nav = navigation.snapshot()
-    if action == 'preview':
-        return waypoint_api.preview(body.get('plan'), nav)
+    if action in ('preview','qgc_preview'):
+        return waypoint_api.preview(body.get('plan'), nav,source='qgc' if action=='qgc_preview' else 'gui')
     if action == 'abort':
         status = nav['streams'].get('waypoint', {}).get('data', {})
         expected = waypoint_launch['run_id'] if waypoint_launch and waypoint_process.poll() is None else status.get('run_id')

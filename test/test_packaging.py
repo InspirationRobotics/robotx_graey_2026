@@ -20,13 +20,15 @@ class PackagingTests(unittest.TestCase):
             self.assertIn('tools/vendor/leaflet/leaflet.js', installed)
             self.assertIn('tools/vendor/leaflet/leaflet.css', installed)
             self.assertIn('tools/vendor/leaflet/LICENSE', installed)
+            for asset in ('tools/pool_reference.png','tools/pool.png','tools/vendor/miramar/19-211332-91604.jpg'):
+                self.assertIn(asset,installed)
         finally:
             os.chdir(previous)
 
     def test_core_mavlink_components_are_unique(self):
         ids = []
         for path in ('led/pixhawk_led_node.py', 'pixhawk/kill_switch.py',
-                     'navigation/fused_nav_bridge.py', 'navigation/navigation_supervisor.py',
+                     'navigation/fused_nav_bridge.py',
                      'gui/gui_node.py', 'navigation/pos_server.py'):
             tree = ast.parse((ROOT/'robotx_graey_2026/api'/path).read_text())
             calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)

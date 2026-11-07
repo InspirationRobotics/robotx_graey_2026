@@ -1,0 +1,50 @@
+[
+  {
+    "run": "71d6e6a85c",
+    "passed": true,
+    "stage": "COMPLETE",
+    "reason": "Estimated waypoint reached; stopped and disarmed",
+    "alignment_m": 9.903945472353822,
+    "north_offset_deg": -40.04708053040238,
+    "faults": [
+      "dvl",
+      "vn"
+    ],
+    "gps_loss_observed": false,
+    "sampled_vertical_inputs": [
+      500
+    ],
+    "qgc_forwarding": false
+  },
+  {
+    "run": "a8227d87ef",
+    "passed": true,
+    "stage": "ABORTED",
+    "reason": "Jetson estimator lost GPS, DVL and VN",
+    "alignment_m": 9.902855156502133,
+    "north_offset_deg": -40.030004978275514,
+    "faults": [],
+    "gps_loss_observed": true,
+    "sampled_vertical_inputs": [
+      500
+    ],
+    "qgc_forwarding": false
+  },
+  {
+    "run": "97d2b40a77",
+    "passed": true,
+    "stage": "COMPLETE",
+    "reason": "Estimated waypoint reached; stopped and disarmed",
+    "alignment_m": 9.903540171518532,
+    "north_offset_deg": -40.075100880432075,
+    "faults": [
+      "dvl",
+      "vn"
+    ],
+    "gps_loss_observed": false,
+    "sampled_vertical_inputs": [
+      500
+    ],
+    "qgc_forwarding": false
+  }
+]

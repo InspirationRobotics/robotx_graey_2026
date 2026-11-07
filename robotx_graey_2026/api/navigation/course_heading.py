@@ -56,7 +56,7 @@ class CourseHeading:
                 and math.hypot(*world[:2])<.08 and abs(world[2])<=.15
                 and abs(math.degrees(rates[2]))<=3. and max(abs(math.degrees(r)) for r in rates[:2])<=10.):
             self.velocity_rows.clear()
-            self.reason='Stopped segment check; retaining cumulative position baseline'
+            self.reason='Low motion; retaining cumulative position baseline'
             return 0.
         if (not all(math.isfinite(v) for v in (*world,*rates))
                 or abs(math.degrees(rates[2]))>3.

@@ -1,0 +1,13 @@
+# Restore GUI to the Jetson waypoint mission
+
+Deployed 2026-10-25 at the user's explicit request to revert the last native GUI Go-to change and leave QGC alone. This supersedes `gui-native-goto-2026-10-25.md` as the active GUI behavior.
+
+Restored `gui_node.py` and `tools/waypoint.html` byte-for-byte from the pre-native-GUI backup `/home/graey/deployment-backups/gui-native-goto-20261024-035550`. Removed the newly introduced `native_goto.py` from source/installed runtime and its local unit test. The GUI again uses the existing preview/start/abort route and launches the Jetson waypoint mission. Its original startup/surface confirmation UI is restored as part of the exact rollback.
+
+The already deployed Jetson mission has no automatic alignment leg or stopped heading acceptance phase. It converts the selected geographic target into Cube's registered local NED frame and controls surface travel using Cube's EKF local position, velocity and yaw. Jetson owns the mission and STABILIZE surface controller; the restored GUI does not send the new native DO_REPOSITION command. Existing estimated arrival stop/disarm behavior is restored. Manual heading correction remains available.
+
+No QGC/MAVProxy, estimator, heading, navigation bridge or mission-controller source changed. Before/after SHA-256 values verified `mavproxy_mission_gate.py`, `start_mavproxy.sh`, `continuous_estimator.py`, `fused_nav_bridge.py` and `guided_surface_mission.py` unchanged. The Cube geographic-frame repair remains active. No new checks or controller behavior were introduced by this rollback.
+
+58 local affected Python tests and the restored Jetson GUI JavaScript checks passed. Onboard: 2 manual-only navigation, 7 navigation-new, 5 heading correction, 1 native QGC forwarding, 17 navigation view, 3 geographic frame, 23 bridge transport and 10 calibration job tests passed: **68 total**. These include direct Jetson transit without an alignment stage and EKF target navigation. No physical mission was launched.
+
+Rollback backup: `/home/graey/deployment-backups/restore-jetson-gui-20261024-040425` (vehicle clock), containing native GUI files, before/after JSON and unchanged-component hashes. Only GUI process 83013 was restarted. Postdeployment checks confirmed exact rollback bytes, served preview/start handlers, absence of native GUI endpoint/status and alignment travel, and unchanged bridge instance `0aa75d8c-9d64-46b7-8e05-94b71adf6f10` with manual VN offset -92.9341797927508. The bridge remained enabled/transmitting/profile verified in cube_ned. Controller was disarmed MANUAL/no mission/no autonomy at final observation. No arming, motion, mode command, parameter change, commit or push was performed.

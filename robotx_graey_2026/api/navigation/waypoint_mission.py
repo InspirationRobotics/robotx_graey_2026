@@ -1,4 +1,5 @@
 """Operator-started waypoint mission; the same controller runs in isolated SITL."""
+from .prediction_policy import cube_prediction_allowed
 import json
 import math
 import os
@@ -13,8 +14,8 @@ from robotx_graey_2026.api.navigation.waypoint_logic import WaypointRun
 from robotx_graey_2026.api.navigation.guided_surface_mission import GuidedSurfaceRun
 from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
 from robotx_graey_2026.api.navigation.surface_measurement import SurfaceMeasurement
-from robotx_graey_2026.api.navigation.surface_control import surface_velocity,SurfaceLeg,gentle_horizontal
-from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL
+from robotx_graey_2026.api.navigation.surface_control import surface_velocity,SurfaceLeg,gentle_horizontal,StabilizeSurfaceControl
+from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL, MODE_STABILIZE
 
 
 class WaypointMission(Node):
@@ -39,9 +40,10 @@ class WaypointMission(Node):
         if not cfg['run_id'] or (not self.sim and not cfg['commissioned']):
             raise ValueError('Mission run ID and commissioned live configuration required')
         plan=json.loads(cfg['plan_json'])
-        self.logic = (GuidedSurfaceRun if plan.get('mode','surface')=='surface' else WaypointRun)(plan,cfg['run_id'],time.monotonic())
+        if plan.get('mode','surface')!='surface':raise ValueError('Only surface missions are supported')
+        self.logic = GuidedSurfaceRun(plan,cfg['run_id'],time.monotonic())
         self.result_file = cfg['result_file']
-        self.link = Link(cfg['mavlink'], 198, self.get_logger())
+        self.link = Link(cfg['mavlink'], 198, self.get_logger(),system=255 if isinstance(self.logic,GuidedSurfaceRun) else 1)
         self.view = NavigationView()
         self.supervisor, self.safety = {}, {}
         self.bridge = {}
@@ -56,6 +58,8 @@ class WaypointMission(Node):
         self.last_trace = -math.inf
         self.sent_target = None
         self.surface_leg=SurfaceLeg()
+        self.stabilize_control=StabilizeSurfaceControl()
+        self.pilot_override_active=False
         self.surface_measurement=(SurfaceMeasurement(duration=5.,tolerated_gps_gap=4.,tolerated_sensor_gap=1.5)
                                   if self.logic.plan['mode']=='surface' else SurfaceMeasurement())
         self.surface_measurement_status={}
@@ -86,6 +90,45 @@ class WaypointMission(Node):
                     and math.isfinite(value) and 0<value<=maximum+max(1e-7,abs(maximum)*1e-6)):
                 return False
         return True
+
+    def destroy_node(self):
+        self.release_surface_controls()
+        return super().destroy_node()
+
+    def release_surface_controls(self):
+        if self.pilot_override_active:
+            # Release only the first eight pilot channels, not RF kill/arm inputs.
+            self.link.send('rc_channels_override_send',1,1,*([0]*8))
+            self.pilot_override_active=False
+
+    def send_surface(self, now, velocity, heading, o, stopping=False):
+        if not isinstance(self.logic,GuidedSurfaceRun):
+            self.link.surface_velocity(*velocity,heading);return
+        if o.get('mode')!=MODE_STABILIZE or not o.get('armed') or o.get('failure'):
+            self.release_surface_controls();return
+        if not o.get('fresh') and not o.get('navigation_hold_safe'):
+            self.release_surface_controls();return
+        command=self.stabilize_control.step(now,velocity,o['velocity_ned'],o['yaw'],heading,stopping)
+        self.link.send('manual_control_send',1,*command,0)
+        self.pilot_override_active=True
+        self.last_manual_control=command
+
+    def send_guided_waypoint(self, target):
+        """Give Cube a local NED waypoint; its GUIDED controller uses the EKF."""
+        self.link.send('manual_control_send',1,0,0,500,0,0)
+        self.pilot_override_active=True
+        self.sent_target=tuple(target)
+        # Position only: original GUIDED transit command.
+        self.link.send('set_position_target_local_ned_send',0,1,1,1,3576,
+            *target[:3],0.,0.,0.,0.,0.,0.,0.,0.)
+
+    def send_guided_orientation(self,target):
+        self.link.send('manual_control_send',1,0,0,500,0,0)
+        self.pilot_override_active=True
+        self.sent_target=tuple(target)
+        # Position + absolute local yaw; Cube performs the turn while holding XYZ.
+        self.link.send('set_position_target_local_ned_send',0,1,1,1,2552,
+            *target[:3],0.,0.,0.,0.,0.,0.,target[3],0.)
 
     def on_status(self, msg):
         try:
@@ -142,21 +185,16 @@ class WaypointMission(Node):
             return s.get('data', {}) if s.get('age', math.inf) < limit else {}
         hb, local, att = sample('heartbeat', 2), sample('local', .5), sample('attitude', .5)
         glob, origin = sample('global', .5), sample('cube_origin', 10)
-        s = self.supervisor
-        fresh = bool(hb and local and att and origin and self.view.position_healthy()
-                     and 0 <= now-self.supervisor_time < .7
-                     and 0 <= now-s.get('published_monotonic', -math.inf) < .7)
+        s = self.supervisor  # display only
+        b=getattr(self,'bridge',{})
         ned, velocity = local.get('ned'), local.get('velocity')
-        depth = s.get('depth_m')
-        fresh = fresh and all(isinstance(v, (int, float)) and math.isfinite(v)
-                             for v in (*(ned or [None]), *(velocity or [None]),
-                                       *att.get('rpy', [None]), depth))
+        depth=b.get('depth_m') if b.get('depth_m') is not None else 0.
+        fresh=bool(hb and local and att and ned and velocity
+            and all(isinstance(v,(int,float)) and math.isfinite(v)
+                    for v in (*ned,*velocity,*att.get('rpy',[None])))
+            and 0<=now-getattr(self,'bridge_time',-math.inf)<1.)
         failure = ''
         limits_ready=self.limits_ready(now)
-        if not limits_ready:
-            fresh=False
-            if self.logic.stage!='WAIT_SURFACE':
-                failure='Shallow waypoint vertical speed/acceleration limits unavailable or excessive'
         if not self.sim:
             c = self.safety
             if not (0 <= now-self.safety_time < 2 and c.get('vehicle_fresh')
@@ -173,16 +211,7 @@ class WaypointMission(Node):
             and all(isinstance(v,(int,float)) and math.isfinite(v)
                     for v in (*ned,*velocity,*att.get('rpy',[None]),depth)))
         continuity=b.get('dvl_continuity') or {}
-        # Brief DVL loss permits bounded hold, never continued travel.
-        dvl_hold=bool(continuity.get('recovering') is True
-            and continuity.get('state')=='COASTING'
-            and 0<=continuity.get('gap_age_s',math.inf)<1.5
-            and 0<=continuity.get('position_sigma_m',math.inf)<=5.
-            and not continuity.get('requires_position_revalidation',True)
-            and b.get('initialized') is True and b.get('enabled') is True
-            and not b.get('heading_continuity_lost',True)
-            and (b.get('inputs') or {}).get('vn') is True
-            and 0<=now-(b.get('pressure_sample') or {}).get('received',-math.inf)<.5)
+        dvl_hold=cube_prediction_allowed(b,now,cube_fresh)
         hold_safe=bool(cube_fresh and not failure
             and 0<=now-getattr(self,'bridge_time',-math.inf)<.3
             and 0<=now-b.get('published_monotonic',-math.inf)<.3
@@ -194,7 +223,7 @@ class WaypointMission(Node):
         fix=b.get('gps_observation') or {}
         gps_current=bool(0<=now-getattr(self,'bridge_time',-math.inf)<.3
             and b.get('gps_eligible') is True and gps.get('qualified') is True
-            and (gps.get('applied_recently') is True or gps.get('stationary_validated_recently') is True))
+            and fix.get('fix',0)>=3)
         gps_at_target=False
         if gps_current:
             try:
@@ -208,7 +237,9 @@ class WaypointMission(Node):
             frame=GeographicFrame.restore(b.get('map_transform'))
             geographic=frame.to_geo(ned) if frame.angle is not None and ned else ((fix['lat'],fix['lon']) if gps_current else None)
         return dict(fresh=fresh, failure=failure, abort=self.aborted,bridge=b,
+            cube_prediction_healthy=bool(dvl_hold and not failure),
             surface_gps_current=gps_current,surface_gps_at_target=gps_at_target,
+            raw_gps=(fix.get('lat'),fix.get('lon')) if gps_current else None,
             dvl_continuity=b.get('dvl_continuity') if 0<=now-getattr(self,'bridge_time',-math.inf)<.3 else {},
             vertical_limits_verified=limits_ready,
             navigation_hold_safe=hold_safe,
@@ -231,30 +262,40 @@ class WaypointMission(Node):
         if not isinstance(self.logic,GuidedSurfaceRun) and self.logic.stage=='CHECK_SURFACE' and getattr(self,'measurement_stage',None)!='CHECK_SURFACE':
             self.surface_measurement=SurfaceMeasurement(duration=5.,tolerated_gps_gap=4.,tolerated_sensor_gap=1.5)
         self.measurement_stage=self.logic.stage
-        if self.logic.stage in ('WAIT_SURFACE','CHECK_SURFACE') or (isinstance(self.logic,GuidedSurfaceRun) and self.logic.stage in ('GUIDED','ARM')):
+        if not isinstance(self.logic,GuidedSurfaceRun) and self.logic.stage in ('WAIT_SURFACE','CHECK_SURFACE'):
             b=self.bridge if 0<=now-self.bridge_time<.3 else {}
             self.surface_measurement_status=self.surface_measurement.update(now,b)
         o['surface_measurement']=self.surface_measurement_status
         if self.logic.stage=='WAIT_SURFACE' and not o['vertical_limits_verified']:
             self.logic.reason='Waiting for shallow waypoint vertical speed/acceleration limit readback'
         for action, payload in self.logic.step(now, o):
-            if action in ('align_velocity','stop'):
+            if action in ('guided_target','guided_hold'):
+                self.send_guided_waypoint(payload)
+            elif action=='guided_orient':
+                self.send_guided_orientation(payload)
+            elif action=='guided_alignment':
+                x,y,z,vx,vy,heading=payload
+                # Refresh ownership with neutral pilot input; GUIDED owns XYZ.
+                self.link.send('manual_control_send',1,0,0,500,0,0)
+                self.pilot_override_active=True
+                self.link.send('set_position_target_local_ned_send',0,1,1,1,0b100111000000,x,y,z,vx,vy,0.,0.,0.,0.,heading,0.)
+            elif action in ('align_velocity','stop'):
                 # Alignment and braking need the same surface protection as transit.
                 # An abort with invalid depth must still be able to send a stop.
                 depth=o.get('depth')
-                down=surface_velocity((0.,0.),(0.,0.),(0.,0.),depth)[2] if o.get('fresh') and isinstance(depth,(int,float)) and math.isfinite(depth) else 0.
+                down=0. if isinstance(self.logic,GuidedSurfaceRun) else surface_velocity((0.,0.),(0.,0.),(0.,0.),depth)[2] if o.get('fresh') and isinstance(depth,(int,float)) and math.isfinite(depth) else 0.
                 v=(payload[0],payload[1],down) if action=='align_velocity' else (0.,0.,down)
                 heading=payload[2] if action=='align_velocity' else payload[0]
                 if action!='stop':
                     if self.logic.navigation_wait_since is None:
                         v=gentle_horizontal(v,getattr(self,'sent_surface_velocity',(0.,0.,0.)),now-getattr(self,'surface_command_at',now-.1))
                 self.surface_command_at=now
-                self.link.surface_velocity(*v,heading)
+                self.send_surface(now,v,heading,o,stopping=action=='stop' or self.logic.navigation_wait_since is not None)
                 self.sent_surface_velocity=v;self.sent_surface_heading=heading
             elif action == 'target':
                 self.sent_target=payload
                 if self.logic.plan['mode']=='surface':
-                    if self.logic.stage=='TRANSIT' and self.logic.navigation_wait_since is None:
+                    if self.logic.stage=='TRANSIT' and self.logic.target is not None and self.logic.navigation_wait_since is None:
                         v,heading=self.surface_leg.step(now,self.logic.start,self.logic.target,
                             o['local'],o['velocity_ned'],o['depth'],o['yaw'])
                     else:
@@ -262,19 +303,25 @@ class WaypointMission(Node):
                         heading=payload[3]
                     if self.logic.navigation_wait_since is None:
                         v=gentle_horizontal(v,getattr(self,'sent_surface_velocity',(0.,0.,0.)),now-getattr(self,'surface_command_at',now-.1))
+                    if isinstance(self.logic,GuidedSurfaceRun):v=(*v[:2],0.)
                     self.surface_command_at=now
-                    self.link.surface_velocity(*v,heading)
+                    self.send_surface(now,v,heading,o,stopping=action=='stop' or self.logic.navigation_wait_since is not None)
                     self.sent_surface_velocity=v
                     self.sent_surface_heading=heading
                 else:
                     self.link.goto_ned(*payload)
-            elif action in ('guided', 'manual'):
+            elif action in ('guided', 'stabilize', 'manual'):
                 self.get_logger().warning('MISSION_MODE_REQUEST '+json.dumps(dict(
                     run_id=self.logic.run_id,action=action,stage=self.logic.stage,
                     reason=self.logic.reason,published_monotonic=now)))
-                self.link.set_mode(MODE_GUIDED if action == 'guided' else MODE_MANUAL)
+                if action=='guided' and isinstance(self.logic,GuidedSurfaceRun):
+                    self.link.send('manual_control_send',1,0,0,500,0,0)
+                    self.pilot_override_active=True
+                if action=='manual':self.release_surface_controls()
+                self.link.set_mode(MODE_GUIDED if action=='guided' else MODE_STABILIZE if action=='stabilize' else MODE_MANUAL)
             elif action in ('arm', 'disarm'):
                 self.link.command(400, 1 if action == 'arm' else 0)
+        if self.logic.stage in self.logic.terminal:self.release_surface_controls()
         if self.logic.stage=='ABORTED' and self.logic.abort_context is None:
             self.logic.abort_context=dict(telemetry_fresh=bool(o['fresh']),
                 navigation_hold_safe=o.get('navigation_hold_safe'),
@@ -298,7 +345,7 @@ class WaypointMission(Node):
             self.last_pause=paused
             self.get_logger().warning('MISSION_NAVIGATION_PAUSE '+json.dumps(dict(
                 run_id=self.logic.run_id,published_monotonic=now,**status['navigation_pause'])))
-        status.update(simulation=self.sim, published_monotonic=now,
+        status.update(control_mode='GUIDED', vertical_control='Cube GUIDED position/depth control' if isinstance(self.logic,GuidedSurfaceRun) else 'depth control',last_manual_control=getattr(self,'last_manual_control',None),simulation=self.sim, published_monotonic=now,
                       surface_leg=self.surface_leg.state,
                       last_sent_surface_heading_rad=getattr(self,'sent_surface_heading',None),
                       bridge_course_heading=self.bridge.get('course_heading'),
@@ -318,6 +365,7 @@ class WaypointMission(Node):
                 run_id=self.logic.run_id,stage=self.logic.stage,monotonic=now,
                 plan=self.logic.plan,target_ned=self.logic.target,
                 last_sent_target_ned_yaw=self.sent_target,
+                last_manual_control=getattr(self,'last_manual_control',None),
                 last_sent_surface_velocity_ned=getattr(self,'sent_surface_velocity',None),
                 surface_leg=self.surface_leg.state,
                 last_sent_surface_heading_rad=getattr(self,'sent_surface_heading',None),
@@ -345,7 +393,7 @@ class WaypointMission(Node):
             # Publish the terminal state long enough for the GUI. On a nav abort
             # continue requesting takeover until the Cube acknowledges leaving GUIDED.
             if now-self.logic.since > 3 and (self.logic.stage == 'COMPLETE'
-                    or o.get('mode') not in (None, 4) or self.logic.pilot_takeover
+                    or o.get('mode') not in (None, MODE_GUIDED) or self.logic.pilot_takeover
                     or not self.logic.takeover_requested):
                 raise SystemExit(0)
 

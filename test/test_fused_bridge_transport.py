@@ -5,6 +5,7 @@ import math
 import statistics
 from collections import deque
 from robotx_graey_2026.api.navigation.relative_estimator import RelativeEstimator
+from robotx_graey_2026.api.navigation.continuous_estimator import ContinuousEstimator
 from pathlib import Path
 from types import SimpleNamespace as NS
 import unittest
@@ -18,6 +19,63 @@ from robotx_graey_2026.api.navigation.track_north import TrackNorth
 
 
 class TransportTests(unittest.TestCase):
+    def test_registered_odometry_uses_cube_origin_and_resets_once(self):
+        self.b.est=ContinuousEstimator();e=self.b.est
+        e.imu(10.,(1,0,0,0),(0,0,0))
+        e.map.align(32.9235839,-117.0385754,(0.,0.),0.)
+        e.set_origin((32.9235833,-117.0385061,215.98))
+        self.b.configured=lambda now:True
+        self.b.tick()
+        args=self.b.link.odometry.call_args
+        self.assertEqual(list(args.args[0]),e.cube_position(e.position))
+        self.assertLess(args.args[0][1],-6.)
+        self.assertEqual(args.kwargs['reset_counter'],1)
+        self.clock.now=10.1;self.b.tick()
+        self.assertEqual(self.b.link.odometry.call_args.kwargs['reset_counter'],1)
+
+    def test_manual_heading_service_works_before_navigation_output_is_enabled(self):
+        self.b.est=ContinuousEstimator();self.b.est.imu(10.,(1,0,0,0),(0,0,0))
+        self.b.output_permitted=False;self.b.get_logger=Mock(return_value=Mock())
+        request=NS(parameters=[NS(name='true_heading_deg',value=NS(type=3,double_value=90.))])
+        result=self.b.align_heading(request,NS(result=NS()))
+        self.assertTrue(result.result.successful,result.result.reason)
+        self.assertIn('output paused',result.result.reason)
+        self.assertTrue(self.b.est.manual_north)
+        self.assertAlmostEqual(yaw(self.b.est.orientation()),90.)
+        self.b.link.send.assert_not_called();self.b.link.command.assert_not_called()
+
+    def test_heading_correction_reaches_odometry_with_one_reset_counter_change(self):
+        self.b.est=ContinuousEstimator()
+        self.b.est.imu(10.,(1,0,0,0),(0,0,0))
+        self.b.est.dvl(10.,(.2,0,0),True)
+        self.b.est.pressure_depth(10.,0.)
+        self.b.est.correct_heading(40.,10.)
+        self.b.configured=lambda now:True
+        self.b.tick()
+        args=self.b.link.odometry.call_args
+        self.assertAlmostEqual(yaw(args.args[1]),40.,places=6)
+        self.assertEqual(args.kwargs['reset_counter'],1)
+        self.clock.now=10.1
+        self.b.tick()
+        self.assertEqual(self.b.link.odometry.call_args.kwargs['reset_counter'],1)
+
+    def test_legacy_alignment_messages_cannot_start_or_accept_automatic_alignment(self):
+        self.b.est=ContinuousEstimator()
+        self.b.control_received=10.
+        self.b.control_state=dict(mission_claimed=True,mode='GUIDED',armed=True,sa_active=False,esc_commanded_on=True)
+        m=dict(run_id='r',published_monotonic=10.,stage='ALIGN_GUIDED')
+        self.b.mission_alignment_status(NS(data=json.dumps(m)))
+        self.assertFalse(self.b.est.alignment_collecting)
+        self.assertIsNone(self.b.est.alignment_run_id)
+        m.update(stage='ALIGN_FINISH',alignment_stopped=True,gps_alignment=dict(offset_deg=10.,lat=33.,lon=-117.,local=[0,0,0]))
+        self.b.mission_alignment_status(NS(data=json.dumps(m)))
+        self.assertFalse(self.b.est.heading_validated)
+        self.assertIsNone(self.b.est.map.angle)
+        self.assertFalse(hasattr(self.b,'guided_alignment_run'))
+        self.b.est.heading_validated=True;self.b.est.alignment_collecting=False
+        self.b.mission_alignment_status(NS(data=json.dumps(m)))
+        self.assertFalse(hasattr(self.b,'guided_alignment_run'))
+
     def test_track_start_checks_profile_and_never_writes_parameters_or_controls(self):
         self.b.configured=lambda now:True
         self.b.est.gps_eligible=lambda now:True
@@ -95,9 +153,9 @@ class TransportTests(unittest.TestCase):
         tree = ast.parse(path.read_text())
         tree.body = [n for n in tree.body if isinstance(n, ast.ClassDef)]
         self.clock = NS(now=10.)
-        ns = dict(SteadyNode=object, math=math, json=json, String=NS, PROFILE=PROFILE,
+        ns = dict(ContinuousEstimator=ContinuousEstimator, SteadyNode=object, math=math, json=json, String=NS, PROFILE=PROFILE,
                   yaw=yaw, time=NS(monotonic=lambda: self.clock.now),
-                  statistics=statistics, BridgeEstimator=BridgeEstimator,RelativeEstimator=RelativeEstimator,TrackNorth=TrackNorth, require_maintenance=Mock(), AutomaticRecovery=AutomaticRecovery)
+                  statistics=statistics, BridgeEstimator=BridgeEstimator,RelativeEstimator=RelativeEstimator,TrackNorth=TrackNorth, require_maintenance=Mock(), navigation_start_reason=Mock(), AutomaticRecovery=AutomaticRecovery)
         exec(compile(tree, str(path), 'exec'), ns)
         self.b = ns['FusedNavBridge'].__new__(ns['FusedNavBridge'])
         self.b.est = BridgeEstimator()
@@ -223,14 +281,21 @@ class TransportTests(unittest.TestCase):
         self.b.link.odometry.assert_not_called()
         self.b.link.command.assert_not_called()
 
-    def test_prepare_rejects_unstable_pressure_or_failed_calibration(self):
-        self.b.params = {k:(10.,v) for k,v in dict(PROFILE,COMPASS_LEARN=0).items()}
-        for phase,spread in (('failed',0.),('collecting',0.),('idle',20.)):
-            self.b.vn_calibration = (10.,dict(phase=phase))
-            self.b.pressures = deque((8.+i*.1,1000.+spread*i/20) for i in range(21))
-            response = self.b.prepare(NS(data=True),NS())
-            self.assertFalse(response.success)
-            self.assertEqual(self.b.reset_counter,0)
+    def test_continuous_start_does_not_qualify_sensors(self):
+        self.b.est=ContinuousEstimator()
+        self.b.settings['surface_pressure_hpa']=0.
+        self.b.vn_calibration=(10.,dict(phase='idle'))
+        response=self.b.prepare(NS(data=True),NS())
+        self.assertTrue(response.success)
+        self.assertTrue(self.b.est.started)
+        self.assertTrue(self.b.output_permitted)
+        self.assertEqual(self.b.reset_counter,0)
+        original=self.b.est
+        self.b.est.filter.x[0]=4.5
+        self.assertTrue(self.b.prepare(NS(data=True),NS()).success)
+        self.assertIs(self.b.est,original)
+        self.assertEqual(self.b.est.filter.x[0],4.5)
+        self.assertEqual(self.b.reset_counter,0)
 
     def test_profile_never_selects_native_gps(self):
         for slot in (1, 2, 3):
@@ -239,7 +304,9 @@ class TransportTests(unittest.TestCase):
 
     def test_fast_receive_polling_does_not_flood_odometry(self):
         self.b.params = {k: (10., v) for k, v in dict(PROFILE,COMPASS_LEARN=0).items()}
-        self.b.est.status = lambda now: dict(healthy=True)
+        self.b.est=ContinuousEstimator()
+        self.b.est.imu(10.,(1.,0.,0.,0.),(0.,0.,0.))
+        self.b.est.status = lambda now: dict(healthy=True,position_ned=self.b.est.cube_position(self.b.est.position))
         self.b.tick()
         self.clock.now = 10.01
         self.b.tick()

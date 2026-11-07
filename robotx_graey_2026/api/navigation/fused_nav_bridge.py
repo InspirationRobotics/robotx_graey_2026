@@ -3,6 +3,7 @@
 Does not send GPS_INPUT, source-selection, origin-reset or vehicle-control commands.
 Readbacks gate odometry transmission; startup defaults cannot affect Cube fusion.
 """
+from .prediction_policy import new_dvl_measurement
 import json
 import math
 import time
@@ -20,11 +21,12 @@ from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.pixhawk.mavlink import Link
 from .bridge_estimator import BridgeEstimator, yaw
 from .odometry_profile import PROFILE
-from .maintenance_safety import require_maintenance
+from .maintenance_safety import require_maintenance, navigation_start_reason
 from .automatic_recovery import AutomaticRecovery
 from .land_north import LandNorth
 from .track_north import TrackNorth
 from .relative_estimator import RelativeEstimator
+from .continuous_estimator import ContinuousEstimator
 
 
 class FusedNavBridge(SteadyNode):
@@ -50,7 +52,7 @@ class FusedNavBridge(SteadyNode):
         if self.est.north_alignment is not None:
             self.est.north_alignment = TrackNorth()
         if self.settings['fixed_local_navigation']:
-            self.est=RelativeEstimator()
+            self.est=ContinuousEstimator()
         self.land_north = LandNorth()
         self.raw_gps_health=None
         self.link = Link(self.settings['mavlink'], 197, self.get_logger())
@@ -74,12 +76,7 @@ class FusedNavBridge(SteadyNode):
         self.create_subscription(String, '/graey/control_watchdog/status', self.control_status, 10)
         self.create_service(Trigger, '/graey/navigation/pause_odometry', self.pause_odometry)
         self.create_service(SetBool, '/graey/navigation/prepare', self.prepare)
-        self.create_service(Trigger, '/graey/navigation/recover_dvl', self.recover_dvl)
         self.create_service(SetParametersAtomically, '/graey/navigation/align_heading', self.align_heading)
-        self.create_service(SetParametersAtomically, '/graey/navigation/align_land', self.align_land)
-        self.create_service(Trigger, '/graey/navigation/forget_land', self.forget_land)
-        self.create_service(Trigger, '/graey/navigation/begin_motion_north', self.begin_motion_north)
-        self.create_subscription(String, '/graey/navigation/north_maneuver', self.motion_north_status, 10)
         self.create_subscription(String, '/graey/waypoint/status', self.mission_alignment_status, 10)
         if self.settings['sitl_depth_topic']:
             self.create_subscription(Float32, self.settings['sitl_depth_topic'],
@@ -147,32 +144,28 @@ class FusedNavBridge(SteadyNode):
             if not 0<=now-m.get('published_monotonic',-math.inf)<.5 or not m.get('run_id'):return
             c=self.control_state
             if (self.control_received is None or not 0<=now-self.control_received<1.
-                    or not c.get('mission_claimed') or c.get('mode')!='GUIDED' or not c.get('armed')
+                    or not c.get('mission_claimed') or c.get('mode') not in ('STABILIZE','GUIDED') or not c.get('armed')
                     or c.get('sa_active') or not c.get('esc_commanded_on')):
                 if self.est.north_alignment.active:self.est.north_alignment.stop(False)
                 return
+            if isinstance(self.est,ContinuousEstimator):
+                plan=m.get('plan') or {}
+                if 'lat' in plan and 'lon' in plan:self.est.target_gps=(plan['lat'],plan['lon'])
+                return
             plan=m.get('plan') or {}
             self.est.target_gps=(plan['lat'],plan['lon'])
-            if getattr(self,'segmented_course_run',None)!=m['run_id']:
-                self.segmented_course_run=m['run_id']
+            if getattr(self,'course_run',None)!=m['run_id']:
+                self.course_run=m['run_id']
                 self.est.pending_course_step=None
                 self.est.last_segment_correction=None
-                self.est.course_heading.reset_window('New segmented mission; collect fresh correction evidence')
-            if m.get('stage')=='TRANSIT_CHECK':
-                status=self.est.status(now)
-                v=self.est.velocity()
-                # Never turn a queued correction into a stale-motion update.
-                if (status.get('healthy') and self.est.motion_valid and self.est.fresh(self.est.motion_at,now)
-                        and len(v)==3 and math.sqrt(sum(x*x for x in v))<=.08
-                        and abs(math.degrees(self.est.rates[2]))<=3.
-                        and (status.get('gps_admission') or {}).get('qualified')):
-                    self.est.apply_segment_correction(now,(m['run_id'],m.get('segment_checks',0)))
+                self.est.course_heading.reset_window('New mission; collect continuous heading evidence')
             a=self.est.north_alignment
-            if m.get('stage')=='ALIGN_MOVE' and getattr(self,'motion_north_run',None)!=m['run_id']:
+            if m.get('stage')=='TRANSIT' and self.est.map.angle is None and getattr(self,'motion_north_run',None)!=m['run_id']:
                 self.motion_north_run=m['run_id'];a.begin()
             if getattr(self,'motion_north_run',None)!=m['run_id']:return
             self.motion_north_received=now
-            if m.get('stage')=='ALIGN_ACCEPT' and a.active and not a.approved:a.stop(True)
+            if (m.get('stage')=='TRANSIT_CHECK' and a.active and not a.approved
+                    and a.status().get('candidate_ready') and m.get('sample_check_ready') is True):a.stop(True)
             elif m.get('stage') in ('ABORTED','COMPLETE') and a.active:a.stop(False)
         except (ValueError,KeyError,TypeError):return
 
@@ -226,15 +219,18 @@ class FusedNavBridge(SteadyNode):
 
     def align_heading(self, request, response):
         try:
-            if isinstance(self.est,RelativeEstimator):
-                raise ValueError('North is learned inside the GUIDED mission; Cube local frame stays fixed')
-            require_maintenance()
-            if not self.output_permitted:
-                raise ValueError('Run Prepare before capturing north')
+            if isinstance(self.est,ContinuousEstimator):
+                require_maintenance(check=navigation_start_reason)
+            else:
+                require_maintenance()
+                if not self.output_permitted:
+                    raise ValueError('Run Prepare before capturing north')
             if (len(request.parameters)!=1 or request.parameters[0].name!='true_heading_deg'
                     or request.parameters[0].value.type!=3):
                 raise ValueError('Expected one double true_heading_deg')
             response.result.reason=self.est.align_known_heading(time.monotonic(),request.parameters[0].value.double_value)
+            if isinstance(self.est,ContinuousEstimator) and not self.output_permitted:
+                response.result.reason+='; navigation output paused until Start Navigation'
             self.get_logger().info('NORTH_REFERENCE '+json.dumps(self.est.north_alignment.status()))
             response.result.successful=True
         except (ValueError,OSError) as error:
@@ -269,22 +265,27 @@ class FusedNavBridge(SteadyNode):
 
     def prepare(self, request, response):
         try:
-            require_maintenance()
+            require_maintenance(check=navigation_start_reason)
             now = time.monotonic()
             if request.data is not True:
                 raise ValueError('Operator must confirm floating at the water surface')
-            if not self.vn_calibration or not 0 <= now-self.vn_calibration[0] < 1.5:
-                raise ValueError('Fresh VN calibration state unavailable')
-            if self.vn_calibration[1].get('phase') not in ('idle','collected'):
-                raise ValueError('VN calibration incomplete, failed or still running')
+            # Start the data path now; sensor availability is status, not a
+            # preparation qualification loop. First pressure sets the baseline.
+            if isinstance(self.est,ContinuousEstimator):
+                self.start_checked=True
+                self.output_permitted=True
+                self.est.started=True
+                rows=[r for r in self.pressures if 0<=now-r[0]<3.]
+                if self.settings['surface_pressure_hpa']<=0 and rows:
+                    self.settings['surface_pressure_hpa']=statistics.median(r[1] for r in rows)
+                response.success=True
+                response.message='Navigation started; sensor and estimator health shown live'
+                return response
             rows = [r for r in self.pressures if 0 <= now-r[0] < 3.]
-            if len(rows) < 15 or rows[-1][0]-rows[0][0] < 1.5 or now-rows[-1][0] > .35:
-                raise ValueError('Wait for at least 1.5 seconds of fresh pressure samples')
-            if not self.configured(now):
-                raise ValueError('Cube external-navigation profile unavailable or mismatched')
+            if not rows: raise ValueError('Pressure unavailable')
             base = statistics.median(r[1] for r in rows)
-            if max(r[1] for r in rows)-min(r[1] for r in rows) > 8.:
-                raise ValueError('Pressure changing too much; hold stationary at the surface and retry')
+            # Surface confirmation establishes zero; median samples tolerate wave bobbing.
+            # Do not require a motionless vehicle for local odometry preparation.
             clock, origin = self.est.gps.clock, self.est.origin
             retained_north = (self.est.north_alignment if self.est.heading_validated
                 and not self.est.heading_continuity_lost and self.est.fresh(self.est.imu_at,now) else None)
@@ -294,7 +295,7 @@ class FusedNavBridge(SteadyNode):
             self.est = BridgeEstimator(auto_north_alignment=True)
             self.est.north_alignment = TrackNorth()
             if self.settings.get('fixed_local_navigation'):
-                self.est=RelativeEstimator()
+                self.est=ContinuousEstimator()
                 retained_north=None
             if retained_north is not None:
                 self.est.north_alignment = retained_north
@@ -425,6 +426,8 @@ class FusedNavBridge(SteadyNode):
                                         received=now, cube_boot_ms=m.time_boot_ms)
             if math.isfinite(m.press_abs):
                 self.pressures.append((now, m.press_abs))
+            if isinstance(self.est,ContinuousEstimator) and self.est.started and self.settings['surface_pressure_hpa']<=0 and math.isfinite(m.press_abs):
+                self.settings['surface_pressure_hpa']=m.press_abs
             base, rho = self.settings['surface_pressure_hpa'], self.settings['water_density']
             depth = (m.press_abs-base)*100/(rho*9.80665) if base > 0 and rho > 0 else math.nan
             self.est.pressure_depth(now, depth)
@@ -453,19 +456,29 @@ class FusedNavBridge(SteadyNode):
                 and now-getattr(self,'motion_north_received',getattr(self,'motion_north_started',now))
                 > (.7 if hasattr(self,'motion_north_received') else 10.)):
             a.stop(False)
-        if self.output_permitted and self.configured(now):
+        if not isinstance(self.est,ContinuousEstimator) and self.output_permitted and self.configured(now):
             if self.auto_recovery.step(now,self.est,self.control_state,self.control_received):
                 self.reset_counter=(self.reset_counter+1)%256
                 self.last_sent=None
                 self.get_logger().warning('AUTOMATIC_DVL_RECOVERY '+self.auto_recovery.reason)
         status = self.est.status(now)
+        registered=bool(status.get('cube_origin_registered'))
+        if registered!=getattr(self,'cube_origin_registered',False):
+            self.cube_origin_registered=registered
+            self.reset_counter=(self.reset_counter+1)%256
+        heading_reset=status.get('heading_reset') or {}
+        revision=heading_reset.get('revision',0)
+        if revision!=getattr(self,'heading_reset_revision',0):
+            self.heading_reset_revision=revision
+            self.reset_counter=(self.reset_counter+1)%256
         configured = self.configured(now)
-        if self.start_checked and self.output_permitted and not self.auto_recovery.pending and configured and status['healthy'] and (self.last_sent is None or now-self.last_sent >= .05):
-            self.link.odometry(self.est.position, self.est.orientation(), self.est.velocity(),
-                               self.est.rates, reset_counter=self.reset_counter, covariance=self.est.covariance(),
+        if self.start_checked and self.output_permitted and not self.auto_recovery.pending and status['healthy'] and (isinstance(self.est,ContinuousEstimator) or new_dvl_measurement(self.est, now, getattr(self, 'last_dvl_sent', None))) and (self.last_sent is None or now-self.last_sent >= .05):
+            self.link.odometry(status['position_ned'] if isinstance(self.est,ContinuousEstimator) else self.est.position, self.est.orientation(), self.est.velocity(),
+                               self.est.rates if self.est.fresh(self.est.imu_at,now) else (0.,0.,0.), reset_counter=self.reset_counter, covariance=self.est.covariance(), velocity_covariance=self.est.velocity_covariance() if isinstance(self.est,ContinuousEstimator) else None,
                                quality=40 if status.get('dvl_continuity',{}).get('prediction_active') else 80)
             self.last_sent = now
-        status.update(instance=self.instance, fusion_policy='bridge_odometry',
+            self.last_dvl_sent = self.est.motion_at
+        status.update(guided_alignment_run=getattr(self,'guided_alignment_run',None),instance=self.instance, fusion_policy='bridge_odometry',
                       land_north_reference=self.land_north.current(now) if hasattr(self,'land_north') else None,
                       automatic_recovery=self.auto_recovery.status(now,self.control_state,self.control_received),
                       clock_mapping=dict(offset=self.est.gps.clock.offset,

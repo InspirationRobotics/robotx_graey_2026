@@ -17,7 +17,7 @@ setup(
     ] + [(os.path.join('share', package_name, folder),
           [os.path.join(folder, name) for name in files])
          for folder, _, files in os.walk('tools/vendor') if files],
-    install_requires=['setuptools'],
+    install_requires=['setuptools', 'numpy'],
     zip_safe=True,
     maintainer='Chris',
     maintainer_email='chrismartin.ee.ucsd@gmail.com',

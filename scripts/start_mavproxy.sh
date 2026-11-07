@@ -31,7 +31,7 @@ fi
 
 [ -t 1 ] || DAEMON="--daemon"           # no terminal = running as a service
 
-mavproxy.py --master=$CUBE --baudrate=115200 $DAEMON \
+python3 "$(dirname "$0")/mavproxy_mission_gate.py" --master=$CUBE --baudrate=115200 $DAEMON \
   --state-basedir=/root/robotx_ws/logs \
   $OUTS \
   --out=udpin:0.0.0.0:14551 \

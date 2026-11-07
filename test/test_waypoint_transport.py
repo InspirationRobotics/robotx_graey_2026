@@ -3,6 +3,8 @@ import math
 from pathlib import Path
 from types import SimpleNamespace as NS
 import unittest
+from robotx_graey_2026.api.navigation.prediction_policy import cube_prediction_allowed
+from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
 
 
 class WaypointTransportTest(unittest.TestCase):
@@ -10,7 +12,7 @@ class WaypointTransportTest(unittest.TestCase):
         path=Path(__file__).parents[1]/'robotx_graey_2026/api/navigation/waypoint_mission.py'
         tree=ast.parse(path.read_text())
         tree.body=[n for n in tree.body if isinstance(n,ast.ClassDef)]
-        ns=dict(Node=object,math=math)
+        ns=dict(Node=object,math=math,cube_prediction_allowed=cube_prediction_allowed,GeographicFrame=GeographicFrame)
         exec(compile(tree,str(path),'exec'),ns)
         cls=ns['WaypointMission'];node=cls.__new__(cls)
         node.sim=False;node.aborted=False;node.safety={};node.safety_time=-math.inf
@@ -26,7 +28,7 @@ class WaypointTransportTest(unittest.TestCase):
         self.assertFalse(first['fresh']);self.assertEqual(first['failure'],'')
         self.assertIn('watchdog',node.observation(6.)['failure'])
         self.assertEqual(node.observation(3.)['failure'],'')
-        node.supervisor_time=.1;node.safety_time=.1
+        node.supervisor_time=.1;node.safety_time=.1;node.bridge_time=.1
         node.safety=dict(vehicle_fresh=True,inhibit=False,sa_active=False,esc_commanded_on=True)
         self.assertTrue(node.observation(.1)['fresh'])
         node.safety['inhibit']=True
@@ -42,31 +44,22 @@ class WaypointTransportTest(unittest.TestCase):
         self.assertTrue(node.observation(.1)['navigation_hold_safe'])
         node.bridge['healthy']=False
         self.assertFalse(node.observation(.1)['navigation_hold_safe'])
-        node.bridge.update(navigation_valid=False,transmitting=False,initialized=True,enabled=True,
+        node.bridge.update(coordinate_frame='fixed_local',navigation_valid=False,transmitting=False,initialized=True,enabled=True,
             heading_continuity_lost=False,inputs={'vn':True},pressure_sample={'received':.1},
             dvl_continuity=dict(recovering=True,state='COASTING',gap_age_s=.21,
                 position_sigma_m=1.14,requires_position_revalidation=False))
         self.assertTrue(node.observation(.1)['navigation_hold_safe'])
-        node.bridge['dvl_continuity']['gap_age_s']=1.5
+        node.bridge['dvl_continuity']['gap_age_s']=15.
+        self.assertTrue(node.observation(.1)['navigation_hold_safe'])
+        node.view.position_healthy=lambda:False
         self.assertFalse(node.observation(.1)['navigation_hold_safe'])
+        node.view.position_healthy=lambda:True
         node.bridge['dvl_continuity']['gap_age_s']=.21
         node.bridge['fault']='heading fault'
         self.assertFalse(node.observation(.1)['navigation_hold_safe'])
         node.bridge['fault']=''
         node.bridge_time=.1
         node.nav_limits['WPNAV_SPEED_DN']=(.1,150.)
-        self.assertFalse(node.observation(.1)['fresh'])
-        self.assertEqual(node.observation(.1)['failure'],'')
-        node.logic.stage='DIVE'
-        self.assertIn('vertical speed',node.observation(.1)['failure'])
-        node.nav_limits={k:(.1,v) for k,v in cls.SHALLOW_LIMITS.items()}
-        self.assertTrue(node.limits_ready(.2))
-        self.assertFalse(node.limits_ready(12.2))
-        node.SHALLOW_LIMITS=dict(WP_SPD_DN=.1,WP_SPD_UP=.15,WP_ACC_Z=.5)
-        node.nav_limits={'WP_SPD_DN':(.1,.10000000149011612),
-                         'WP_SPD_UP':(.1,.15000000596046448),'WP_ACC_Z':(.1,.5)}
-        self.assertTrue(node.limits_ready(.2))
-        node.nav_limits['WP_SPD_DN']=(.1,.11)
-        self.assertFalse(node.limits_ready(.2))
+        self.assertTrue(node.observation(.1)['fresh']) # STABILIZE has no depth controller.
         node.bridge['healthy']=True;node.bridge_time=-1.
         self.assertFalse(node.observation(.1)['navigation_hold_safe'])
