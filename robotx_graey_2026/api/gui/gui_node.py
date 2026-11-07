@@ -54,8 +54,7 @@ FILES = {
     '/vendor/leaflet/leaflet.css': 'vendor/leaflet/leaflet.css',
     '/navigation': 'navigation.html',
     '/navigation-supervisor': 'navigation_supervisor.html',
-    '/': 'waypoint.html',
-    '/control': 'gui.html',
+    '/': 'gui.html',                   # the whole GUI, every tab, lives here (Ruth, Nov 7)
     '/planner': 'pool_planner.html',
     '/pool-map': 'waypoint.html',
     '/waypoint': 'waypoint.html',
@@ -391,6 +390,13 @@ async function watchdogAction(action, source) {
 watchdogPoll();
 </script>
 """
+
+VEHICLE_CONTROLS_PAGE = ('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Vehicle controls</title>'
+                         '<style>body{margin:0;font-family:Segoe UI,Arial,sans-serif;background:#14171c;color:#e8e8e8}'
+                         'button.act{background:#2d3442;color:#e8e8e8;border:1px solid #444;border-radius:6px;'
+                         'padding:5px 16px;cursor:pointer;font-size:13px}button.act:hover{border-color:#5b9bd5}'
+                         '</style></head><body>' + CONTROL_PANEL + '</body></html>')
+
 
 
 class ControlBridge:
@@ -928,6 +934,20 @@ class Handler(BaseHTTPRequestHandler):
                     spawn(['ros2', 'run', 'robotx_graey_2026', name])
 
             self.reply_json(200, {'ok': True})
+            return
+
+        if u.path == '/control':
+            # the GUI moved back to the root (Ruth, Nov 7): old /control links land there
+            self.send_response(302)
+            self.send_header('Location', '/')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+
+        if u.path == '/vehicle-controls':
+            # only the controller failsafe panel, for the waypoint page's 'Vehicle controls' box
+            # (it used to frame the whole GUI from /control)
+            self.reply(200, VEHICLE_CONTROLS_PAGE.encode('utf-8'), 'text/html')
             return
 
         fname = FILES.get(u.path)

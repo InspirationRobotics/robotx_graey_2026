@@ -11,7 +11,7 @@
   #strip .v { font-family:Consolas, monospace; }
   #strip.stale { opacity:.45; }
   #tabs { display:flex; background:#1d2129; border-bottom:1px solid #2a2f3a; }
-  #tabs { flex-wrap:wrap; }
+  #tabs { flex-wrap:wrap; position:sticky; top:0; z-index:10; }   /* always in view (Ruth, Nov 7) */
   #tabs button { background:none; border:none; color:#aab; padding:12px 18px; font-size:14px; cursor:pointer; }
   #tabs button.on { color:#e8e8e8; background:#14171c; border-bottom:2px solid #5b9bd5; }
   table { border-collapse:collapse; margin:18px; min-width:560px; }
@@ -55,7 +55,7 @@
   <button data-panel="sensors" onclick="show('sensors')">Sensors</button>
   <button data-panel="gps" onclick="show('gps')">Navigation</button>
   <button data-panel="waypoint" onclick="show('waypoint')">Waypoint mission</button>
-  <button onclick="location.href='/calibration'">Calibrate / Prepare</button>
+  <button data-panel="calibration" onclick="show('calibration')">Calibrate / Prepare</button>
   <button data-panel="supervisor" onclick="show('supervisor')">Navigation Supervisor</button>
   <button data-panel="camera" onclick="show('camera')">Camera</button>
   <button data-panel="sonar" onclick="show('sonar')">Sonar</button>
@@ -90,6 +90,9 @@
 </div>
 <div id="waypoint" class="embedded-page" style="display:none">
   <iframe title="Waypoint mission and Cube map" data-src="/waypoint"></iframe>
+</div>
+<div id="calibration" class="embedded-page" style="display:none">
+  <iframe title="Calibration and startup" data-src="/calibration"></iframe>
 </div>
 
 <div id="supervisor" class="embedded-page" style="display:none">
@@ -166,7 +169,29 @@
 </div>
 
 <script>
-var TABS = ['nodes','sensors','gps','waypoint','supervisor','camera','sonar','planner','logs','system'];
+var TABS = ['nodes','sensors','gps','waypoint','calibration','supervisor','camera','sonar','planner','logs','system'];
+// Links inside the embedded pages (Beichen's navigation, waypoint, calibration, supervisor, planner) open
+// their tab here instead of leaving this page, so the tab bar stays (Ruth, Nov 7)
+var PAGE_TAB = {'/': 'nodes', '/control': 'nodes', '/navigation': 'gps', '/waypoint': 'waypoint',
+                '/pool-map': 'waypoint', '/calibration': 'calibration', '/navigation-supervisor': 'supervisor',
+                '/planner': 'planner'};
+function hookFrameLinks(frame) {
+  try {
+    frame.contentDocument.addEventListener('click', function (e) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (!a) return;
+      var href = a.getAttribute('href') || '';
+      if (href.charAt(0) === '#') return;                       // a place on the same page
+      var url = new URL(href, frame.contentWindow.location.href);
+      if (url.origin !== location.origin || !(url.pathname in PAGE_TAB)) return;
+      e.preventDefault();
+      show(PAGE_TAB[url.pathname]);
+    }, true);
+  } catch (err) { /* not loaded yet, or not this GUI's page */ }
+}
+document.querySelectorAll('iframe[data-src]').forEach(function (f) {
+  f.addEventListener('load', function () { hookFrameLinks(f); });
+});
 var ledOff = false;                          // mirrored from /api/status
 
 // The log is only fetched while its tab is open - no point pulling 60 KB a second
@@ -224,10 +249,9 @@ function show(t){
   document.querySelectorAll('#tabs button').forEach(function(b,i){
     b.classList.toggle('on', b.dataset.panel === t);
   });
-  if (t === 'gps' || t === 'waypoint' || t === 'supervisor' || t === 'planner') {
-    var frame = document.querySelector('#' + t + ' iframe');
-    if (frame && !frame.src) frame.src = frame.dataset.src;
-  }
+  var frame = document.querySelector('#' + t + ' iframe[data-src]');   // the embedded pages load when first opened
+  if (frame && !frame.getAttribute('src')) frame.src = frame.dataset.src;
+  try { localStorage.setItem('graeyTab', t); } catch (err) {}    // back on this tab after a reload
   if (t === 'camera') camCheck();            // the stream loads once it is up (camShow)
   if (t === 'sonar') sonarCheck();
 }
@@ -441,6 +465,8 @@ document.getElementById('errOnly').onchange = refreshLog;
 refreshStatus(); setInterval(refreshStatus, 1000);
 refreshGroups(); setInterval(refreshGroups, 2000);
 setInterval(refreshLog, 2000);
+
+try { var lastTab = localStorage.getItem('graeyTab'); if (lastTab && TABS.indexOf(lastTab) >= 0) show(lastTab); } catch (err) {}
 </script>
 </body>
 </html>
