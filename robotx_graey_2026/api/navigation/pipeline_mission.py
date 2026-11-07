@@ -203,7 +203,8 @@ SETTINGS = {
                                        #   light_box_v3, daylight + dark close-ups: Oct 25 pool, box near the
                                        #   magnet 16 of 22 held-out frames, the light finder 6; Oct 22 dark
                                        #   touch, on the light 113 of 124); '' or no file = none
-    'end_model':           '/root/robotx_ws/src/robotx_graey_2026/models/pipe_end.pt',
+    'end_model':           '',         # (was models/pipe_end.pt) OFF (Ruth, Nov 7: it scored 0 on the pool's end;
+                                       #   back only when Ruth says): ends from the sonar alone
                                        # a yolo model with a pipe_end class, for the pipe's ends only (the
                                        #   lights stay on light_detector): '' = none, ends from the sonar
                                        #   (also the sonar if the file isn't there or won't load)
@@ -239,7 +240,9 @@ PARTS = {
 # the survey starts where the sonar first finds the pipe (survey_buoy 'here') - the buoys sit near the
 # pipe's ends and the sub starts at the active one; going back to the buoy end cost 2.5 min of turns in
 # the pool and backed the sonar off the pipe's end.
-FIXED = {'plan': 'pool', 'scan_mode': 'transit', 'camera_follow': True, 'pool_band': 'none',
+# Ruth, Nov 7: camera_follow OFF - the pipe finder is completely unreliable; the sonar steers, the camera only
+# counts the light boxes (box model) while following.
+FIXED = {'plan': 'pool', 'scan_mode': 'transit', 'camera_follow': False, 'pool_band': 'none',
          'pool_compact': False, 'survey_buoy': 'here', 'pool_max_pick_m': 0.0, 'follow_near_m': 0.45}
 
 # The simulator never left the surface with unchanged targets re-sent every 3 s

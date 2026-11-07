@@ -18,10 +18,11 @@ Direction vector is (cos a, sin a) in (right, up).
 """
 
 # ---------------------------------------------------------------- physics
-SPEED_OF_SOUND = 1480.0     # m/s. FRESH water - Marina Bay sits behind the
-                            # barrage and is a reservoir, not seawater. Salt
-                            # would be ~1520. Getting this wrong scales every
-                            # range you measure.
+SPEED_OF_SOUND = 1512.0     # m/s. Marina Bay, Singapore (Ruth, Nov 7, 2026: ~1512
+                            # there) - it sits behind the barrage, a reservoir,
+                            # and warm (~30 C) fresh water is ~1507-1512. Pools
+                            # and the Oct lake (cooler) used 1480. Getting this
+                            # wrong scales every range you measure.
 
 TICK = 25e-9                # sonar's sample-period clock tick, seconds
 MAX_SAMPLES = 1000          # hardware cap on range bins per ping
