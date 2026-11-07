@@ -308,6 +308,9 @@ SLOW_ZONE_M = 0.05      #   target never more than FINAL_LEAD_M under where the 
 TOUCH_S = 2.0           # ... on the box: the target that far ahead and the sub not this much deeper for this long
 TOUCH_MOVE_M = 0.005
 PAST_BOX_M = 0.15       # ... no touch with the magnet this far under the box's guessed top: stop going down
+RETRY_STUCK_S = 10.0    # lift and retry (Ruth, Nov 7): going down, the depth held this long (the LED off the magnet) ...
+RETRY_UP_M = 0.15       # ... or no GREEN on the box: up at least this far (and to centre_shift_m above the box), the
+                        #   camera over it again, the magnet over it again, down again - repair_tries times
 NUDGE_S = 2.0           # option B (Ruth, Oct 30): Graey's position hold leaves 1.5-2 cm level, 3-5 cm going down
 NUDGE_MIN_M = 0.01      #   (Oct 30 pool, the tlog: 20 s still, 3-5 cm off its target). The sub this far from where
 NUDGE_GAIN_M = 0.005    #   it should be and not this much closer each NUDGE_S: the target put further out that way,
@@ -715,7 +718,8 @@ class PipelineMission(MissionBase):
         p('centre_near_m', 0.1)             # ... centre_speed_near this far or closer, a straight line between
         p('centre_speed_near', 0.01)        # (0.5 m 8 cm/s, 0.25 m 3.6, 0.15 m 1.9, 0.05 m 1.0)
         p('final_rate_mps', 0.01)           # after the last level: down this fast, never pushing harder ...
-        p('final_s', 7.0)                   # ... for this long; no GREEN by then: surface anyway
+        p('final_s', 7.0)                   # ... for this long; no GREEN by then: lift and try again ...
+        p('repair_tries', 3)                # ... this many more times (Ruth, Nov 7); then surface anyway
         p('box_width_m', 0.12)              # the light box across (Ruth, Oct 29): its width in the picture gives
                                             # its distance from the camera
         p('light_above_floor_m', 0.45)      # start_with:=centre only (no sonar pipe point): the box's top above the
@@ -866,6 +870,7 @@ class PipelineMission(MissionBase):
         self.centre_far, self.centre_v_far = float(g('centre_far_m')), float(g('centre_speed_far'))
         self.centre_near, self.centre_v_near = float(g('centre_near_m')), float(g('centre_speed_near'))
         self.final_rate, self.final_s = float(g('final_rate_mps')), float(g('final_s'))
+        self.repair_tries = int(g('repair_tries'))
         self.box_width, self.boxes_total = float(g('box_width_m')), int(g('boxes_total'))
         self.light_above_floor = float(g('light_above_floor_m'))
         self.cam_f = float(g('cam_f_px'))
@@ -3510,6 +3515,9 @@ class PipelineMission(MissionBase):
         self.c_cam_off = None                           # (t, north, east): the LED from the magnet, the camera's newest
         self.c_react = {'t': None, 'o': None}           # ... and that offset REACT_S ago
         self.c_paused = False                           # going down: the LED off the magnet or not seen, the depth held
+        self.c_pause_t = None                           # ... since when
+        self.c_tries = 0                                # lift-and-retries done (Ruth, Nov 7)
+        self.c_touch_z = None                           # ... the Cube z of the last real touch (sets the box's top)
         self.c_touch = None                             # (time, Cube z) the sub stopped following down: touching?
         self.c_hold_z = None                            # on the box: the Cube z it holds there
         self.c_nudge = {'t': self.now(), 'gap': None, 'boost': 1.0, 'dir': None}   # option B
@@ -3705,7 +3713,11 @@ class PipelineMission(MissionBase):
         levels = self.centre_levels
         if self.c_final_t is not None:
             if now - self.c_final_t >= self.final_s:
-                self.centre_end(f'no GREEN after {self.final_s:.0f} s of the final descent')
+                if self.c_tries < self.repair_tries:
+                    self.centre_retry(f'no GREEN after {self.final_s:.0f} s on the box', z)
+                else:
+                    self.centre_end(f'no GREEN after {self.final_s:.0f} s of the final descent'
+                                    + (f', {self.c_tries} retries' if self.c_tries else ''))
                 return
             if self.c_hold_z is not None:
                 # on the box (or as far down as it goes): the depth held there, no more pushing - pushing on the
@@ -3727,15 +3739,17 @@ class PipelineMission(MissionBase):
                 self.c_down = min(self.c_down + v * dt, z + FINAL_LEAD_M)
             speed = self.centre_speed_at(0.0)
             if self.c_down - z >= FINAL_LEAD_M - 0.005:
-                if self.c_touch is None:
+                # TOUCH_S with the sub less than TOUCH_MOVE_M deeper: the clock starts again while it still goes down
+                # (Nov 7 toy: started once up high, a sub lagging its target all the way down never 'touched')
+                if self.c_touch is None or z - self.c_touch[1] >= TOUCH_MOVE_M:
                     self.c_touch = (now, z)
-                elif now - self.c_touch[0] >= TOUCH_S and z - self.c_touch[1] < TOUCH_MOVE_M:
+                elif now - self.c_touch[0] >= TOUCH_S:
                     guess = f', {(z - contact) * 100:+.0f} cm from the guess ({self.c_box_src})' if contact is not None else ''
                     msg = (f'centre: on the box (stopped going down at {self.below_surface(z):.2f} m{guess}) - holding '
                            f'there, waiting up to {self.final_s:.0f} s for GREEN')
                     self.get_logger().info('    ' + msg)
                     self.mark(msg)
-                    self.c_final_t, self.c_hold_z = now, z
+                    self.c_final_t, self.c_hold_z, self.c_touch_z = now, z, z
             else:
                 self.c_touch = None
             if self.c_final_t is None and contact is not None and z > contact + PAST_BOX_M:
@@ -3804,8 +3818,16 @@ class PipelineMission(MissionBase):
             elif self.c_final_t is None:
                 # going down: the depth held where it was going (not where the sub is, so a touch still shows) while
                 # the LED is off the magnet or not seen; on down once the camera sees it within CAM_HOLD_M
+                if self.c_paused and now - self.c_pause_t >= RETRY_STUCK_S:
+                    if self.c_tries < self.repair_tries:
+                        self.centre_retry(f'{led} - the depth held {RETRY_STUCK_S:.0f} s going down', z)
+                        return
+                    self.get_logger().warn(f'    centre: {led}, the depth held {RETRY_STUCK_S:.0f} s, no tries left - '
+                                           f'holding here, waiting up to {self.final_s:.0f} s for GREEN')
+                    self.c_final_t, self.c_hold_z = now, z
+                    return
                 if not self.c_paused and (off is None or off > CAM_HOLD_M):
-                    self.c_paused = True
+                    self.c_paused, self.c_pause_t = True, now
                     self.get_logger().warn(f'    centre: {led} (camera) - holding the depth until it sees the LED within '
                                            f'{CAM_HOLD_M * 100:.1f} cm')
                 elif self.c_paused and off is not None and off <= CAM_HOLD_M:
@@ -3984,6 +4006,38 @@ class PipelineMission(MissionBase):
             elif self.c_box is not None:
                 self.c_box = tuple(np.median(np.array(self.c_good), axis=0))
         return spot
+
+    def centre_retry(self, why, z):
+        """Lift and retry (Ruth, Nov 7 - the Nov 1 footage: lined up within 1 cm, the magnet even inside the ring, then
+        the ring slid 4-5 cm off in 1.5-2 s in the last few cm, and the sub never came back; and no GREEN on the box):
+        the box's top set from the touch if there was one (the guess was 7-16 cm out on Nov 1), up at least
+        RETRY_UP_M and to centre_shift_m above the box, the camera over the box again (centred anew), the magnet over
+        it again, down again - like the first time."""
+        self.c_tries += 1
+        if self.c_touch_z is not None:
+            old, self.c_box_sonar, self.c_box_src = self.c_box_sonar, self.c_touch_z + MAGNET_BELOW_M, 'touch'
+            if old is not None:
+                why += f'; the box top from the touch, {(self.c_box_sonar - old) * 100:+.0f} cm from the guess'
+        elif self.c_hold_z is not None and self.c_box_sonar is not None and \
+                self.c_hold_z + MAGNET_BELOW_M > self.c_box_sonar:
+            # stopped PAST_BOX_M under the guess without a touch: the box is deeper than that (a guess 16 cm out
+            # never let the magnet reach it, Nov 7 toy) - the next try goes PAST_BOX_M further
+            old, self.c_box_sonar = self.c_box_sonar, self.c_hold_z + MAGNET_BELOW_M
+            self.c_box_src = 'under the last stop'
+            why += f'; no touch there, so the box taken {(self.c_box_sonar - old) * 100:+.0f} cm deeper'
+        bz, _ = self.box_z()
+        self.c_level = next(k for k, L in enumerate(self.centre_levels) if abs(L - self.centre_shift) < 1e-6)
+        self.c_shift_goal = self.c_shift_base = self.c_cam_off = None
+        self.c_shifted, self.c_paused, self.c_pause_t, self.c_touch, self.c_cam_errs = False, False, None, None, []
+        self.c_final_t = self.c_hold_z = self.c_touch_z = None
+        self.c_centred = False                          # the camera over the box again before going down to the level
+        up = z - RETRY_UP_M
+        self.c_down = min(up, bz - MAGNET_BELOW_M - self.centre_shift) if bz is not None else up
+        msg = (f'repair: {why} - try {self.c_tries + 1} of {self.repair_tries + 1}: up to '
+               f'{self.below_surface(self.c_down):.2f} m, the camera over the box again, then the magnet')
+        self.get_logger().warn('    ' + msg)
+        self.mark(msg)
+        self.box_mode('centre', 'centring the box again for the next try')
 
     def box_lost(self, why=None, depth='the depth held'):
         """Lost LOST_GO_S: back to the box's place (its last good sighting before it has one; where centring was
