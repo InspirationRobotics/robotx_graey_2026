@@ -101,7 +101,7 @@ class MissionBase(Node):
         self.rc_high = g('rc_high').value
         self.read_extra_parameters()
 
-        self.link = Link(g('mavlink').value, component, self.get_logger())
+        self.link = Link(g('mavlink').value, component, self.get_logger(), node=self)
         self.get_logger().info(f'dry_run={self.dry} rc_start={self.rc_wait}')
 
         # A switch already up when we start must not count. Both channels have to be

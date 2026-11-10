@@ -9,6 +9,7 @@ from robotx_graey_2026.api.navigation.continuous_estimator import ContinuousEsti
 from pathlib import Path
 from types import SimpleNamespace as NS
 import unittest
+from robotx_graey_2026.api.navigation.prepare_recovery import recover_ingress
 from unittest.mock import Mock
 
 from robotx_graey_2026.api.navigation.bridge_estimator import BridgeEstimator, yaw
@@ -153,8 +154,8 @@ class TransportTests(unittest.TestCase):
         tree = ast.parse(path.read_text())
         tree.body = [n for n in tree.body if isinstance(n, ast.ClassDef)]
         self.clock = NS(now=10.)
-        ns = dict(ContinuousEstimator=ContinuousEstimator, SteadyNode=object, math=math, json=json, String=NS, PROFILE=PROFILE,
-                  yaw=yaw, time=NS(monotonic=lambda: self.clock.now),
+        ns = dict(recover_ingress=recover_ingress, ContinuousEstimator=ContinuousEstimator, SteadyNode=object, math=math, json=json, String=NS, PROFILE=PROFILE,
+                  yaw=yaw, time=NS(monotonic=lambda: self.clock.now, monotonic_ns=lambda: int(self.clock.now*1e9)),
                   statistics=statistics, BridgeEstimator=BridgeEstimator,RelativeEstimator=RelativeEstimator,TrackNorth=TrackNorth, require_maintenance=Mock(), navigation_start_reason=Mock(), AutomaticRecovery=AutomaticRecovery)
         exec(compile(tree, str(path), 'exec'), ns)
         self.b = ns['FusedNavBridge'].__new__(ns['FusedNavBridge'])
@@ -163,6 +164,7 @@ class TransportTests(unittest.TestCase):
         self.b.control_state={}
         self.b.control_received=None
         self.b.stamps, self.b.params = {}, {}
+        self.b.ingress_rejections, self.b.prepare_recovery = {}, {}
         self.b.boot_ms = self.b.last_sent = None
         self.b.start_checked = True
         self.b.output_permitted = True
@@ -296,6 +298,54 @@ class TransportTests(unittest.TestCase):
         self.assertIs(self.b.est,original)
         self.assertEqual(self.b.est.filter.x[0],4.5)
         self.assertEqual(self.b.reset_counter,0)
+
+    def test_prepare_recovers_regressed_dvl_without_resetting_estimator(self):
+        self.b.est=ContinuousEstimator()
+        self.b.est.filter.x[0]=4.5
+        self.b.est.yaw_offset_deg=37.
+        self.b.stamps['dvl_sensor']=1000
+        def sample(stamp):
+            return NS(data=json.dumps(dict(stamp_ns=int(self.clock.now*1e9),
+                sensor_time=stamp,velocity=[.1,0.,0.],valid=True)))
+        self.b.dvl(sample(2))
+        self.assertIn('dvl_sensor',self.b.ingress_rejections)
+        estimator=self.b.est
+        response=self.b.prepare(NS(data=True),NS())
+        self.assertTrue(response.success,response.message)
+        self.assertIn('dvl_sensor',self.b.prepare_recovery['recovered'])
+        self.clock.now+=.1
+        self.b.dvl(sample(3))
+        self.assertEqual(self.b.stamps['dvl_sensor'],3)
+        self.assertIs(self.b.est,estimator)
+        self.assertEqual(self.b.est.yaw_offset_deg,37.)
+        self.assertEqual(self.b.settings['surface_pressure_hpa'],1000.)
+
+    def test_prepare_recovers_cube_epoch_but_not_unrelated_fault(self):
+        self.b.est=ContinuousEstimator()
+        self.b.est.fault='Cube restarted; revalidate navigation frame'
+        self.b.est.gps.fault='Cube GPS clock regressed; restart and revalidate'
+        self.b.est.gps.last_fix=999999
+        self.b.stamps['pressure']=99999
+        self.assertTrue(self.b.prepare(NS(data=True),NS()).success)
+        self.assertEqual(self.b.est.fault,'')
+        self.assertIsNone(self.b.est.gps.last_fix)
+        self.assertIsNone(self.b.est.gps.clock.offset)
+        self.assertNotIn('pressure',self.b.stamps)
+        self.b.est.fault='unrelated fault'
+        self.b.prepare(NS(data=True),NS())
+        self.assertEqual(self.b.est.fault,'unrelated fault')
+
+    def test_prepare_does_not_erase_gps_quality_or_stale_rejections(self):
+        self.b.est=ContinuousEstimator()
+        quality=self.b.est.gps.quality
+        self.b.est.gps.reason='GPS jump rejected'
+        self.b.stamps['imu']=100
+        self.b.ingress_rejections['imu']=1.
+        self.b.prepare(NS(data=True),NS())
+        self.assertEqual(self.b.prepare_recovery['recovered'],[])
+        self.assertEqual(self.b.stamps['imu'],100)
+        self.assertIs(self.b.est.gps.quality,quality)
+        self.assertEqual(self.b.est.gps.reason,'GPS jump rejected')
 
     def test_profile_never_selects_native_gps(self):
         for slot in (1, 2, 3):

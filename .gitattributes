@@ -1,1 +1,14 @@
-*.sh text eol=lf
+# Preserve inspected upstream files byte-for-byte, including line endings.
+robotx_graey_2026/api/gui/laptop/gcs_app.py -text
+robotx_graey_2026/api/gui/laptop/page.html -text
+robotx_graey_2026/api/gui/laptop/map.js -text
+robotx_graey_2026/api/gui/laptop/editor.js -text
+robotx_graey_2026/api/gui/gcs_wire.py -text
+robotx_graey_2026/api/gui/mission_xml.py -text
+robotx_graey_2026/api/gui/param_client.py -text
+robotx_graey_2026/api/gui/recorder.py -text
+robotx_graey_2026/api/gui/crusader_system_info.py -text
+robotx_graey_2026/api/gui/log_buffer.py -text
+robotx_graey_2026/api/gui/laptop/crusader_theme.css -text
+*.cmd text eol=crlf
+docs/competition-ocs.patch -whitespace

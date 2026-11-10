@@ -12,10 +12,14 @@ from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.gui.navigation_view import NavigationView
 from robotx_graey_2026.api.navigation.waypoint_logic import WaypointRun
 from robotx_graey_2026.api.navigation.guided_surface_mission import GuidedSurfaceRun
+from robotx_graey_2026.api.navigation.simple_sequence import SimpleSequenceRun
+from robotx_graey_2026.api.navigation.competition_route import CompetitionRouteRun
+from robotx_graey_2026.api.navigation.pipeline_recording import PipelineRecording
 from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
 from robotx_graey_2026.api.navigation.surface_measurement import SurfaceMeasurement
 from robotx_graey_2026.api.navigation.surface_control import surface_velocity,SurfaceLeg,gentle_horizontal,StabilizeSurfaceControl
 from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL, MODE_STABILIZE
+from robotx_graey_2026.api.comms.run_gate import RunGate
 
 
 class WaypointMission(Node):
@@ -40,10 +44,16 @@ class WaypointMission(Node):
         if not cfg['run_id'] or (not self.sim and not cfg['commissioned']):
             raise ValueError('Mission run ID and commissioned live configuration required')
         plan=json.loads(cfg['plan_json'])
+        if type(plan.get('competition',False)) is not bool:
+            raise ValueError('competition must be boolean')
+        self.run_gate=RunGate(plan.get('competition',False))
+        self.competition_hold=None
         if plan.get('mode','surface')!='surface':raise ValueError('Only surface missions are supported')
-        self.logic = GuidedSurfaceRun(plan,cfg['run_id'],time.monotonic())
+        self.logic = (SimpleSequenceRun if plan.get('kind') == 'simple_sequence' else CompetitionRouteRun if 'points' in plan else GuidedSurfaceRun)(plan,cfg['run_id'],time.monotonic())
         self.result_file = cfg['result_file']
-        self.link = Link(cfg['mavlink'], 198, self.get_logger(),system=255 if isinstance(self.logic,GuidedSurfaceRun) else 1)
+        self.recorder = (PipelineRecording(Path(self.result_file).parent if self.result_file else Path.home()/'robotx_ws/logs', cfg['run_id'])
+                         if isinstance(self.logic, CompetitionRouteRun) and not self.sim and plan.get('recording_mode','automatic')=='automatic' else None)
+        self.link = Link(cfg['mavlink'], 198, self.get_logger(),system=255 if isinstance(self.logic,GuidedSurfaceRun) else 1, node=None if self.sim else self)
         self.view = NavigationView()
         self.supervisor, self.safety = {}, {}
         self.bridge = {}
@@ -65,17 +75,23 @@ class WaypointMission(Node):
         self.surface_measurement_status={}
         self.fc_status_text = []
         self.pub = self.create_publisher(String, '/graey/waypoint/status', 10)
+        self.task_pub=self.create_publisher(String,'/graey/comms/current_task',10)
         self.intent_pub = self.create_publisher(String, '/graey/navigation/intent', 10)
         self.auto_pub = self.create_publisher(Bool, '/graey/autonomy_active', 10)
         self.create_subscription(String, '/graey/navigation/status', self.on_status, 10)
         self.create_subscription(String, '/graey/navigation/bridge_status', self.on_bridge, 10)
         self.create_subscription(String, '/graey/control_watchdog/status', self.on_safety, 10)
         self.create_subscription(String, '/graey/waypoint/abort', self.on_abort, 10)
+        self.create_subscription(String,'/graey/comms/status',self.on_competition_status,10)
         self.create_timer(.02, self.pump)
         self.create_timer(.1, self.tick)
         self.create_timer(1., self.link.heartbeat)
         self.create_timer(5., self.request)
         self.request()
+
+    def on_competition_status(self,msg):
+        try:self.run_gate.update(json.loads(msg.data),time.monotonic())
+        except (ValueError,TypeError):pass
 
     def request(self):
         for mid in (24, 30, 32, 33, 49, 193):
@@ -92,6 +108,8 @@ class WaypointMission(Node):
         return True
 
     def destroy_node(self):
+        if getattr(self, 'recorder', None) is not None:
+            self.recorder.close()
         self.release_surface_controls()
         return super().destroy_node()
 
@@ -188,7 +206,7 @@ class WaypointMission(Node):
         s = self.supervisor  # display only
         b=getattr(self,'bridge',{})
         ned, velocity = local.get('ned'), local.get('velocity')
-        depth=b.get('depth_m') if b.get('depth_m') is not None else 0.
+        depth=b.get('depth_m')
         fresh=bool(hb and local and att and ned and velocity
             and all(isinstance(v,(int,float)) and math.isfinite(v)
                     for v in (*ned,*velocity,*att.get('rpy',[None])))
@@ -259,6 +277,39 @@ class WaypointMission(Node):
             self.intent_pub.publish(String(data=json.dumps(dict(run_id=self.logic.run_id,
                 phase=self.logic.phase, sequence=self.sequence, target_gps=self.logic.plan))))
         o = self.observation(now)
+        gate=getattr(self,'run_gate',None)
+        if hasattr(self,'task_pub'):
+            self.task_pub.publish(String(data='TASK_INFRA_SURVEY_REPAIR' if gate is not None and gate.competition
+                and self.logic.stage not in self.logic.terminal else 'TASK_NONE'))
+        if gate is not None and gate.competition:
+            if gate.revoked:self.logic.abort(now,'Competition run ended or changed')
+            ready=bool(o.get('fresh') and o.get('armed') and o.get('mode')==MODE_GUIDED and not o.get('failure'))
+            if not gate.admit(now,ready) and self.logic.stage not in self.logic.terminal:
+                if self.logic.stage not in ('WAIT_SURFACE','GUIDED','ARM'):
+                    self.logic.abort(now,'Competition admission lost')
+                elif o.get('armed'):
+                    if not ready:self.logic.abort(now,'Competition hold readiness lost')
+                    else:
+                        if self.competition_hold is None:self.competition_hold=tuple(o['local'])
+                        self.send_guided_waypoint(self.competition_hold)
+                        status=self.logic.snapshot()
+                        status.update(stage='WAIT_RUN_START',reason='Autonomous hold; waiting for verified RoboCommand RunStart',competition=True,competition_ready=True,competition_run_id=None)
+                        self.auto_pub.publish(Bool(data=True))
+                        self.pub.publish(String(data=json.dumps(status,allow_nan=False)))
+                        return
+        if isinstance(self.logic, CompetitionRouteRun):
+            desired = self.logic.recording_requested and self.logic.stage not in self.logic.terminal
+            o['recording'] = (self.recorder.update(desired) if self.recorder else
+                              dict(ready=True, reason='Operator-controlled recording; see Record page', operator_controlled=True)
+                              if self.logic.route.get('recording_mode')=='manual' else
+                              dict(ready=True, reason='SIMULATION: recording stub; no hardware recording', simulated=True))
+            if self.sim and os.environ.get('GRAEY_SITL_RECORDING_FAILURE') == '1':
+                o['recording'] = dict(ready=False, reason='SIMULATION: injected recorder failure', simulated=True)
+            recording_key = (desired, o['recording'].get('ready'), o['recording'].get('reason'))
+            if recording_key != getattr(self, '_last_recording_state', None):
+                self._last_recording_state = recording_key
+                self.get_logger().warning('PIPELINE_RECORDING '+json.dumps(dict(
+                    run_id=self.logic.run_id, stage=self.logic.stage, monotonic=now, **o['recording'])))
         if not isinstance(self.logic,GuidedSurfaceRun) and self.logic.stage=='CHECK_SURFACE' and getattr(self,'measurement_stage',None)!='CHECK_SURFACE':
             self.surface_measurement=SurfaceMeasurement(duration=5.,tolerated_gps_gap=4.,tolerated_sensor_gap=1.5)
         self.measurement_stage=self.logic.stage
@@ -340,6 +391,9 @@ class WaypointMission(Node):
                 self.gps_enabled = enabled
                 self.link.send('param_set_send', 1, 1, b'SIM_GPS_DISABLE', float(not enabled), 9)
         status = self.logic.snapshot()
+        status.update(competition=bool(gate and gate.competition),competition_run_id=gate.run_id if gate is not None else None)
+        if isinstance(self.logic, CompetitionRouteRun):
+            status['recording'] = o['recording']
         paused=status['navigation_pause']['active']
         if paused!=self.last_pause:
             self.last_pause=paused

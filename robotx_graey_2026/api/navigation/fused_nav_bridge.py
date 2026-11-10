@@ -4,6 +4,8 @@ Does not send GPS_INPUT, source-selection, origin-reset or vehicle-control comma
 Readbacks gate odometry transmission; startup defaults cannot affect Cube fusion.
 """
 from .prediction_policy import new_dvl_measurement
+from robotx_graey_2026.api.runtime_parameters import result,water_density
+from .prepare_recovery import recover_ingress
 import json
 import math
 import time
@@ -41,7 +43,7 @@ class FusedNavBridge(SteadyNode):
                         require_disarmed_start=False,
                         heading_reference_validated=False)
         for name, value in defaults.items():
-            self.declare_parameter(name, value, ParameterDescriptor(read_only=True))
+            self.declare_parameter(name,value,ParameterDescriptor(read_only=name!='water_density',description='Live water density requires paused odometry and disarmed maintenance' if name=='water_density' else 'Startup frame/ownership configuration; restart required'))
         self.settings = {k: self.get_parameter(k).value for k in defaults}
         if self.settings['pressure_message'] not in ('SCALED_PRESSURE','SCALED_PRESSURE2','SCALED_PRESSURE3'):
             raise ValueError('Select a verified MAVLink pressure sensor message')
@@ -55,9 +57,11 @@ class FusedNavBridge(SteadyNode):
             self.est=ContinuousEstimator()
         self.land_north = LandNorth()
         self.raw_gps_health=None
-        self.link = Link(self.settings['mavlink'], 197, self.get_logger())
+        self.link = Link(self.settings['mavlink'], 197, self.get_logger(), node=self)
         self.instance = str(uuid.uuid4())
         self.stamps, self.params = {}, {}
+        self.ingress_rejections = {}
+        self.prepare_recovery = {}
         self.last_sent = None
         self.boot_ms = None
         self.start_checked = not self.settings['require_disarmed_start']
@@ -68,6 +72,7 @@ class FusedNavBridge(SteadyNode):
         self.auto_recovery=AutomaticRecovery()
         self.control_state={}
         self.control_received=None
+        self.add_on_set_parameters_callback(lambda p:result(lambda q:water_density(self,q,time.monotonic()),p))
         self.pressure_sample = None
         self.pub = self.create_publisher(String, '/graey/navigation/bridge_status', 10)
         self.create_subscription(Imu, '/graey/vn100/imu', self.imu, 20)
@@ -272,6 +277,8 @@ class FusedNavBridge(SteadyNode):
             # Start the data path now; sensor availability is status, not a
             # preparation qualification loop. First pressure sets the baseline.
             if isinstance(self.est,ContinuousEstimator):
+                self.prepare_recovery = recover_ingress(self, now)
+                self.request()
                 self.start_checked=True
                 self.output_permitted=True
                 self.est.started=True
@@ -279,7 +286,7 @@ class FusedNavBridge(SteadyNode):
                 if self.settings['surface_pressure_hpa']<=0 and rows:
                     self.settings['surface_pressure_hpa']=statistics.median(r[1] for r in rows)
                 response.success=True
-                response.message='Navigation started; sensor and estimator health shown live'
+                response.message='Navigation started; '+self.prepare_recovery['message']
                 return response
             rows = [r for r in self.pressures if 0 <= now-r[0] < 3.]
             if not rows: raise ValueError('Pressure unavailable')
@@ -326,7 +333,10 @@ class FusedNavBridge(SteadyNode):
 
     def advancing(self, key, stamp):
         if stamp <= 0 or stamp <= self.stamps.get(key, -1):
+            if stamp > 0 and stamp < self.stamps.get(key, -1):
+                self.ingress_rejections[key] = time.monotonic()
             return False
+        self.ingress_rejections.pop(key, None)
         self.stamps[key] = stamp
         return True
 
@@ -358,7 +368,10 @@ class FusedNavBridge(SteadyNode):
                 return
             sensor = d.get('sensor_time')
             if sensor is not None and sensor <= self.stamps.get('dvl_sensor', -math.inf):
+                if sensor < self.stamps.get('dvl_sensor', -math.inf):
+                    self.ingress_rejections['dvl_sensor'] = time.monotonic()
                 return
+            self.ingress_rejections.pop('dvl_sensor', None)
             if sensor is not None:
                 self.stamps['dvl_sensor'] = sensor
             self.est.dvl(time.monotonic(), tuple(float(v) for v in d['velocity']), d['valid'] is True)
@@ -478,7 +491,7 @@ class FusedNavBridge(SteadyNode):
                                quality=40 if status.get('dvl_continuity',{}).get('prediction_active') else 80)
             self.last_sent = now
             self.last_dvl_sent = self.est.motion_at
-        status.update(guided_alignment_run=getattr(self,'guided_alignment_run',None),instance=self.instance, fusion_policy='bridge_odometry',
+        status.update(prepare_recovery=self.prepare_recovery, ingress_rejections=dict(self.ingress_rejections), guided_alignment_run=getattr(self,'guided_alignment_run',None),instance=self.instance, fusion_policy='bridge_odometry',
                       land_north_reference=self.land_north.current(now) if hasattr(self,'land_north') else None,
                       automatic_recovery=self.auto_recovery.status(now,self.control_state,self.control_received),
                       clock_mapping=dict(offset=self.est.gps.clock.offset,

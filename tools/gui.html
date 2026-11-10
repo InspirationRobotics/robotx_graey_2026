@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>Graey Control</title>
+<title>GRAEY ground station</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
   body { margin:0; font-family: Segoe UI, Arial, sans-serif; background:#14171c; color:#e8e8e8; }
   #strip { display:flex; align-items:center; gap:26px; padding:10px 18px;
@@ -36,11 +36,11 @@
             border-radius:6px; padding:10px; font-family:Consolas, monospace;
             font-size:12px; height:calc(100vh - 220px); overflow:auto;
             white-space:pre-wrap; }
-</style>
+</style><link rel="stylesheet" href="/station.css"><script>try{document.documentElement.dataset.theme=localStorage.getItem("graeyTheme")||"dark"}catch(e){}</script>
 </head>
 <body>
 
-<div id="strip">
+<div class="station-brand"><img src="/ti_logo.jpg" alt="Team Inspiration"><img src="/asta_logo.png" alt="ASTA"><strong>GRAEY</strong><span>Operator ground station</span></div><div id="strip"><span id="statusFreshness" role="status">Telemetry unknown</span>
   <span><span class="k">STATUS</span><span class="dot down" id="sLed"></span><span class="v" id="sLedTxt">--</span></span>
   <span><span class="k">ARM</span><span class="v" id="sArm">--</span></span>
   <span><span class="k">MODE</span><span class="v" id="sMode">--</span></span>
@@ -50,21 +50,23 @@
   <span id="sMission" style="display:none;color:#ffb74d" class="v">MISSION RUNNING</span>
 </div>
 
-<div id="tabs">
+<div id="tabs"><button data-panel="overview" onclick="show('overview')">Overview</button><button data-panel="communications" onclick="show('communications')">Communications</button><button onclick="toggleTheme()" aria-label="Toggle day and night theme">Day / night</button>
+
   <button data-panel="nodes" class="on" onclick="show('nodes')">Nodes</button>
   <button data-panel="sensors" onclick="show('sensors')">Sensors</button>
-  <button data-panel="gps" onclick="show('gps')">Navigation</button>
-  <button data-panel="waypoint" onclick="show('waypoint')">Waypoint mission</button>
+
+  <button data-panel="waypoint" onclick="show('waypoint')">Missions</button>
   <button data-panel="calibration" onclick="show('calibration')">Calibrate / Prepare</button>
   <button data-panel="supervisor" onclick="show('supervisor')">Navigation Supervisor</button>
-  <button data-panel="camera" onclick="show('camera')">Camera</button>
-  <button data-panel="sonar" onclick="show('sonar')">Sonar</button>
+
+
   
+  <button data-panel="record" onclick="show('record')">Record</button>
   <button data-panel="logs" onclick="show('logs')">Logs</button>
   <button data-panel="system" onclick="show('system')">System</button>
 </div>
 
-<div id="nodes">
+<section id="overview" style="display:none"><div class="station-grid"><article class="station-card"><h2>GRAEY WiFi to OCS</h2><strong id="overviewConnection">Unknown</strong><p id="overviewFreshness">Waiting for communications node</p></article><article class="station-card"><h2>Competition run</h2><strong id="overviewRun">Unknown</strong><p>Declaration is managed centrally in OCS.</p></article><article class="station-card"><h2>Report delivery</h2><strong id="overviewReports">Unknown</strong><p>Broker receipt confirms delivery to the broker.</p></article></div><p class="note">Use Missions to plot the course route, select Waypoints, Pipeline Survey or 5–2–5, and manage the shared OCS run. Sensors shows numerical and visual measurements; Record controls acquisition. Competition routes hold autonomously until verified RoboCommand RunStart. Local training is independent.</p></section><section id="communications" style="display:none"><table><thead><tr><th>Connection or report</th><th>State</th><th>Details</th></tr></thead><tbody id="communicationsRows"></tbody></table><h2 style="margin:18px">Report outbox and receipts</h2><table><thead><tr><th>Observation</th><th>Run</th><th>Report</th><th>Receipt</th></tr></thead><tbody id="outboxRows"></tbody></table><p class="note">RF and tether observations come from the control watchdog. WiFi reporting does not change the selected failsafe or restore ESC power. GRAEY RFD reporting is deferred. Unknown means no fresh evidence.</p></section><div id="nodes">
   <table>
     <thead><tr><th>Stack</th><th>State</th><th></th></tr></thead>
     <tbody id="rows"></tbody>
@@ -75,7 +77,7 @@
   restarted.</div>
 </div>
 
-<div id="sensors" style="display:none">
+<div id="sensors" style="display:none"><iframe title="Numerical and visual sensor dashboard" data-src="/sensors" style="height:1000px"></iframe><div id="sensorMedia"></div><details><summary>Quick sensor status</summary>
   <table>
     <thead><tr><th>Sensor</th><th>Reading</th><th>Last update</th></tr></thead>
     <tbody id="srows"></tbody>
@@ -83,14 +85,16 @@
   <div class="note">"Last update" is seconds since that source was last heard from.
   A dash means it has never reported since the GUI started &mdash; check the matching
   stack on the Nodes tab.</div>
-</div>
+</details></div>
 
 <div id="gps" class="embedded-page" style="display:none">
   <iframe title="GPS and vehicle pose map" data-src="/navigation"></iframe>
 </div>
+<div id="simple" class="embedded-page" style="display:none"><iframe title="5–2–5 test" data-src="/simple-sequence"></iframe></div>
 <div id="waypoint" class="embedded-page" style="display:none">
-  <iframe title="Waypoint mission and Cube map" data-src="/waypoint"></iframe>
+  <iframe title="Unified missions and course map" data-src="/missions"></iframe>
 </div>
+<div id="record" class="embedded-page" style="display:none"><iframe title="Sensor camera and sonar recording" data-src="/record"></iframe></div>
 <div id="calibration" class="embedded-page" style="display:none">
   <iframe title="Calibration and startup" data-src="/calibration"></iframe>
 </div>
@@ -101,10 +105,9 @@
 
 <div id="camera" style="display:none">
   <div class="sub" style="padding:4px 0">
-    <button class="act" onclick="camCmd('camera/start')">Start cameras</button>
+    <label><input type="checkbox" id="camView" onchange="camCheck()"> Show live camera</label><button class="act" onclick="camCmd('camera/start')">Start cameras</button>
     <button class="act" onclick="camCmd('camera/stop')">Stop cameras</button>
-    <button class="act" onclick="camCmd('record/start')">Record</button>
-    <button class="act" onclick="camCmd('record/stop')">Stop recording</button>
+    <button class="act" onclick="show('record')">Recording sessions</button>
     <label style="margin:0 10px;cursor:pointer"><input type="checkbox" id="camDet" onchange="camDetToggle()"> Show detections</label>
     <span id="camSt"></span></div>
   <div id="camDetBar" class="sub" style="display:none;padding:2px 0 6px">
@@ -139,7 +142,7 @@
   <pre id="logbox"></pre>
 </div>
 
-<div id="system" style="display:none">
+<div id="system" style="display:none"><table><thead><tr><th>Host measurement</th><th>Value</th></tr></thead><tbody id="systemRows"></tbody></table>
   <div class="note" style="margin:18px; max-width:640px">
     Powering the Jetson down properly matters &mdash; the SD card is the boot device,
     and pulling batteries on a running filesystem is how you corrupt it.
@@ -169,10 +172,10 @@
 </div>
 
 <script>
-var TABS = ['nodes','sensors','gps','waypoint','calibration','supervisor','camera','sonar','planner','logs','system'];
+var TABS = ['overview','communications','simple','nodes','sensors','gps','waypoint','calibration','supervisor','camera','sonar','planner','logs','system','record'];
 // Links inside the embedded pages (Beichen's navigation, waypoint, calibration, supervisor, planner) open
 // their tab here instead of leaving this page, so the tab bar stays (Ruth, Nov 7)
-var PAGE_TAB = {'/': 'nodes', '/control': 'nodes', '/navigation': 'gps', '/waypoint': 'waypoint',
+var PAGE_TAB = {'/simple-sequence':'simple','/': 'nodes', '/control': 'nodes', '/navigation': 'gps', '/waypoint': 'waypoint',
                 '/pool-map': 'waypoint', '/calibration': 'calibration', '/navigation-supervisor': 'supervisor',
                 '/planner': 'planner'};
 function hookFrameLinks(frame) {
@@ -196,18 +199,13 @@ var ledOff = false;                          // mirrored from /api/status
 
 // The log is only fetched while its tab is open - no point pulling 60 KB a second
 // across the tether to a div nobody is looking at.
+let logCursor=0,logGeneration='',logLines=[],logFilter=null,logBusy=false;
 async function refreshLog(){
-  if (document.getElementById('logs').style.display === 'none') return;
-  try {
-    var errs = document.getElementById('errOnly').checked ? '1' : '0';
-    var txt = await (await fetch('/api/log?errors=' + errs, {cache:'no-store'})).text();
-    var box = document.getElementById('logbox');
-    box.textContent = txt;
-    if (document.getElementById('follow').checked) box.scrollTop = box.scrollHeight;
-    document.getElementById('logMsg').textContent = '';
-  } catch (e) {
-    document.getElementById('logMsg').textContent = 'could not read the log';
-  }
+ if(logBusy||document.getElementById('logs').style.display==='none')return;
+ logBusy=true;
+ try{const errors=document.getElementById('errOnly').checked?'1':'0';if(errors!==logFilter){logFilter=errors;logCursor=0;logGeneration='';logLines=[]}
+ const response=await fetch('/api/logs?after='+logCursor+'&generation='+encodeURIComponent(logGeneration)+'&errors='+errors,{cache:'no-store',signal:AbortSignal.timeout(2500)});if(!response.ok)throw Error(response.status);const data=await response.json();if(data.reset)logLines=[];logLines.push(...data.lines);logLines=logLines.slice(-2000);logCursor=data.cursor;logGeneration=data.generation;const box=document.getElementById('logbox');box.textContent=logLines.join('\n');if(document.getElementById('follow').checked)box.scrollTop=box.scrollHeight;text('logMsg',data.available?'':'No log file available');
+ }catch(e){text('logMsg','Could not read the log')}finally{logBusy=false}
 }
 
 async function ledToggle(){
@@ -242,6 +240,8 @@ async function power(what){
 }
 
 function show(t){
+  if(['gps','simple'].includes(t))t='waypoint';
+  if(['camera','sonar'].includes(t))t='sensors';
   TABS.forEach(function(name){
     var panel = document.getElementById(name);
     if (panel) panel.style.display = (name === t) ? '' : 'none';
@@ -252,8 +252,10 @@ function show(t){
   var frame = document.querySelector('#' + t + ' iframe[data-src]');   // the embedded pages load when first opened
   if (frame && !frame.getAttribute('src')) frame.src = frame.dataset.src;
   try { localStorage.setItem('graeyTab', t); } catch (err) {}    // back on this tab after a reload
-  if (t === 'camera') camCheck();            // the stream loads once it is up (camShow)
-  if (t === 'sonar') sonarCheck();
+  document.getElementById('camera').style.display=t==='sensors'?'':'none';
+  document.getElementById('sonar').style.display=t==='sensors'?'':'none';
+  if(t!=='sensors')pauseCameraViewer();if (t === 'sensors') camCheck();            // the stream loads once it is up (camShow)
+  if (t === 'sensors') sonarCheck();if(t==='system')refreshSystem();if(t==='logs')refreshLog();
 }
 // The sonar tools run on the Jetson itself, outside the container, so this GUI
 // can't start them: tools/gui_sonar_launcher.py (port 8096) does it for us. The tools
@@ -289,6 +291,8 @@ setInterval(function(){                       // only while the Sonar tab is ope
 // The cameras (tools/cam_pair.py, in the container) and recording them to ~/camera_rec on the
 // Jetson: the same launcher on 8096 (Ruth, Oct 24). The stream is on 8080, loaded into the
 // frame only while the Camera tab is open (it is a live MJPEG connection).
+function pauseCameraViewer(){const f=document.getElementById('cam'),img=document.getElementById('camImg');if(f.src!=='about:blank')f.src='about:blank';img.removeAttribute('src');document.getElementById('camOv').style.display='none';document.getElementById('camDetBar').style.display='none'}
+document.addEventListener('visibilitychange',()=>{if(document.hidden)pauseCameraViewer();else if(document.getElementById('camera').style.display!=='none')camCheck()});
 function camShow(s){
   var st = document.getElementById('camSt'), f = document.getElementById('cam');
   if (!s){ st.textContent = 'launcher not reachable on port 8096 - is graey-sonar-launcher.service installed?'; return; }
@@ -297,6 +301,7 @@ function camShow(s){
   if (s.recording) txt += '  |  RECORDING ' + s.recFile + ', ' + (s.recBytes / 1e6).toFixed(0) + ' MB';
   else if (s.recFile) txt += '  |  last recording ' + s.recFile;
   st.textContent = (s.msg && s.msg !== 'ok' ? s.msg + '  |  ' : '') + txt;
+  if(!document.getElementById('camView').checked||document.hidden||document.getElementById('camera').style.display==='none'){pauseCameraViewer();st.textContent+=' · viewer paused';return;}
   var img = document.getElementById('camImg');
   f.style.display = camDet ? 'none' : '';
   document.getElementById('camOv').style.display = document.getElementById('camDetBar').style.display = camDet ? '' : 'none';
@@ -379,14 +384,14 @@ function camDraw(d){
       + (d.line && d.line.by ? ', steering by the ' + d.line.by : '') + ', picture ' + d.age_s.toFixed(1) + ' s old';
 }
 setInterval(function(){                       // only while ticked and the Camera tab is open
-  if (!camDet || camDetBusy || document.getElementById('camera').style.display === 'none') return;
+  if (!camDet || camDetBusy || document.hidden || !document.getElementById('camView').checked || document.getElementById('camera').style.display === 'none') return;
   camDetBusy = true;
   fetch(sonarUrl(8097, 'seen'), {cache: 'no-store'}).then(function(r){ return r.json(); })
     .then(camDraw).catch(function(){ camDraw(null); })
     .then(function(){ camDetBusy = false; });
 }, 300);
 
-function age(a){ return (a < 0) ? '--' : a.toFixed(1) + ' s'; }
+function age(a){ return !Number.isFinite(a) || a < 0 ? '--' : a.toFixed(1) + ' s'; }
 
 // ---------------- status strip + sensors ----------------
 async function refreshStatus(){
@@ -405,7 +410,7 @@ async function refreshStatus(){
       (s.heading === null) ? '--' : s.heading.toFixed(1) + '°';
     document.getElementById('sDvl').textContent   =
       s.dvl_lock ? ('lock ' + s.altitude.toFixed(2) + ' m') : 'no lock';
-    document.getElementById('strip').classList.toggle('stale', s.mav_age < 0 || s.mav_age > 3);
+    document.getElementById('strip').classList.toggle('stale', !Number.isFinite(s.mav_age) || s.mav_age < 0 || s.mav_age > 3);text('statusFreshness',Number.isFinite(s.mav_age)&&s.mav_age>=0&&s.mav_age<=3?'Live telemetry':'STALE telemetry');
     document.getElementById('sMission').style.display = s.mission ? '' : 'none';
 
     document.getElementById('srows').innerHTML = [
@@ -420,7 +425,7 @@ async function refreshStatus(){
       return '<tr><td>' + r[0] + '</td><td class="mono">' + r[1]
            + '</td><td class="mono">' + age(r[2]) + '</td></tr>';
     }).join('');
-  } catch (e) { document.getElementById('strip').classList.add('stale'); }
+  } catch (e) { document.getElementById('strip').classList.add('stale');text('statusFreshness','Telemetry unavailable'); }
 }
 
 // ---------------- node stacks ----------------
@@ -462,11 +467,24 @@ async function act(what, key){
 
 document.getElementById('errOnly').onchange = refreshLog;
 
+function toggleTheme(){const theme=document.documentElement.dataset.theme==='light'?'dark':'light';document.documentElement.dataset.theme=theme;try{localStorage.setItem('graeyTheme',theme)}catch(e){}}
+function text(id,value){document.getElementById(id).textContent=value}
+async function refreshCommunications(){try{const response=await fetch('/api/communications',{cache:'no-store',signal:AbortSignal.timeout(2500)});if(!response.ok)throw Error('HTTP '+response.status);const s=await response.json(),d=s.data||{},c=s.controller||{},g=s.gateway||{},gd=g.data||{},fresh=s.fresh===true;const runState=fresh?(d.remote_state==='RUNNING'&&!s.run_verified?'Run confirmation unavailable':d.remote_state||'Unknown'):'Unknown';const runId=Object.prototype.hasOwnProperty.call(d,'remote_run_id')?d.remote_run_id:d.run_id;
+text('overviewConnection',s.connection||'unknown');text('overviewFreshness',s.age_s===null?'No sample':(fresh?'Updated ':'STALE: ')+Number(s.age_s).toFixed(1)+' s ago');text('overviewRun',fresh?runState+' / '+(runId??'—'):'Unknown');text('overviewReports',fresh?(d.pending??0)+' pending / '+(d.broker_acknowledged??0)+' acknowledged':'Unknown');
+document.getElementById('overviewConnection').className=fresh?(s.connection==='connected'?'station-ok':'station-bad'):'station-warn';document.getElementById('overviewRun').className=s.run_verified?'station-ok':'station-warn';document.getElementById('overviewReports').className=!fresh?'station-warn':d.rejected>0?'station-bad':d.pending>0?'station-warn':'station-ok';
+const live=v=>c.online?(v===true?'Alive':v===false?'Lost':'Unknown'):'Unknown';
+const rows=[['Retained report transport',fresh?(d.report_transport_ready?'Ready':'Held'):'Unknown',fresh?(d.report_hold_reason||'Run-tag verification available'):'No fresh evidence'],['WiFi to laptop OCS',s.connection||'unknown',fresh?((d.wifi||{}).host||'')+':'+((d.wifi||{}).port||37564):'Communications telemetry stale'],['RF watchdog',live(c.rf_alive),'Observation only; RFD reporting deferred'],['Tether watchdog',live(c.tether_alive),'Existing watchdog selection retained'],['RoboCommand run',runState,fresh?'Run ID '+(runId??'—'):'No fresh run snapshot'],['RunStart verified',s.run_verified?'Verified':'Not verified','Competition missions only'],['Outbox',fresh?String(d.pending??0):'Unknown','Persistent pending observations'],['Broker receipts',fresh?String(d.broker_acknowledged??0):'Unknown','MQTT PUBACK; not a competition score'],['Rejected reports',fresh?String(d.rejected??0):'Unknown','Retained for diagnosis'],['Previous run reports',fresh?String(d.previous_run_pending??0):'Unknown','Stored; never replayed into a different run'],['Telemetry gateway',g.fresh?'Online':'Unknown',g.fresh?'RX '+gd.received+' / TX '+gd.transmitted+' / refused '+gd.refused:'No fresh gateway sample'],['Heartbeat hold',fresh?(d.telemetry_hold_reason||'None'):'Unknown','Measured telemetry required']];const mission=s.mission||{};rows.push(['Mission readiness',mission.fresh?(mission.data?.stage||'Unknown'):'Unknown',mission.fresh?(mission.data?.reason||''):'No fresh mission sample']);const body=document.getElementById('communicationsRows');body.replaceChildren();for(const values of rows){const row=document.createElement('tr');for(const [i,value] of values.entries()){const cell=document.createElement('td');cell.textContent=value;if(i===1)cell.className=['Alive','Online','Verified','connected','RUNNING'].includes(value)?'station-ok':['Lost','disconnected'].includes(value)?'station-bad':['Unknown','Not verified','Run confirmation unavailable','DECLARED'].includes(value)?'station-warn':'';row.appendChild(cell)}body.appendChild(row)}const outbox=document.getElementById('outboxRows');outbox.replaceChildren();for(const report of (fresh?d.reports||[]:[])){const row=document.createElement('tr');for(const [i,value] of [report.observation_id,report.run_id,report.kind,report.verdict+(report.detail?' — '+report.detail:'')].entries()){const cell=document.createElement('td');cell.textContent=String(value??'—');if(i===3)cell.className=report.verdict==='acknowledged'?'station-ok':report.verdict==='pending'?'station-warn':'station-bad';row.appendChild(cell)}outbox.appendChild(row)}
+}catch(e){text('overviewConnection','Unknown');text('overviewRun','Unknown');text('overviewReports','Unknown');text('overviewFreshness','GUI connection unavailable');document.getElementById('communicationsRows').replaceChildren();document.getElementById('outboxRows').replaceChildren()}}
+async function refreshSystem(){if(document.getElementById('system').style.display==='none')return;const body=document.getElementById('systemRows');try{const response=await fetch('/api/system',{cache:'no-store',signal:AbortSignal.timeout(2500)});if(!response.ok)throw Error(response.status);const s=await response.json(),n=(v,unit,scale=1)=>Number.isFinite(v)?(v/scale).toFixed(1)+unit:'Unknown';const rows=[['CPU usage',n(s.cpu_percent,' %')],['Memory used / total',n(s.memory_used_bytes,' GiB',2**30)+' / '+n(s.memory_total_bytes,' GiB',2**30)],['Highest thermal zone',n(s.temperature_c,' °C')],['Disk free / total',n(s.disk_free_bytes,' GiB',2**30)+' / '+n(s.disk_total_bytes,' GiB',2**30)],['Uptime',n(s.uptime_s,' hours',3600)]];body.replaceChildren();for(const values of rows){const row=document.createElement('tr');for(const value of values){const cell=document.createElement('td');cell.textContent=value;row.appendChild(cell)}body.appendChild(row)}}catch(e){body.replaceChildren();const row=document.createElement('tr');const cell=document.createElement('td');cell.textContent='Host measurements unavailable';row.appendChild(cell);body.appendChild(row)}}
+setInterval(refreshSystem,2000);
+refreshCommunications();setInterval(refreshCommunications,1000);
 refreshStatus(); setInterval(refreshStatus, 1000);
 refreshGroups(); setInterval(refreshGroups, 2000);
 setInterval(refreshLog, 2000);
 
-try { var lastTab = localStorage.getItem('graeyTab'); if (lastTab && TABS.indexOf(lastTab) >= 0) show(lastTab); } catch (err) {}
+for(const [id,title] of [['camera','Camera'],['sonar','Sonar']]){const panel=document.getElementById(id);const heading=document.createElement('h2');heading.textContent=title;panel.prepend(heading);document.getElementById('sensorMedia').appendChild(panel)}
+show('waypoint');try { var lastTab = localStorage.getItem('graeyTab'); if (lastTab && TABS.indexOf(lastTab) >= 0) show(lastTab); } catch (err) {}
+const requestedTab=new URLSearchParams(location.search).get('tab');if(requestedTab&&TABS.includes(requestedTab))show(requestedTab);
 </script>
 </body>
 </html>

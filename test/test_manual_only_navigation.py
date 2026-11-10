@@ -1,6 +1,7 @@
 import unittest
 from robotx_graey_2026.api.navigation.continuous_estimator import ContinuousEstimator
 from robotx_graey_2026.api.navigation.guided_surface_mission import GuidedSurfaceRun
+from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
 
 class ManualOnlyTests(unittest.TestCase):
     def test_gps_fuses_without_heading_qualification_and_does_not_fit_north(self):
@@ -13,10 +14,11 @@ class ManualOnlyTests(unittest.TestCase):
         e.begin_guided_alignment('run')
         self.assertFalse(e.alignment_collecting)
 
-    def test_mission_without_manual_heading_or_corridor_goes_directly_to_transit(self):
+    def test_registered_mission_without_alignment_corridor_enters_orientation(self):
         r=GuidedSurfaceRun(dict(lat=33.,lon=-117.,mode='surface',map='geographic'),'run',0.)
         r.stage='ARM'
-        r.step(.1,dict(fresh=True,mode=4,armed=True,bridge={},local=(0.,0.,0.),yaw=0.,speed=0.,depth=0.))
-        self.assertEqual(r.stage,'TRANSIT')
+        frame=GeographicFrame();frame.align(33.,-117.,(0.,0.),0.)
+        r.step(.1,dict(fresh=True,mode=4,armed=True,bridge=dict(map_transform=frame.snapshot()),local=(0.,0.,0.),yaw=0.,speed=0.,depth=0.))
+        self.assertEqual(r.stage,'ORIENT')
 
 if __name__=='__main__':unittest.main()

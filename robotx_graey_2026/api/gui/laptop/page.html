@@ -1,0 +1,1172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Crusader GCS</title>
+<script>
+(function () {
+  var t = null;
+  try { t = localStorage.getItem("crsd-theme"); } catch (e) {}
+  if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
+<style>
+/* Light is the sunlight palette of the old Jetson GUI (dark text, darkened status colours,
+   borders that survive glare); dark is its night palette. */
+:root, html[data-theme="light"] {
+  color-scheme: light;
+  --bg: #e7ebef; --panel: #ffffff; --card: #eef1f4; --fg: #0b0e12; --strong: #000000;
+  --muted: #5a6672; --line: #8d99a6; --rowline: #c9d1d9; --btn: #dde3e9; --field: #ffffff;
+  --accent: #14496e; --primary-bg: #14496e; --primary-fg: #ffffff;
+  --danger-bg: #b0151c; --danger-fg: #ffffff;
+  --ok: #0a6b2e; --warn: #8a4b00; --bad: #b0151c; --stale: #98a4b0; --trail: #14496e;
+  --map-bg: #e4ebf2; --map-grid: #cdd6e0; --map-grid-major: #9eaebf; --map-text: #2b343d;
+  --map-boat: #14496e; --map-path: #00796b; --map-hazard: #b35900; --map-obstacle: #7b1fa2;
+  --map-draft: #c2185b;
+  --blk-control: #14496e; --blk-decorator: #6a3d9a; --blk-action: #00796b; --blk-condition: #8a4b00;
+  --blk-task: #0a6b2e; --blk-gps: #c2185b; --blk-unknown: #5a6672;
+  --lvl0: #14496e; --lvl1: #00796b; --lvl2: #8a4b00; --lvl3: #6a3d9a;
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111111; --panel: #1b1b1b; --card: #202020; --fg: #cccccc; --strong: #eeeeee;
+  --muted: #8e8e8e; --line: #3a3a3a; --rowline: #2a2a2a; --btn: #262626; --field: #0c0c0c;
+  --accent: #7fa8c9; --primary-bg: #2d5a7a; --primary-fg: #ffffff;
+  --danger-bg: #7a3030; --danger-fg: #f3c4c4;
+  --ok: #5fbf6a; --warn: #d8a13a; --bad: #e05252; --stale: #555555; --trail: #4f87b0;
+  --map-bg: #0e1218; --map-grid: #222a36; --map-grid-major: #364254; --map-text: #aab3c0;
+  --map-boat: #64b5f6; --map-path: #26c6da; --map-hazard: #ff9800; --map-obstacle: #ce93d8;
+  --map-draft: #f48fb1;
+  --blk-control: #64b5f6; --blk-decorator: #b39ddb; --blk-action: #26c6da; --blk-condition: #d8a13a;
+  --blk-task: #5fbf6a; --blk-gps: #f48fb1; --blk-unknown: #8e8e8e;
+  --lvl0: #64b5f6; --lvl1: #26c6da; --lvl2: #d8a13a; --lvl3: #b39ddb;
+}
+:root { --grid: var(--map-grid); }
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+header { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 10px; padding: 6px 8px;
+         background: var(--panel); border-bottom: 1px solid var(--line);
+         position: sticky; top: 0; z-index: 2; }
+@media (max-width: 700px) { header { position: static; } }
+.brand { display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 700;
+         color: var(--strong); white-space: nowrap; }
+.logo { display: flex; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; }
+.logo img { height: 26px; width: auto; display: block; }
+#theme { font-size: 16px; line-height: 1; padding: 5px 9px; }
+#strip { flex: 1 1 22em; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.tile { --vc: var(--line); display: flex; flex-direction: column; min-width: 0; max-width: min(100%, 30em);
+        padding: 1px 9px 2px 8px; line-height: 1.3; background: var(--card);
+        border: 1px solid var(--line); border-left: 4px solid var(--vc); border-radius: 6px; }
+.tile.t-ok { --vc: var(--ok); } .tile.t-warn { --vc: var(--warn); } .tile.t-bad { --vc: var(--bad); }
+.tile.t-stale { --vc: var(--stale); }
+@supports (background: color-mix(in srgb, red 10%, blue)) {
+  .tile.t-warn, .tile.t-bad { background: color-mix(in srgb, var(--vc) 14%, var(--card)); }
+}
+.tile .k { font-size: 10.5px; font-weight: 700; letter-spacing: .8px; color: var(--muted); }
+.tile .v, .tile .s { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .v { font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tile .s { font-size: 11px; color: var(--muted); min-height: 1.3em; }
+.t-ok .v { color: var(--ok); } .t-warn .v { color: var(--warn); } .t-bad .v { color: var(--bad); }
+.t-stale .v { color: var(--muted); font-weight: 400; }
+.ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+/* Mission tree: one guide per ancestor level, coloured by level, so a branch's children share a line */
+#m-nodes td:first-child { white-space: nowrap; }
+.bt-g { display: inline-block; width: 1em; height: 1.2em; vertical-align: -0.25em; border-left: 2px solid var(--lvl0); }
+.bt-g.l1 { border-color: var(--lvl1); } .bt-g.l2 { border-color: var(--lvl2); } .bt-g.l3 { border-color: var(--lvl3); }
+.bt-parent { font-weight: 600; }
+.muted { color: var(--muted); }
+nav { display: flex; flex-wrap: wrap; gap: 2px; padding: 4px 8px 0; }
+nav button { border: 1px solid var(--line); border-bottom: none; background: var(--bg);
+             color: var(--fg); padding: 6px 12px; border-radius: 6px 6px 0 0; cursor: pointer; }
+nav button.on { background: var(--panel); font-weight: 600; }
+main { background: var(--panel); border-top: 1px solid var(--line); padding: 10px; min-height: 80vh; }
+section { display: none; } section.on { display: block; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+.col { flex: 1 1 320px; min-width: 0; }
+canvas.map { width: 100%; height: 70vh; border: 1px solid var(--line); border-radius: 4px; display: block; }
+canvas.small { height: 45vh; }
+table { border-collapse: collapse; width: 100%; }
+td, th { border-bottom: 1px solid var(--rowline); padding: 3px 6px; text-align: left; vertical-align: top; }
+th { color: var(--muted); font-weight: 500; }
+button { cursor: pointer; padding: 4px 10px; border-radius: 4px; border: 1px solid var(--line);
+         background: var(--btn); color: var(--fg); }
+button.primary { background: var(--primary-bg); color: var(--primary-fg); border-color: var(--primary-bg); }
+button.danger { background: var(--danger-bg); color: var(--danger-fg); border-color: var(--danger-bg); }
+button.orange { background: #d9730d; color: #fff; border-color: #d9730d; font-weight: 600; }
+button:disabled { opacity: 0.45; cursor: default; }
+#run-gate { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 6px 10px;
+            background: var(--card); border-bottom: 3px solid #d9730d; }
+#run-gate[hidden] { display: none; }
+input, select, textarea { background: var(--field); color: var(--fg); border: 1px solid var(--line);
+                          border-radius: 4px; padding: 3px 5px; }
+input.num { width: 7em; }
+input.ll { width: 9.5em; }
+textarea { width: 100%; font: 12px ui-monospace, Consolas, monospace; }
+h3 { margin: 12px 0 6px; font-size: 15px; }
+.box { border: 1px solid var(--line); border-radius: 4px; padding: 8px; margin-bottom: 10px; }
+.scroll { max-height: 60vh; overflow: auto; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; white-space: pre-wrap; }
+#toast { position: fixed; right: 12px; bottom: 12px; max-width: 50vw; padding: 8px 12px;
+         border-radius: 6px; background: var(--fg); color: var(--bg); display: none; z-index: 5; }
+img#cam { max-width: 100%; border: 1px solid var(--line); border-radius: 4px; background: #000; }
+.drift { color: var(--warn); }
+.small { font-size: 12px; }
+.ngrid { display: grid; grid-template-columns: minmax(0, 1.6fr) 6em minmax(0, 1fr) 14em; }
+.ngrid > div { min-width: 0; padding: 3px 6px; border-bottom: 1px solid var(--rowline);
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ngrid .ng-h { color: var(--muted); }
+.ngrid .ng-group { grid-column: 1 / -1; margin-top: 10px; font-size: 15px; white-space: normal; }
+.ngrid .ng-act { display: flex; justify-content: flex-end; align-items: center; gap: 4px; overflow: visible; }
+.ngrid .ng-act button { padding: 2px 8px; }
+.ngrid .ng-tail { grid-column: 1 / -1; max-height: 8em; overflow: auto; text-overflow: clip;
+                  white-space: pre-wrap; background: var(--card); }
+.ll-item { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding: 2px 0;
+           border-bottom: 1px solid var(--rowline); }
+.ll-item button { padding: 0 6px; }
+.ll-item .grow { flex: 1 1 auto; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px;
+       border: 1px solid var(--line); }
+/* Mission editor: a block's left edge says what it is (--blk-*), in both themes */
+.ed-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.ed-bar input { width: 13em; }
+.ed-sep { flex: 0 0 1em; }
+.ed-grid { display: grid; grid-template-columns: minmax(150px, 210px) minmax(0, 1fr); gap: 10px; }
+@media (max-width: 700px) { .ed-grid { grid-template-columns: 1fr; } }
+#ed-pal { max-height: 64vh; overflow: auto; padding: 6px; background: var(--card);
+          border: 1px solid var(--line); border-radius: 4px; }
+#ed-find { width: 100%; margin-bottom: 4px; }
+#ed-pal summary { cursor: pointer; font-weight: 600; margin: 6px 0 2px; }
+.k-control { --bc: var(--blk-control); } .k-decorator { --bc: var(--blk-decorator); }
+.k-action { --bc: var(--blk-action); } .k-condition { --bc: var(--blk-condition); }
+.k-task { --bc: var(--blk-task); } .k-gps { --bc: var(--blk-gps); } .k-unknown { --bc: var(--blk-unknown); }
+.pal { margin: 2px 0; padding: 3px 8px; background: var(--panel); cursor: grab;
+       border: 1px solid var(--line); border-left: 4px solid var(--bc); border-radius: 4px;
+       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: none; touch-action: none; }
+.pal.off { opacity: .4; cursor: not-allowed; }
+#ed-work { min-height: 9em; max-height: 64vh; overflow: auto; padding: 6px; background: var(--card);
+           border: 1px solid var(--line); border-radius: 4px; }
+#ed-root:empty::before { content: "Drag blocks here, or click them in the palette."; color: var(--muted); }
+#ed-problems > div { margin-bottom: 3px; }
+.blk { margin: 4px 0; background: var(--panel); border: 1px solid var(--line);
+       border-left: 5px solid var(--bc); border-radius: 4px; }
+.blk.sel { outline: 2px solid var(--accent); }
+.blk.bad { border-color: var(--bad); border-left-color: var(--bad); }
+.bh { display: flex; align-items: center; gap: 8px; padding: 4px 6px; cursor: grab; user-select: none;
+      touch-action: none; }
+.bh .bt { font-weight: 600; white-space: nowrap; }
+.bh .bsum { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.bh button { padding: 0 6px; }
+.bf { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 8px; align-items: center;
+      padding: 6px 8px; border-top: 1px solid var(--rowline); }
+.bf label { color: var(--muted); }
+.bf input, .bf select { width: 100%; }
+.bp { padding: 0 8px; color: var(--bad); font-size: 12px; }
+.bp:not(:empty) { padding: 2px 8px 4px; }
+.blk .blist { min-height: 26px; margin: 4px 0 4px 14px; padding: 2px 0 2px 8px; border-left: 2px dashed var(--bc); }
+.blk .blist:empty::before { content: "drop blocks here"; color: var(--muted); font-size: 12px; }
+.ed-ghost { position: fixed; left: 0; top: 0; z-index: 9; pointer-events: none; padding: 3px 8px; opacity: .9;
+            border-radius: 4px; background: var(--primary-bg); color: var(--primary-fg); }
+.ed-line { position: fixed; z-index: 8; height: 3px; border-radius: 2px; background: var(--accent); pointer-events: none; }
+body.ed-dragging { cursor: grabbing; user-select: none; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo"><img src="data:image/jpeg;base64,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" alt="Team Inspiration" title="Team Inspiration"></span>Crusader</div>
+  <button id="theme"></button>
+  <div id="strip"></div>
+</header>
+<div id="run-gate" hidden>
+  <b id="gate-text"></b>
+  <button class="orange" id="gate-release"
+    title="Bench or lake only: starts the held mission without RoboCommand's RunStart">Release without RoboCommand (bench)</button>
+  <span id="gate-answer" class="small"></span>
+</div>
+<nav id="tabs"></nav>
+<main>
+<section id="t-map">
+  <div class="row">
+    <div class="col" style="flex: 3 1 600px"><canvas id="map" class="map"></canvas></div>
+    <div class="col" style="flex: 1 1 260px">
+      <div class="box">
+        <h3>Layers</h3>
+        <label><input type="checkbox" id="obs-on"> <span class="dot" style="background: var(--map-obstacle)"></span>Obstacles (LiDAR)</label>
+        <div id="obs-info" class="muted small"></div>
+      </div>
+      <div class="box">
+        <h3>Passage plan</h3>
+        <div id="plan-info" class="muted">no plan</div>
+      </div>
+      <div class="box">
+        <h3>MANUAL field</h3>
+        <p class="muted">For when Ekko cannot fly: place the buoys yourself. The first flashing
+          blue is the ENTRY, the first steady blue the EXIT. Sent, it replaces Ekko's plan
+          on the boat and is resent every second until cleared.</p>
+        <label><input type="checkbox" id="edit-on"> edit on the map (click: place, click a
+          buoy: remove)</label><br>
+        <select id="edit-beacon"></select>
+        <div id="edit-count" class="muted"></div>
+        <button class="primary" id="field-send">Send field</button>
+        <button id="field-clear-boat">Clear on boat</button><br>
+        <button id="field-load">Copy current plan</button>
+        <button id="field-clear">Clear editor</button>
+      </div>
+      <div class="box">
+        <h3>Place by lat/lon</h3>
+        <input id="ll-lat" class="ll" placeholder="lat" aria-label="latitude" inputmode="decimal">
+        <input id="ll-lon" class="ll" placeholder="lon" aria-label="longitude" inputmode="decimal">
+        <select id="ll-beacon" aria-label="beacon"></select>
+        <button class="primary" id="ll-add">Add</button>
+        <button id="ll-centre">Centre map here</button>
+        <div id="ll-err" class="bad small"></div>
+        <h3>Paste</h3>
+        <textarea id="ll-paste" rows="4" spellcheck="false"
+          placeholder="one buoy per line: lat, lon, beacon&#10;1.2345678, 103.1234567, red&#10;1.2345700, 103.1234600, entry"></textarea>
+        <div class="muted small">beacon: red, green, entry, exit, off, unknown or 0-5; left out means unknown</div>
+        <button id="ll-paste-add">Add pasted</button>
+        <div id="ll-skipped" class="mono muted"></div>
+        <h3>Buoys in the field</h3>
+        <div id="ll-list" class="scroll" style="max-height: 30vh"></div>
+      </div>
+      <button id="trail-clear">Clear trail</button>
+    </div>
+  </div>
+</section>
+
+<section id="t-mission">
+  <div class="row">
+    <div class="col" style="flex: 3 1 560px">
+      <div class="box">
+        <h3 style="margin-top: 0">Build a mission</h3>
+        <div id="ed-note"><b id="ed-note-text">asking the boat for its blocks...</b>
+          <button id="ed-retry">Check again</button></div>
+        <div id="ed-body" hidden>
+          <div class="ed-bar">
+            <input id="ed-name" placeholder="mission_name" aria-label="mission name" spellcheck="false"
+              autocomplete="off" autocapitalize="none">
+            <button class="primary" id="ed-save">Save to boat</button>
+            <span class="ed-sep"></span>
+            <select id="ed-open" aria-label="stored missions"></select>
+            <button id="ed-open-go">Open</button>
+            <button id="ed-insert" title="inline it as a group of blocks, where the next block would go">Insert</button>
+            <button class="danger" id="ed-delete">Delete</button>
+            <span class="ed-sep"></span>
+            <span id="ed-tpl-wrap" hidden>
+              <select id="ed-tpl" aria-label="survey templates"></select>
+              <button id="ed-tpl-go" title="a pattern of waypoints inside the declared tasks, placed on the boat: then drag the waypoints onto the course and save it under a name">New from template</button>
+              <span id="ed-tpl-desc" class="small muted"></span>
+            </span>
+          </div>
+          <div class="ed-bar" id="ed-decl">
+            <b title="Which tier of each task this run is declared at. Saved with the mission; the OCS declares it to RoboCommand.">Declaration</b>
+            <span id="ed-decl-sel"></span>
+            <button id="ed-tiers-send" title="hand these four tiers to the OCS, through the boat's link to it">Send tiers to OCS</button>
+          </div>
+          <div id="ed-ocs" class="small" style="margin-bottom: 8px"></div>
+          <div class="ed-bar">
+            <button id="ed-wp">Add waypoints on map</button>
+            <button id="ed-undo">Undo</button><button id="ed-redo">Redo</button>
+            <button id="ed-clear">Clear</button>
+            <span id="ed-status" class="small"></span>
+          </div>
+          <div class="ed-grid">
+            <div id="ed-pal"><input id="ed-find" placeholder="find a block" aria-label="find a block"
+              spellcheck="false"><div id="ed-pal-list"></div></div>
+            <div>
+              <div id="ed-problems"></div>
+              <div id="ed-work"><div id="ed-root" class="blist"></div></div>
+              <details><summary class="muted small">the XML the boat would get</summary>
+                <pre id="ed-xml" class="mono"></pre></details>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col" style="flex: 2 1 340px">
+      <div class="box">
+        <h3 style="margin-top: 0">Run a mission</h3>
+        <select id="m-name"></select>
+        timeout <input id="m-timeout" class="num" type="number" min="0" value="0"> s (0 = default)
+        <div style="margin-top: 6px" title="Task 3: where to look for the dock when no bay has been seen yet; empty = none">
+          approach <input id="m-alat" class="ll" placeholder="lat" aria-label="approach latitude" inputmode="decimal">
+          <input id="m-alon" class="ll" placeholder="lon" aria-label="approach longitude" inputmode="decimal">
+          <button id="m-here">Boat here</button></div>
+        <div id="m-dockh" style="margin-top: 6px; display: none" title="Task 3: the bow's heading facing the dock, deg true (bt_runner_node dock_heading_deg, read at Start)">
+          dock heading <input id="m-dockh-v" class="num" type="number" min="0" max="359.9" step="1"> deg
+          <button id="m-dockh-set">Set</button> <span id="m-dockh-now" class="muted"></span>
+          <div style="margin-top: 6px" title="Task 3: which way the search slides along the dock (bt_runner_node search_first, read at Start); not set = left">
+            slide first <select id="m-slide"><option>left</option><option>right</option></select>
+            <button id="m-slide-set">Set</button> <span id="m-slide-now" class="muted"></span></div></div>
+        <div style="margin-top: 6px">
+          <button class="primary" id="m-start">Start</button>
+          <button class="danger" id="m-stop">Stop</button>
+        </div>
+      </div>
+      <canvas id="map2" class="map small"></canvas>
+      <div class="box" style="margin-top: 10px"><h3 style="margin-top: 0">Tree</h3><div id="m-state"></div>
+        <div class="scroll"><table id="m-nodes"></table></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="t-sensors">
+  <div class="row">
+    <div class="col">
+      <h3>Camera</h3>
+      <div><button id="cam-view" title="closed: no pictures are asked of the boat, so none cross the WiFi"></button>
+        model <select id="cam-model"><option>none</option><option>buoy</option>
+        <option>dock</option></select>
+        view <select id="cam-w"><option>320</option><option selected>640</option>
+          <option>960</option></select> px
+        <label title="off: the frame as the camera sent it, without the detector's boxes"><input type="checkbox" id="cam-annotate" checked> Annotations</label>
+        <span id="cam-info" class="muted"></span></div>
+      <img id="cam" alt="camera">
+      <div id="cam-health" class="mono muted"></div>
+    </div>
+    <div class="col">
+      <h3>LiDAR (plan view, bow up)</h3>
+      <div><button id="lidar-view" title="closed: no points are asked of the boat, so none cross the WiFi"></button></div>
+      <canvas id="lidar" class="map small"></canvas>
+      <div id="lidar-health" class="mono muted"></div>
+    </div>
+  </div>
+  <div class="box">
+    <h3>Camera settings</h3>
+    <div>profile <select id="cp-name"></select> <button id="cp-apply">Apply</button>
+      <button id="cp-delete">Delete</button>
+      &nbsp; save the live settings as <input id="cp-new" placeholder="name">
+      <button id="cp-save">Save</button></div>
+    <div id="cp-store" class="muted small"></div>
+    <div id="cam-controls"></div>
+  </div>
+</section>
+
+<section id="t-nodes">
+  <div class="row">
+    <div class="col" style="flex: 2 1 500px"><div id="nodes"></div></div>
+    <div class="col">
+      <div class="box"><h3>Profiles</h3><div id="profiles"></div></div>
+      <div class="box"><h3>Jetson</h3><div id="sys"></div></div>
+      <div class="box"><h3>Power</h3><div id="power"></div>
+        <input id="pw-host" placeholder="type the hostname">
+        <button class="danger" data-verb="shutdown">Shut down</button>
+        <button class="danger" data-verb="reboot">Reboot</button></div>
+    </div>
+  </div>
+</section>
+
+<section id="t-reports">
+  <label><input type="checkbox" id="ocs-hb"> show heartbeats and link state</label>
+  <div class="scroll"><table id="ocs"></table></div>
+</section>
+
+<section id="t-radio">
+  <button id="radio-test">Send test frame to Ekko</button>
+  <div class="row">
+    <div class="col"><h3>Systems</h3><table id="radio-sys"></table></div>
+    <div class="col"><h3>Streams</h3><table id="radio-streams"></table></div>
+  </div>
+  <h3>Frames</h3><div class="scroll"><table id="radio"></table></div>
+</section>
+
+<section id="t-logs">
+  level <select id="log-level"><option value="10">debug</option><option value="20" selected>info</option>
+    <option value="30">warn</option><option value="40">error</option></select>
+  node <select id="log-node"><option value="">all</option></select>
+  filter <input id="log-filter">
+  <label><input type="checkbox" id="log-follow" checked> follow</label>
+  <div id="logs" class="scroll mono" style="max-height: 75vh"></div>
+</section>
+
+<section id="t-params">
+  <div class="box">node <select id="p-node"></select> <button id="p-load">Load</button>
+    <button class="primary" id="p-set">Set changed</button>
+    <span class="muted">Live only: crusader_params.yaml stays the source of truth.</span></div>
+  <div class="box"><h3>Planner profiles (bt_runner_node)</h3>
+    <select id="pp-name"></select> <button id="pp-apply">Apply</button>
+    &nbsp; save the drifted planner values as <input id="pp-new" placeholder="name">
+    <button id="pp-save">Save</button> <span id="pp-info" class="muted"></span></div>
+  <table id="params"></table>
+</section>
+
+<section id="t-record">
+  <div class="box" id="rec-live"></div>
+  <div class="box">
+    <h3>New session</h3>
+    camera frames <input id="rec-hz" class="num" type="number" step="0.5" value="1"> fps
+    <button class="primary" id="rec-start">Start</button>
+    <button class="danger" id="rec-stop">Stop</button>
+    <button id="rec-bag-stop">Stop the bag only</button>
+    <div>also record these topics in a bag (<button id="rec-topics">load topics</button>):</div>
+    <div id="rec-topic-list" class="scroll" style="max-height: 30vh"></div>
+  </div>
+  <h3>Sessions</h3><table id="rec-sessions"></table>
+</section>
+</main>
+<div id="toast"></div>
+<script src="map.js"></script>
+<script src="editor.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const TABS = [["map", "Map"], ["mission", "Mission"], ["sensors", "Sensors"], ["nodes", "Nodes"],
+              ["reports", "Reports"], ["radio", "Radio"], ["logs", "Logs"], ["params", "Params"],
+              ["record", "Record"]];
+const G = {link: null, linkAt: null, state: null, stateAt: null, nodes: null, tree: null, plan: null,
+           logs: [], radio: [], ocs: [], tab: "map", params: null, camControls: [], camProfiles: []};
+const DASH = "—";
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+}
+function fmt(v, d = 1, unit = "") { return v == null ? "—" : (+v).toFixed(d) + unit; }
+function ago(t) { return t == null ? "—" : new Date(t * 1000).toLocaleTimeString(); }
+let toastTimer;
+function toast(msg, ok = true) {
+  const t = $("toast"); t.textContent = msg; t.style.display = "block";
+  t.style.background = ok ? "" : "var(--bad)";
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.style.display = "none"), ok ? 3500 : 8000);
+}
+async function ask(op, fields = {}) {
+  try {
+    return await (await fetch("/req", {method: "POST", body: JSON.stringify(Object.assign({op}, fields))})).json();
+  } catch (e) { return {ok: false, msg: String(e)}; }
+}
+async function req(op, fields = {}, quiet = false) {
+  const r = await ask(op, fields);
+  if (!quiet || !r.ok) toast(`${op}: ${r.msg || (r.ok ? "ok" : "failed")}`, r.ok);
+  return r;
+}
+
+// ---- tabs -------------------------------------------------------------------
+for (const [id, label] of TABS) {
+  const b = document.createElement("button");
+  b.textContent = label; b.dataset.tab = id;
+  b.onclick = () => show(id);
+  $("tabs").appendChild(b);
+}
+function show(id) {
+  G.tab = id;
+  for (const b of $("tabs").children) b.classList.toggle("on", b.dataset.tab === id);
+  for (const [t] of TABS) $("t-" + t).classList.toggle("on", t === id);
+  CrsdMap.redraw();
+  obstaclesLoop();
+  if (id === "mission") CrsdEditor.enter(); else CrsdEditor.leave();
+  if (id === "sensors") { camLoop(); lidarLoop(); loadCamera(); }
+  if (id === "mission" && !$("m-name").options.length) loadMissions();
+  if (id === "params") paramNodes();
+  if (id === "record") recordList();
+  if (id === "logs") logs();
+  if (id === "reports") ocs();
+  if (id === "radio") radio();
+}
+
+// ---- the event stream -------------------------------------------------------
+function setLink(f) { G.link = f; G.linkAt = performance.now(); strip(); }
+const handlers = {
+  link: setLink,
+  hello(f) { G.hello = f; },
+  state(f) { G.state = f; G.stateAt = performance.now(); CrsdMap.update("state", f); strip(); system(); CrsdEditor.status(); },
+  targets(f) { CrsdMap.update("targets", f); },
+  plan(f) { G.plan = f; CrsdMap.update("plan", f); planInfo(); },
+  path(f) { CrsdMap.update("path", f); },
+  hazards(f) { CrsdMap.update("hazards", f); },
+  nodes(f) { G.nodes = f; nodes(); },
+  tree(f) { G.tree = f; tree(); },
+  log(f) { if (f.replay) G.logs = []; G.logs.push(...f.items); G.logs = G.logs.slice(-2000); logs(); },
+  radio(f) { if (f.replay) G.radio = []; G.radio.push(...f.items); G.radio = G.radio.slice(-500);
+             G.radioSummary = f; radio(); },
+  ocs(f) {
+    if (f.replay) G.ocs = [];
+    G.ocs.push(...f.items);
+    G.ocs = G.ocs.slice(-300);
+    const L = !f.replay && f.items.map(linkState).filter(Boolean).pop();   // a replay is not news
+    if (L) { G.ocsLink = L; G.ocsLinkAt = performance.now(); }
+    ocs();
+  },
+};
+const es = new EventSource("/events");
+es.onmessage = e => { const f = JSON.parse(e.data); (handlers[f.t] || (() => {}))(f); };
+es.onerror = () => setLink({up: false, error: "gcs_app is not running"});
+
+// ---- obstacles (LiDAR) ------------------------------------------------------
+// Asked of the boat only while the box is ticked and the Map tab shows: the boat subscribes to
+// the clusters while we keep asking, and drops them seconds after we stop.
+let obsBusy = false, obsTimer = 0;
+const obstaclesShown = () => G.tab === "map" && $("obs-on").checked;
+function obstaclesLoop() {
+  clearTimeout(obsTimer);
+  if (!obstaclesShown()) {
+    $("obs-info").textContent = "";
+    CrsdMap.update("obstacles", {items: []});
+    return;
+  }
+  if (obsBusy) return;                              // the answer in flight re-arms the loop
+  obsBusy = true;
+  req("obstacles", {}, true).then(showObstacles)
+    .finally(() => { obsBusy = false; obsTimer = setTimeout(obstaclesLoop, 500); });
+}
+function showObstacles(r) {
+  if (!obstaclesShown()) return;                    // unticked or left the tab while it was asked
+  const d = r.data || {}, items = r.ok ? d.items || [] : [];
+  CrsdMap.update("obstacles", {items});
+  $("obs-info").textContent = !r.ok ? r.msg : d.reason ? `no obstacles drawn: ${d.reason}`
+                                                       : `obstacles: ${items.length}, age ${fmt(d.clusters_age, 1)} s`;
+}
+$("obs-on").onchange = obstaclesLoop;
+
+// ---- theme ------------------------------------------------------------------
+let themeChosen = false;      // a saved or toggled choice beats the OS setting
+try { themeChosen = ["light", "dark"].includes(localStorage.getItem("crsd-theme")); } catch (e) {}
+function themeSet(t, save) {
+  document.documentElement.setAttribute("data-theme", t);
+  if (save) { try { localStorage.setItem("crsd-theme", t); } catch (e) {} }
+  const b = $("theme"), other = t === "dark" ? "light" : "dark";
+  b.textContent = t === "dark" ? "☀" : "☾";
+  b.title = `switch to the ${other} theme`; b.setAttribute("aria-label", b.title);
+  if (typeof CrsdMap.redraw === "function") CrsdMap.redraw();
+}
+$("theme").onclick = () => {
+  themeChosen = true;
+  themeSet(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark", true);
+};
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", e => {
+  if (!themeChosen) themeSet(e.matches ? "dark" : "light", false);
+});
+themeSet(document.documentElement.getAttribute("data-theme"), false);
+
+// ---- status banner ----------------------------------------------------------
+// Ages are measured on this laptop only: the boat's clock is never compared with ours.
+const AGE_WARN_S = 1.5, AGE_BAD_S = 3, RTT_WARN_MS = 400, LINK_STATS_S = 10;
+const GPS_MIN_FIX = 3, GPS_MIN_SATS = 10, GPS_MAX_HDOP = 1.2;     // the old GUI's thresholds
+const FIX_NAMES = ["NO FIX", "NO FIX", "2D", "3D", "DGPS", "RTK FLOAT", "RTK FIXED"];
+const SEVERITY = ["EMERGENCY", "ALERT", "CRITICAL", "ERROR", "WARNING", "NOTICE", "INFO", "DEBUG"];
+// EKF_STATUS_REPORT bits; the same needed / bad sets as crusader_behavior/fcu_health.py
+const EKF_FLAGS = [[1, "ATTITUDE", true], [2, "VELOCITY_HORIZ", true], [16, "POS_HORIZ_ABS", true],
+                   [128, "CONST_POS_MODE", false], [1024, "UNINITIALIZED", false], [32768, "GPS_GLITCH", false]];
+const num = v => typeof v === "number" && isFinite(v);
+const sinceS = t => (performance.now() - t) / 1000;
+
+const tiles = {};
+function tile(id, label, cls, value, sub = "", tip = "") {
+  let t = tiles[id];
+  if (!t) {
+    t = tiles[id] = {key: "", el: document.createElement("div")};
+    t.el.innerHTML = `<span class="k">${label}</span><span class="v"></span><span class="s"></span>`;
+    $("strip").appendChild(t.el);
+  }
+  const key = [cls, value, sub, tip].join("\u0001");
+  if (key === t.key) return;          // rewriting an unchanged tile would close its tooltip
+  t.key = key;
+  t.el.className = "tile t-" + cls;
+  t.el.title = tip;
+  t.el.children[1].textContent = String(value ?? "");
+  t.el.children[2].textContent = String(sub ?? "");
+}
+function stateAge() {
+  if (G.stateAt == null) return null;
+  const L = G.link;
+  return L && num(L.state_age_s) && G.linkAt > G.stateAt ? L.state_age_s + sinceS(G.linkAt) : sinceS(G.stateAt);
+}
+function linkTile(age) {
+  const L = G.link;
+  if (!L) return tile("link", "LINK", "stale", DASH, "connecting");
+  if (!L.up) return tile("link", "LINK", "bad", "DOWN", L.error || "", `${L.boat || "the boat"}: ${L.error || "no link"}`);
+  const heard = sinceS(G.linkAt) <= LINK_STATS_S;
+  const rtt = heard && num(L.rtt_ms) ? L.rtt_ms : null, hz = heard && num(L.state_hz) ? L.state_hz : null;
+  const dropped = ((G.state || {}).link || {}).dropped;
+  const cls = age == null ? "stale" : age > AGE_BAD_S ? "bad" : age > AGE_WARN_S || rtt > RTT_WARN_MS ? "warn" : "ok";
+  const ageText = age == null ? DASH : age.toFixed(1) + " s", rttText = fmt(rtt, 0, " ms"), hzText = fmt(hz, 1, " Hz");
+  tile("link", "LINK", cls, age == null ? "NO STATE" : age > AGE_BAD_S ? "STALE" : "UP",
+       `${rttText} · ${ageText} · ${hzText}` + (dropped ? ` · ${dropped} dropped` : ""),
+       [`boat ${L.boat}`, `round trip ${rttText} (warn above ${RTT_WARN_MS} ms)`,
+        `state ${ageText} old (warn above ${AGE_WARN_S} s, bad above ${AGE_BAD_S} s)`,
+        `state rate ${hzText}`, dropped ? `${dropped} frames dropped` : ""].filter(Boolean).join("\n"));
+}
+const OCS_LINK_STALE_S = 12;      // ocs_client says where its OCS link stands at least every 5 s
+function ocsTile() {
+  const L = G.ocsLink, heard = L && sinceS(G.ocsLinkAt) <= OCS_LINK_STALE_S;
+  const tip = L ? `ocs_client -> ${L.target}` : "ocs_client reports its link to the OCS on /crsd/ocs_traffic";
+  if (!heard) return tile("ocs", "OCS", "stale", DASH, L ? "ocs_client silent" : "no word yet",
+                          `${tip}\nnothing from it for ${OCS_LINK_STALE_S} s: is ocs_client running?`);
+  const owed = L.unreceipted ? `${L.unreceipted} without a receipt` : "";
+  if (!L.connected) return tile("ocs", "OCS", "bad", "DOWN", owed || "not connected", tip);
+  tile("ocs", "OCS", owed ? "warn" : "ok", "UP", [L.peer, owed].filter(Boolean).join(" · "), tip);
+}
+
+const triTile = (v, hi, lo, tip) => v === 2 ? [hi[1], hi[0], "", tip] : v === 1 ? [lo[1], lo[0], "", tip] : null;
+function gpsTile(h) {
+  if (!num(h.fix)) return null;
+  const name = FIX_NAMES[h.fix] || `fix ${h.fix}`, sats = h.sats > 0 ? h.sats : null, hdop = num(h.hdop) ? h.hdop : null;
+  const why = [];
+  if (h.fix < GPS_MIN_FIX) why.push(h.fix === 0 ? "no fix reported (or the GPS stream is stale)" : "no 3D fix");
+  else {
+    if (sats != null && sats < GPS_MIN_SATS) why.push(`only ${sats} satellites (< ${GPS_MIN_SATS})`);
+    if (hdop != null && hdop > GPS_MAX_HDOP) why.push(`HDOP ${hdop} > ${GPS_MAX_HDOP}`);
+  }
+  const head = [name, sats == null ? "satellites not reported" : `${sats} satellites`,
+                `HDOP ${hdop == null ? "not reported" : hdop}`].join(" · ");
+  return [h.fix < GPS_MIN_FIX ? "bad" : why.length ? "warn" : "ok", name, `${sats ?? DASH} sats`, [head, ...why].join("\n")];
+}
+function ekfTip(flags) {
+  const base = "EKF needs attitude, horizontal velocity and absolute horizontal position, and no constant-position mode, uninitialised state or GPS glitch.";
+  if (!num(flags)) return base;
+  const failing = EKF_FLAGS.filter(([bit, , needed]) => (needed ? !(flags & bit) : flags & bit))
+                           .map(([, name, needed]) => needed ? `${name} missing` : `${name} set`);
+  return `${base}\n` + (failing.length ? `failing: ${failing.join(", ")}` : "no failing flags");
+}
+function battTile(h) {
+  const tip = "UNVERIFIED: BATT_VOLT_MULT and the cell count are disputed (see crusader-battery). 0 V means no sensor, not a flat pack.";
+  if (!num(h.batt_v) || h.batt_v <= 0) return ["stale", "no sensor", "", tip];
+  return ["info", fmt(h.batt_v, 2, " V"), (num(h.batt_pct) ? `${h.batt_pct}% · ` : "") + "unverified", tip];
+}
+function posTile(b) {
+  return num(b.lat) && num(b.lon)
+    ? ["info", `${b.lat.toFixed(7)}, ${b.lon.toFixed(7)}`, `${fmt(b.spd, 1, " m/s")} · ${fmt(b.hdg, 0, "°")}`,
+       "position, ground speed and heading; the heading is GPS yaw (the compass is disabled)"] : null;
+}
+function missionTile(m) {
+  if (!m) return null;
+  if (m.state === "WAITING_RUN_START")
+    return ["warn", m.name, "holding for RunStart", m.warning || "waiting for RoboCommand's RunStart via the OCS"];
+  return m.state === "RUNNING" ? [m.warning ? "warn" : "ok", m.name, m.running_node || "", m.warning || "bt_runner is running a mission"]
+                               : ["info", "idle", m.last ? `${m.last.name} ${m.last.outcome}` : "", "bt_runner"];
+}
+// [id, label, build(state, health)]: build returns [verdict, value, sub, tooltip], or null for no data
+const TILES = [
+  ["mode", "MODE", s => { const f = s.fcu || {};
+    return f.mode == null ? null : [f.armed ? "warn" : "info", f.mode, f.armed ? "ARMED" : "disarmed", "autopilot mode and armed state"]; }],
+  ["estop", "E-STOP", (s, h) => h && triTile(h.estop, ["ENGAGED", "bad"], ["RUN", "ok"],
+    "RC e-stop channel below its threshold, or the RC link lost. A readout only: the kill relay is hardware.")],
+  ["gps", "GPS", (s, h) => h && gpsTile(h)],
+  ["ekf", "EKF", (s, h) => h && triTile(h.ekf, ["OK", "ok"], ["BAD", "bad"], ekfTip(h.ekf_flags))],
+  ["prearm", "PRE-ARM", (s, h) => h && triTile(h.prearm, ["PASS", "ok"], ["FAIL", "bad"],
+    "the autopilot's own pre-arm verdict (reasons arrive in MSG); while armed it reports PASS without checking again")],
+  ["batt", "BATTERY", (s, h) => h && battTile(h)],
+  ["pos", "POSITION", s => posTile(s.boat || {})],
+  ["msg", "MSG", (s, h) => h && h.text
+    ? [h.sev <= 3 ? "bad" : h.sev <= 4 ? "warn" : "info", h.text, SEVERITY[h.sev] || "", `${h.text}\nthe last STATUSTEXT; its age is not reported`] : null],
+  ["mission", "MISSION", s => missionTile(s.mission)],
+  ["rec", "REC", s => s.record ? ["bad", "● " + s.record.name, fmt(s.record.elapsed_s, 0, " s"), "a recording session is running on the boat"]
+                               : ["info", "off", "", "no recording session"]],
+  ["cpu", "JETSON", s => s.sys && (num(s.sys.cpu) || num(s.sys.temp)) ? ["info", fmt(s.sys.cpu, 0, "% CPU"), fmt(s.sys.temp, 0, " °C"), "Jetson CPU load and temperature"] : null],
+];
+function strip() {
+  const age = stateAge(), L = G.link, s = G.state || {};
+  linkTile(age);
+  ocsTile();
+  gate(age);
+  const live = !!(L && L.up && age != null && age <= AGE_BAD_S);
+  const why = !L ? "no link yet" : !L.up ? "link down" : age == null ? "no state yet" : `state ${age.toFixed(0)} s old`;
+  for (const [id, label, build] of TILES) {
+    const t = live && build(s, s.health);
+    t ? tile(id, label, ...t) : tile(id, label, "stale", DASH, live ? "no data" : why);
+  }
+}
+setInterval(strip, 500);          // an age keeps growing while no frame arrives
+strip();
+
+// ---- map + MANUAL field -----------------------------------------------------
+function callMap(name, ...args) { return typeof CrsdMap[name] === "function" ? CrsdMap[name](...args) : undefined; }
+const manualList = () => callMap("manual") || [];
+CrsdMap.attach($("map"), {editable: true});
+CrsdMap.attach($("map2"), {pickable: true});
+CrsdMap.onModeChange(mode => { $("edit-on").checked = mode === "manual"; });     // one click mode at a time
+for (const id of ["edit-beacon", "ll-beacon"]) {
+  $(id).innerHTML = Object.entries(CrsdMap.BEACON).map(([code, [name]]) => `<option value="${code}">${esc(name)}</option>`).join("");
+  $(id).value = 2;
+}
+$("edit-beacon").onchange = e => CrsdMap.setBeacon(+e.target.value);
+$("edit-on").onchange = e => CrsdMap.setEditing(e.target.checked);
+function manualChanged() {
+  const p = CrsdMap.manualPlan(), list = manualList();
+  $("edit-count").textContent = `${p.buoys.length} buoys · entry ${p.entry ? "set" : "none"} · exit ${p.exit ? "set" : "none"}`;
+  $("ll-list").innerHTML = list.length ? list.map(llItem).join("") : '<span class="muted">none</span>';
+}
+(typeof CrsdMap.onManualChange === "function" ? CrsdMap.onManualChange : CrsdMap.onEdit)(manualChanged);
+$("field-send").onclick = () => {
+  const p = CrsdMap.manualPlan();
+  if (!p.buoys.length) return toast("place at least one buoy first", false);
+  req("manual_field", {plan: p});
+};
+$("field-clear-boat").onclick = () => confirm("Clear the MANUAL field on the boat? bt_runner will have no plan.") && req("manual_field", {clear: true});
+$("field-load").onclick = () => CrsdMap.loadPlan();
+$("field-clear").onclick = () => CrsdMap.clearManual();
+$("trail-clear").onclick = () => CrsdMap.clearTrail();
+
+// by lat/lon: the map labels a buoy with its 0-based index; the boat is sent id = index + 1
+const parseNum = s => (String(s).trim() === "" ? NaN : Number(s));
+function llError(lat, lon) {
+  if (!num(lat) || Math.abs(lat) > 90) return "latitude must be a number within ±90";
+  if (!num(lon) || Math.abs(lon) > 180) return "longitude must be a number within ±180";
+  return "";
+}
+function llPlace(lat, lon, beacon) {
+  const i = callMap("addManual", lat, lon, beacon);
+  return i === undefined ? "this map.js has no addManual" : i < 0 ? "the map refused that position" : "";
+}
+function llItem(b, i) {
+  const [name, col] = CrsdMap.BEACON[b.beacon] || CrsdMap.BEACON[0];
+  return `<div class="ll-item"><b title="index on the map; the boat is sent id ${i + 1}">${i}</b>
+    <span class="mono">${b.lat.toFixed(7)}, ${b.lon.toFixed(7)}</span>
+    <span class="grow"><span class="dot" style="background:${col}"></span>${esc(name)}</span>
+    <button data-act="centre" data-i="${i}">Centre</button><button class="danger" data-act="del" data-i="${i}">Delete</button></div>`;
+}
+$("ll-list").onclick = e => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const i = +b.dataset.i, m = manualList()[i];
+  if (b.dataset.act === "del") callMap("removeManual", i);
+  else if (m) callMap("centreOn", m.lat, m.lon);
+};
+function llEntry() {
+  const lat = parseNum($("ll-lat").value), lon = parseNum($("ll-lon").value), err = llError(lat, lon);
+  $("ll-err").textContent = err;
+  return err ? null : [lat, lon];
+}
+$("ll-add").onclick = () => {
+  const ll = llEntry(); if (!ll) return;
+  const err = llPlace(ll[0], ll[1], +$("ll-beacon").value);
+  $("ll-err").textContent = err;
+  if (!err) { $("ll-lat").value = $("ll-lon").value = ""; $("ll-lat").focus(); }
+};
+$("ll-centre").onclick = () => {
+  const ll = llEntry();
+  if (ll && callMap("centreOn", ...ll) !== true) $("ll-err").textContent = "the map could not centre there";
+};
+for (const id of ["ll-lat", "ll-lon"]) $(id).onkeydown = e => e.key === "Enter" && $("ll-add").click();
+
+const BEACON_BY_NAME = new Map([["unknown", 0], ["off", 1], ["red", 2], ["green", 3], ["entry", 4], ["exit", 5],
+                                ["flashing blue", 4], ["steady blue", 5]]);
+for (const [code, [name]] of Object.entries(CrsdMap.BEACON)) BEACON_BY_NAME.set(name.toLowerCase(), +code);
+const PASTE_LINE = /^\s*([+-]?(?:\d+\.?\d*|\.\d+))\s*[,;\s]\s*([+-]?(?:\d+\.?\d*|\.\d+))\s*(?:[,;\s]\s*(.*?))?\s*$/;
+function parseBeacon(text) {
+  const t = text.trim().toLowerCase().replace(/\s+/g, " ");
+  if (t === "") return 0;                         // not given: unknown, not a guess
+  if (/^\d$/.test(t)) return +t <= 5 ? +t : null;
+  return BEACON_BY_NAME.has(t) ? BEACON_BY_NAME.get(t) : null;
+}
+function parsePasteLine(line) {
+  const m = PASTE_LINE.exec(line);
+  if (!m) return {error: "expected: lat, lon, beacon"};
+  const lat = Number(m[1]), lon = Number(m[2]), name = (m[3] || "").replace(/[,;\s]+$/, ""), beacon = parseBeacon(name);
+  return {lat, lon, beacon, error: llError(lat, lon) || (beacon == null ? `unknown beacon "${name}"` : "")};
+}
+$("ll-paste-add").onclick = () => {
+  const kept = [], notes = [];
+  let added = 0;
+  $("ll-paste").value.split(/\r?\n/).forEach((line, n) => {
+    if (!line.trim() || line.trim().startsWith("#")) return;
+    const r = parsePasteLine(line), err = r.error || llPlace(r.lat, r.lon, r.beacon);
+    if (err) { kept.push(line); notes.push(`line ${n + 1}: ${err}`); } else added++;
+  });
+  $("ll-paste").value = kept.join("\n");
+  $("ll-skipped").textContent = `added ${added}` + (notes.length ? `, skipped ${notes.length} (left in the box):\n${notes.join("\n")}` : "");
+};
+manualChanged();
+function planInfo() {
+  const p = G.plan;
+  $("plan-info").innerHTML = !p || !p.ok ? "no plan on the boat" :
+    `<b>${p.source === "manual" ? "MANUAL" : "Ekko"}</b> v${p.version}, ${p.buoys.length} buoys, ` +
+    `heard ${fmt(p.age, 0)} s ago<br>entry ${p.entry ? "yes" : "none"} · exit ${p.exit ? "yes" : "none"}` +
+    (p.ekko_too ? '<br><b class="warn">Ekko is publishing too: the boat sees both plans.</b>' : "");
+}
+
+// ---- mission ----------------------------------------------------------------
+async function loadMissions(pick) {             // pick: the name to select; else the one selected stays
+  const r = await req("missions_list", {}, true);
+  if (!r.ok) return;
+  const keep = pick || $("m-name").value;
+  $("m-name").innerHTML = '<option value="">choose a mission</option>' + r.data.names.map(n => `<option>${esc(n)}</option>`).join("");
+  $("m-name").value = r.data.names.includes(keep) ? keep : "";
+}
+CrsdEditor.init({ask, toast, esc, stored: name => loadMissions(name),
+                 boat: () => (G.state || {}).boat, ocsRun: () => (G.state || {}).ocs_run,
+                 ocsLinkUp: () => (G.ocsLink && sinceS(G.ocsLinkAt) <= OCS_LINK_STALE_S ? G.ocsLink.connected : null)});
+// Every RunMission goal is held by bt_runner_node until RoboCommand's RunStart reaches the boat
+// through the OCS, so this banner is on every tab: a mission started from anywhere waits here.
+function gate(age) {
+  const m = (G.state || {}).mission, live = age != null && age <= AGE_BAD_S;
+  const waiting = !!m && m.state === "WAITING_RUN_START";
+  $("run-gate").hidden = !waiting;
+  if (!waiting) return;
+  $("gate-text").textContent = `${m.name || "mission"} holding — waiting for RoboCommand's RunStart via the OCS ` +
+    (m.waiting_s == null ? "" : `(${Math.round(m.waiting_s)} s)`) + (live ? "" : ` [boat state ${age == null ? "unknown" : age.toFixed(0) + " s old"}]`);
+}
+$("gate-release").onclick = async () => {
+  const m = (G.state || {}).mission || {};
+  if (!confirm(`Release ${m.name || "the held mission"} WITHOUT RoboCommand's RunStart?
+
+` +
+               "For the bench or the lake only. It starts the mission now; the boat logs that it was released by hand.")) return;
+  const r = await req("run_release");
+  $("gate-answer").textContent = `${r.ok ? "released" : "not released"}: ${r.msg || ""}`;
+  $("gate-answer").className = "small " + (r.ok ? "ok" : "bad");
+};
+$("m-start").onclick = () => {
+  const name = $("m-name").value;
+  if (!name) return toast("choose a mission to run first", false);
+  const args = {name, timeout_s: +$("m-timeout").value || 0};
+  const la = $("m-alat").value.trim(), lo = $("m-alon").value.trim();
+  if (la || lo) {
+    const e = llError(+la, +lo);
+    if (e) return toast("approach: " + e, false);
+    args.approach = [+la, +lo];
+  }
+  const diff = CrsdEditor.tierMismatch();      // null while the OCS's tiers are unknown
+  if (!confirm(`Start ${name}?
+
+The boat will hold position until RoboCommand's RunStart arrives through the OCS.` +
+               (diff ? `
+
+WARNING: ${diff}` : "")))
+    return;
+  req("run_mission", args);
+};
+// Task 3: the dock heading, on bt_runner_node (dock_heading_deg; < 0 = not set)
+function btNode() { return ((G.nodes || {}).graph || []).find(n => n.endsWith("/bt_runner_node")); }
+async function loadDockHeading() {
+  const show = /^task3_(scan|cannon)_fire$/.test($("m-name").value);
+  $("m-dockh").style.display = show ? "" : "none";
+  const node = btNode();
+  if (!show || !node) return;
+  const r = await req("params_list", {node}, true);
+  const row = r.ok ? r.data.params.find(p => p.name === "dock_heading_deg") : null;
+  $("m-dockh-now").textContent = !row ? "" : row.value < 0 ? "not set" : `now ${row.value} deg`;
+  const sf = r.ok ? r.data.params.find(p => p.name === "search_first") : null;
+  $("m-slide-now").textContent = !sf ? "" : sf.value ? `now ${sf.value}` : "not set: left";
+}
+$("m-name").addEventListener("change", loadDockHeading);
+async function setBtParams(values) {
+  const node = btNode();
+  if (!node) return toast("bt_runner_node is not running", false);
+  await req("params_set", {node, values});
+  loadDockHeading();
+}
+$("m-dockh-set").onclick = () => {
+  const v = parseFloat($("m-dockh-v").value);
+  if (!(v >= 0 && v < 360)) return toast("dock heading: 0 to 359.9 deg", false);
+  setBtParams({dock_heading_deg: v});
+};
+$("m-slide-set").onclick = () => setBtParams({search_first: $("m-slide").value});
+$("m-here").onclick = () => {
+  const b = (G.state || {}).boat || {};
+  if (!num(b.lat) || !num(b.lon)) return toast("no boat position yet", false);
+  $("m-alat").value = b.lat.toFixed(7); $("m-alon").value = b.lon.toFixed(7);
+};
+$("m-stop").onclick = () => req("cancel_mission");
+function tree() {
+  const t = G.tree || {};
+  const last = t.last ? `last: <b>${esc(t.last.name)}</b> ${esc(t.last.outcome)} — ${esc(t.last.detail)} (${fmt(t.last.elapsed_s, 0)} s)` : "";
+  $("m-state").innerHTML = !t.ok ? '<span class="warn">no /crsd/bt_status: is bt_runner_node up?</span>' :
+    t.state === "WAITING_RUN_START"
+      ? `<b>HOLDING ${esc(t.name)}</b> for RoboCommand's RunStart ${fmt(t.waiting_s, 0)} s`
+      : t.state === "RUNNING"
+      ? `<b>RUNNING ${esc(t.name)}</b> ${fmt(t.elapsed_s, 0)} s · node <b>${esc(t.running_node)}</b> · task ${esc(t.current_task)}` +
+        (t.warning ? `<br><b class="warn">${esc(t.warning)}</b>` : "")
+      : `idle. ${last}`;
+  // d and kind come from bt_runner's TreeView::nodesJson; an older runner without them draws flat
+  const guides = d => Array.from({length: d}, (_, k) => `<i class="bt-g l${k % 4}"></i>`).join("");
+  $("m-nodes").innerHTML = (t.nodes || []).map(n =>
+    `<tr><td>${guides(n.d | 0)}<span class="${/^(control|decorator)$/.test(n.kind) ? "bt-parent" : ""}">${esc(n.name)}</span></td><td class="muted">${esc(n.type)}</td><td class="${n.status === "RUNNING" ? "ok" : n.status === "FAILURE" ? "bad" : "muted"}">${esc(n.status)}</td></tr>`).join("");
+}
+
+// ---- sensors ----------------------------------------------------------------
+// A closed stream is never asked for: the boat's lease on it lapses and gcs_bridge drops the
+// subscription, so none of it crosses the WiFi. Closed until opened, remembered per laptop and
+// followed by every GCS page open on it; a hidden page asks for nothing either.
+const VIEW = {cam: false, lidar: false};
+function streamToggle(key, label, loop) {
+  const b = $(`${key}-view`), stored = `crsd-${key}-view`;
+  const set = on => { VIEW[key] = on; b.textContent = on ? `Close ${label}` : `View ${label}`; loop(); };
+  b.onclick = () => {
+    try { localStorage.setItem(stored, VIEW[key] ? "off" : "on"); } catch (e) {}
+    set(!VIEW[key]);
+  };
+  addEventListener("storage", e => { if (e.key === stored) set(e.newValue === "on"); });
+  let on = false;
+  try { on = localStorage.getItem(stored) === "on"; } catch (e) {}
+  set(on);
+}
+let camBusy = false, camTimer = 0;
+function camLoop() {
+  clearTimeout(camTimer);
+  if (G.tab !== "sensors" || document.hidden) return;
+  const img = $("cam");
+  if (!VIEW.cam) {
+    if (img.src.startsWith("blob:")) URL.revokeObjectURL(img.src);
+    img.removeAttribute("src");
+    $("cam-info").textContent = "closed: no pictures asked of the boat";
+    return;
+  }
+  if (camBusy) return;                              // the answer in flight re-arms the loop
+  camBusy = true;
+  const w = $("cam-w").value, stream = $("cam-annotate").checked ? "annotated" : "raw";
+  const url = `/cam.jpg?w=${w}&q=50&stream=${stream}&t=${Date.now()}`;
+  fetch(url).then(async r => {
+    if (!VIEW.cam) return;              // closed while this one was in flight
+    if (r.ok) {
+      const old = img.src; img.src = URL.createObjectURL(await r.blob());
+      if (old.startsWith("blob:")) URL.revokeObjectURL(old);
+      $("cam-info").textContent = `${r.headers.get("X-Size")} · ${r.headers.get("X-Age")} s old`;
+    } else $("cam-info").textContent = await r.text();
+  }).catch(e => VIEW.cam && ($("cam-info").textContent = String(e)))
+    .finally(() => { camBusy = false; camTimer = setTimeout(camLoop, 500); });
+}
+try { $("cam-annotate").checked = localStorage.getItem("crsd-cam-annotate") !== "off"; } catch (e) {}
+$("cam-annotate").onchange = e => {
+  try { localStorage.setItem("crsd-cam-annotate", e.target.checked ? "on" : "off"); } catch (err) {}
+};
+let lidarBusy = false, lidarTimer = 0;
+function lidarLoop() {
+  clearTimeout(lidarTimer);
+  if (G.tab !== "sensors" || document.hidden) return;
+  if (!VIEW.lidar) return drawLidar({ok: false, msg: "closed: no points asked of the boat"});
+  if (lidarBusy) return;                            // the answer in flight re-arms the loop
+  lidarBusy = true;
+  fetch("/lidar.json?max=3000").then(r => r.json()).then(d => VIEW.lidar && drawLidar(d))
+    .catch(() => VIEW.lidar && drawLidar({ok: false, msg: "gcs_app did not answer"}))
+    .finally(() => { lidarBusy = false; lidarTimer = setTimeout(lidarLoop, 500); });
+}
+streamToggle("cam", "camera", camLoop);
+streamToggle("lidar", "LiDAR", lidarLoop);
+document.addEventListener("visibilitychange", () => { camLoop(); lidarLoop(); });
+// The closed LiDAR box is drawn once, so it is redrawn when the theme or the window changes.
+const lidarRedraw = () => VIEW.lidar || lidarLoop();
+new MutationObserver(lidarRedraw).observe(document.documentElement, {attributeFilter: ["data-theme"]});
+addEventListener("resize", lidarRedraw);
+function drawLidar(d) {
+  const cv = $("lidar"), c = cv.getContext("2d");
+  cv.width = cv.clientWidth; cv.height = cv.clientHeight;
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  c.fillStyle = css("--map-bg"); c.fillRect(0, 0, cv.width, cv.height);
+  c.fillStyle = css("--map-text"); c.font = "12px system-ui";
+  if (!d.ok) { c.fillText(d.msg || "no preview", 10, 20); return; }
+  const range = 20, s = Math.min(cv.width / 2, cv.height) / range, ox = cv.width / 2, oy = cv.height - 10;
+  c.strokeStyle = css("--map-grid-major");
+  for (let r = 5; r <= range; r += 5) { c.beginPath(); c.arc(ox, oy, r * s, Math.PI, 2 * Math.PI); c.stroke(); c.fillText(`${r} m`, ox + 3, oy - r * s - 2); }
+  c.fillStyle = css("--map-boat");
+  for (const [x, y] of d.points) c.fillRect(ox - y * s - 1, oy - x * s - 1, 2, 2);   // x fwd = up, y left = left
+  c.fillStyle = css("--map-text"); c.fillText(`${d.points.length} points, ${fmt(d.age, 1)} s old`, 10, 16);
+}
+$("cam-model").onchange = async e => {
+  const node = camNode(); if (!node) return toast("camera_node is not running", false);
+  await req("params_set", {node, values: {model: e.target.value}});
+};
+function camNode() { return ((G.nodes || {}).graph || []).find(n => n.endsWith("/camera_node")); }
+async function loadCamera() {
+  const pr = await req("cam_profiles_list", {}, true);
+  if (pr.ok) {
+    G.camControls = pr.data.controls; G.camProfiles = pr.data.profiles;
+    $("cp-name").innerHTML = pr.data.profiles.map(p => `<option>${esc(p.name)}</option>`).join("");
+    $("cp-store").textContent = "saved in: " + (((pr.data.store || {}).local_path) ?? DASH);
+  }
+  const node = camNode();
+  if (!node) { $("cam-controls").innerHTML = '<p class="muted">camera_node is not running.</p>'; return; }
+  const r = await req("params_list", {node}, true);
+  if (!r.ok) return;
+  const rows = Object.fromEntries(r.data.params.map(p => [p.name, p]));
+  if (rows.model) $("cam-model").value = rows.model.value;
+  $("cam-controls").innerHTML = G.camControls.map(g =>
+    `<h3>${esc(g.group)}</h3><table>` + g.controls.filter(n => rows[n]).map(n => paramRow(rows[n], "cc")).join("") + "</table>").join("") +
+    '<button class="primary" id="cc-set">Set changed</button>';
+  $("cc-set").onclick = () => setChanged(node, "cc");
+}
+$("cp-apply").onclick = async () => { await req("cam_profile_apply", {name: $("cp-name").value}); loadCamera(); };
+$("cp-delete").onclick = async () => confirm(`Delete camera profile ${$("cp-name").value}?`) && (await req("cam_profile_delete", {name: $("cp-name").value}), loadCamera());
+$("cp-save").onclick = async () => { await req("cam_profile_save", {name: $("cp-new").value.trim()}); loadCamera(); };
+
+// ---- parameters (shared by Params and Sensors) --------------------------------
+function paramRow(p, prefix) {
+  const id = `${prefix}-${p.name}`, range = p.lo != null ? `${p.lo} … ${p.hi}` : "";
+  const yaml = p.in_yaml ? `<span class="${JSON.stringify(p.default) !== JSON.stringify(p.value) ? "drift" : "muted"}">yaml ${esc(JSON.stringify(p.default))}</span>` : '<span class="muted">not in yaml</span>';
+  let input;
+  if (!p.editable) input = `<span title="${esc(p.reason)}">${esc(JSON.stringify(p.value))}</span>`;
+  else if (p.choices && p.choices.length)
+    input = `<select id="${id}" data-name="${esc(p.name)}" data-type="${p.type}" data-orig="${esc(p.value)}">` +
+            p.choices.map(c => `<option ${c === p.value ? "selected" : ""}>${esc(c)}</option>`).join("") + "</select>";
+  else if (p.type === "bool")
+    input = `<input type="checkbox" id="${id}" data-name="${esc(p.name)}" data-type="bool" data-orig="${p.value}" ${p.value ? "checked" : ""}>`;
+  else input = `<input id="${id}" class="num" data-name="${esc(p.name)}" data-type="${p.type}" data-orig="${esc(p.value)}" value="${esc(p.value)}">`;
+  return `<tr><td>${esc(p.name)}</td><td>${input}</td><td>${yaml}</td><td class="muted">${range}</td></tr>`;
+}
+function setChanged(node, prefix) {
+  const values = {};
+  for (const e of document.querySelectorAll(`[id^="${prefix}-"][data-name]`)) {
+    const t = e.dataset.type;
+    const v = t === "bool" ? e.checked : t === "integer" ? parseInt(e.value, 10) : t === "double" ? parseFloat(e.value) : e.value;
+    if (String(v) !== e.dataset.orig) values[e.dataset.name] = v;
+  }
+  if (!Object.keys(values).length) return toast("nothing changed");
+  return req("params_set", {node, values}).then(() => (prefix === "cc" ? loadCamera() : loadParams()));
+}
+function paramNodes() {
+  const sel = $("p-node"), cur = sel.value, graph = (G.nodes || {}).graph || [];
+  sel.innerHTML = graph.map(n => `<option>${esc(n)}</option>`).join("");
+  if (graph.includes(cur)) sel.value = cur;
+  planners();
+}
+async function loadParams() {
+  const node = $("p-node").value; if (!node) return;
+  const r = await req("params_list", {node}, true);
+  if (!r.ok) return;
+  $("params").innerHTML = "<tr><th>name</th><th>live</th><th>yaml</th><th>range</th></tr>" +
+    r.data.params.map(p => paramRow(p, "pp")).join("");
+}
+$("p-load").onclick = loadParams;
+$("p-set").onclick = () => setChanged($("p-node").value, "pp");
+async function planners() {
+  const r = await req("planner_profiles_list", {}, true);
+  if (!r.ok) return;
+  $("pp-name").innerHTML = r.data.profiles.map(p => `<option value="${esc(p.name)}">${esc(p.title)} (${p.origin})</option>`).join("");
+  $("pp-info").textContent = r.data.sources.filter(s => !s.ok).map(s => `${s.origin}: ${s.reason}`).join("; ");
+}
+$("pp-apply").onclick = () => req("planner_profile_apply", {name: $("pp-name").value});
+$("pp-save").onclick = async () => { await req("planner_profile_save", {name: $("pp-new").value.trim()}); planners(); };
+
+// ---- nodes, system, power -----------------------------------------------------
+const nodeBtn = (act, i, label, attrs = "") => `<button data-act="${act}" data-name="${esc(i.name)}" ${attrs}>${label}</button>`;
+function nodeRow(i) {
+  const gone = !i.running && /^(exited|failed)$/.test(i.state), tail = gone ? (i.tail || []).join("\n") : "";
+  const cls = i.running ? "ok" : gone && i.detail !== "exit 0" ? "bad" : "muted";
+  const acts = (i.protected ? '<span class="muted">protected</span>' : "") +    // tag first: buttons stay flush right
+    (i.running ? (i.protected ? "" : nodeBtn("restart", i, "Restart") +
+                  nodeBtn("stop", i, "Stop", `class="danger" ${i.stoppable ? "" : "disabled"} title="${esc(i.stop_reason)}"`))
+               : nodeBtn("start", i, "Start"));
+  return `<div title="${esc(i.note)}"><b>${esc(i.name)}</b> <span class="muted small">${esc(i.note)}</span></div>
+    <div class="${cls}">${esc(i.state)}</div><div class="muted" title="${esc(i.detail)}">${esc(i.detail)}</div>
+    <div class="ng-act">${acts}</div>` + (tail ? `<div class="ng-tail mono muted">${esc(tail)}</div>` : "");
+}
+function nodes() {
+  const N = G.nodes; if (!N) return;
+  $("nodes").innerHTML = '<div class="ngrid"><div class="ng-h">Node</div><div class="ng-h">State</div>' +
+    '<div class="ng-h">Detail</div><div class="ng-h"></div>' + N.groups.map(g =>
+    `<div class="ng-group"><b>${esc(g.label)}</b> <span class="muted">${esc(g.hint)}</span></div>` +
+    N.items.filter(i => i.group === g.id).map(nodeRow).join("")).join("") + "</div>";
+  $("profiles").innerHTML = N.profiles.map(p => `<button data-profile="${p.id}">Start ${esc(p.label)}</button>`).join(" ");
+  if (G.tab === "params" && !$("p-node").options.length) paramNodes();
+}
+$("nodes").onclick = async e => {
+  const b = e.target.closest("button[data-act]"); if (!b) return;
+  const name = b.dataset.name, action = b.dataset.act;
+  if (action === "stop" && !confirm(`Stop ${name}?`)) return;
+  let r = await req("node", {action, name});
+  const item = (G.nodes.items || []).find(i => i.name === name);
+  if (!r.ok && action === "start" && item && item.conflicts.length &&
+      confirm(`${item.conflicts.join(", ")} holds the same device. Stop it and start ${name}?`))
+    await req("node", {action, name, stop_conflicts: true});
+};
+$("profiles").onclick = e => { const b = e.target.closest("button"); if (b) req("node", {action: "profile", name: b.dataset.profile}); };
+function system() {
+  const s = (G.state || {}).sys, p = (G.state || {}).power;
+  if (s) $("sys").innerHTML = `CPU ${fmt(s.cpu, 0, "%")} · ${fmt(s.temp, 0, " °C")}<br>memory ${fmt(s.mem_gb, 1)} / ${fmt(s.mem_total_gb, 1)} GB<br>disk free ${fmt(s.disk_gb, 1, " GB")}<br>up ${esc(s.uptime)}`;
+  if (p) $("power").innerHTML = !p.available ? `<span class="muted">${esc(p.reason)}</span>` :
+    p.locked ? `<b class="bad">locked: ${esc(p.lock_reason)}</b>` : `host <b>${esc(p.hostname)}</b>`;
+}
+for (const b of document.querySelectorAll("button[data-verb]"))
+  b.onclick = () => confirm(`${b.dataset.verb.toUpperCase()} the Jetson?`) && req("power", {verb: b.dataset.verb, hostname: $("pw-host").value.trim()});
+
+// ---- reports, radio, logs ---------------------------------------------------------
+// ocs_client numbers each task report (vseq) and echoes it queued, sent (again after a
+// reconnect) and each ocs_receipt the OCS sends for it: one row per report, ending at what
+// became of it. A final verdict stands even if a "published" is echoed after it.
+const FINAL = new Set(["acknowledged", "held", "dropped"]);
+const RECEIPT = {
+  acknowledged: ["ok", r => `acknowledged by RoboCommand, seq ${r.seq}`],
+  published: ["warn", r => `published to RoboCommand, seq ${r.seq}: ${String(r.detail).replace(/^seq=\d+, /, "")}`],
+  held: ["bad", r => `held by the OCS: ${r.detail}`],
+  dropped: ["bad", r => `dropped by the OCS: ${r.detail}`]};
+const linkState = o => o.dir === "link" ? o.body : o.link;
+function ocsRows(hb) {
+  const rows = [], reports = new Map();
+  for (const o of G.ocs) {
+    if (o.vseq == null) {
+      if (hb || (o.kind !== "heartbeat" && o.dir !== "link"))
+        rows.push({...o, cls: /^(sent|republished)$/.test(o.status) ? "ok" : "warn"});
+      continue;
+    }
+    let r = reports.get(o.vseq);
+    if (!r) {
+      reports.set(o.vseq, r = {stamp: o.stamp, dir: "tx", kind: o.kind, vseq: o.vseq, sends: 0, tx: "", receipt: null});
+      rows.push(r);
+    }
+    if (o.receipt) {
+      if (!(r.receipt && FINAL.has(r.receipt.verdict))) r.receipt = o.body;
+    } else {
+      if (r.body === undefined) r.body = o.body;
+      if (o.status === "sent") r.sends++;
+      r.tx = o.status;
+    }
+  }
+  for (const r of reports.values()) {
+    const [cls, text] = RECEIPT[r.receipt && r.receipt.verdict] ||
+      ["warn", () => r.tx === "sent" ? "sent, no receipt yet" : r.tx || "no receipt yet"];
+    r.cls = cls;
+    r.status = text(r.receipt) + (r.sends > 1 ? ` (sent ${r.sends}×)` : "");
+  }
+  return rows;
+}
+function ocs() {
+  const hb = $("ocs-hb").checked;
+  $("ocs").innerHTML = "<tr><th>time</th><th>dir</th><th>kind</th><th>status</th><th>body</th></tr>" +
+    ocsRows(hb).slice(-200).reverse().map(o =>
+      `<tr><td>${ago(o.stamp)}</td><td>${esc(o.dir)}</td>
+       <td title="${o.vseq == null ? "" : `vehicle seq ${o.vseq}`}"><b>${esc(o.kind)}</b></td>
+       <td class="${o.cls}">${esc(o.status)}</td>
+       <td class="mono">${esc(o.body === undefined ? DASH : JSON.stringify(o.body))}</td></tr>`).join("");
+}
+$("ocs-hb").onchange = ocs;
+function radio() {
+  const s = G.radioSummary || {};
+  $("radio-sys").innerHTML = "<tr><th>system</th><th>rx</th><th>tx</th><th>heard</th><th>last</th></tr>" +
+    (s.systems || []).map(x => `<tr><td>${x.sys} ${esc(x.name)}</td><td>${x.rx}</td><td>${x.tx}</td><td>${fmt(x.heard_s, 1, " s ago")}</td><td>${esc(x.last)}</td></tr>`).join("");
+  $("radio-streams").innerHTML = "<tr><th>stream</th><th>rate</th><th>of expected</th><th>longest gap</th></tr>" +
+    (s.streams || []).map(x => `<tr><td>${esc(x.name)}</td><td>${fmt(x.rate_hz, 2, " Hz")}</td><td>${fmt(x.pct, 0, "%")}</td><td>${fmt(x.longest_gap_s, 1, " s")}</td></tr>`).join("");
+  $("radio").innerHTML = G.radio.slice(-200).reverse().map(r =>
+    `<tr><td>${ago(r.t)}</td><td>${esc(r.dir)}</td><td>${esc(r.who)}</td><td><b>${esc(r.name)}</b></td><td class="mono">${esc(r.summary)}</td><td>${r.bytes} B</td></tr>`).join("");
+}
+$("radio-test").onclick = () => req("radio_test");
+function logs() {
+  const nodeSel = $("log-node"), known = new Set([...nodeSel.options].map(o => o.value));
+  for (const r of G.logs) if (!known.has(r.node)) { known.add(r.node); nodeSel.insertAdjacentHTML("beforeend", `<option>${esc(r.node)}</option>`); }
+  if (G.tab !== "logs") return;
+  const node = nodeSel.value, f = $("log-filter").value.toLowerCase(), cls = {30: "warn", 40: "bad", 50: "bad"};
+  const box = $("logs");
+  box.innerHTML = G.logs.filter(r => (!node || r.node === node) && (!f || r.msg.toLowerCase().includes(f))).slice(-800)
+    .map(r => `<div class="${cls[r.level] || ""}">${ago(r.t)} [${esc(r.level_name)}] ${esc(r.node)}: ${esc(r.msg)}</div>`).join("");
+  if ($("log-follow").checked) box.scrollTop = box.scrollHeight;
+}
+$("log-level").onchange = e => req("log_level", {level: +e.target.value}, true);
+$("log-node").onchange = logs; $("log-filter").oninput = logs;
+
+// ---- record -------------------------------------------------------------------------
+async function recordList() {
+  const r = await req("record_list", {}, true);
+  if (!r.ok) return;
+  const d = r.data, live = d.live, bag = d.bag || {};
+  $("rec-live").innerHTML = (live ? `<b class="bad">● recording ${esc(live.name)}</b> ${fmt(live.elapsed_s, 0)} s, ${fmt(live.size_mb, 1)} MB, frames ${esc(JSON.stringify(live.frames))}` +
+      (live.error ? ` <b class="warn">${esc(live.error)}</b>` : "") : "not recording") +
+    (bag.recording ? `<br>bag: ${bag.topics.length} topics, ${fmt(bag.size_mb, 1)} MB, ${fmt(bag.rate_mb_s, 2)} MB/s, ${fmt(bag.hours_left, 1)} h left` : "") +
+    `<br><span class="${d.persist.persists ? "muted" : "bad"}">${esc(d.dir)} ${d.persist.persists ? "persists (" + esc(d.persist.source) + ")" : "is NOT on a bind mount: lost with the container"}</span>`;
+  $("rec-sessions").innerHTML = "<tr><th>session</th><th>size</th><th>frames</th><th></th></tr>" + d.sessions.map(s =>
+    `<tr><td>${esc(s.name)}${s.recording ? ' <b class="bad">live</b>' : ""}</td><td>${fmt(s.size_mb, 1, " MB")}</td><td>${esc(JSON.stringify(s.frames))}</td>
+     <td>${s.recording ? "" : `<a href="/download?name=${encodeURIComponent(s.name)}">download</a> <button data-del="${esc(s.name)}">delete</button>`}</td></tr>`).join("");
+  if (G.tab === "record") setTimeout(recordList, 2000);
+}
+$("rec-sessions").onclick = async e => { const n = e.target.dataset.del; if (n && confirm(`Delete ${n}?`)) { await req("record_delete", {name: n}); } };
+$("rec-topics").onclick = async () => {
+  const r = await req("record_topics", {}, true);
+  if (r.ok) $("rec-topic-list").innerHTML = r.data.topics.map(t =>
+    `<label style="display:block"><input type="checkbox" value="${esc(t.name)}"> ${esc(t.name)} <span class="muted">${esc(t.type)}</span></label>`).join("");
+};
+$("rec-start").onclick = () => req("record", {kind: "session", action: "start", frame_hz: +$("rec-hz").value,
+  topics: [...document.querySelectorAll("#rec-topic-list input:checked")].map(i => i.value)});
+$("rec-stop").onclick = () => req("record", {kind: "session", action: "stop"});
+$("rec-bag-stop").onclick = () => req("record", {kind: "bag", action: "stop"});
+
+show("map");
+</script>
+</body>
+</html>

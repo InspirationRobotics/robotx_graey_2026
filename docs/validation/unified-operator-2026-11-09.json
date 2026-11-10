@@ -1,0 +1,247 @@
+{
+  "result": "PASS",
+  "verified_utc": "2026-11-10T04:14:57.802920+00:00",
+  "checks": [
+    {
+      "name": "graey-full-tests",
+      "code": 0,
+      "tests": 460,
+      "log": "graey-full-tests.log"
+    },
+    {
+      "name": "waypoint-browser-unit",
+      "code": 0,
+      "tests": null,
+      "log": "waypoint-browser-unit.log"
+    },
+    {
+      "name": "gui-browser-tests",
+      "code": 0,
+      "tests": null,
+      "log": "gui-browser-tests.log"
+    },
+    {
+      "name": "unified-gui-browser-tests",
+      "code": 0,
+      "tests": null,
+      "log": "unified-gui-browser-tests.log"
+    },
+    {
+      "name": "missions-syntax",
+      "code": 0,
+      "tests": null,
+      "log": "missions-syntax.log"
+    },
+    {
+      "name": "sensors-syntax",
+      "code": 0,
+      "tests": null,
+      "log": "sensors-syntax.log"
+    },
+    {
+      "name": "record-syntax",
+      "code": 0,
+      "tests": null,
+      "log": "record-syntax.log"
+    },
+    {
+      "name": "gui-syntax",
+      "code": 0,
+      "tests": null,
+      "log": "gui-syntax.log"
+    },
+    {
+      "name": "waypoint-syntax",
+      "code": 0,
+      "tests": null,
+      "log": "waypoint-syntax.log"
+    },
+    {
+      "name": "shared-theme-syntax",
+      "code": 0,
+      "tests": null,
+      "log": "shared-theme-syntax.log"
+    }
+  ],
+  "python_syntax": "PASS",
+  "ros_gateway": {
+    "result": "PASS",
+    "rx_frames": 134,
+    "tx_frames": 3,
+    "refused": 2,
+    "flightmode": "GUIDED",
+    "odometry_preserved": true,
+    "reader_cannot_drive": true,
+    "stale_motion_blocked": true,
+    "emergency_disarm_preserved": true,
+    "hardware_opened": false
+  },
+  "ros_reporting": {
+    "result": "PASS",
+    "ros_domain": 120,
+    "transport": "local TCP fixture",
+    "heartbeat_count": 9,
+    "observations_acknowledged": 2,
+    "measured_depth_m": 0.2,
+    "hardware_opened": false
+  },
+  "ros_gui": {
+    "result": "PASS",
+    "ros_domain": 124,
+    "actual_gui_node": true,
+    "checked": [
+      "/missions",
+      "/missions.js",
+      "/sensors",
+      "/record",
+      "/api/recording",
+      "/api/missions"
+    ],
+    "mission_library_round_trip": true,
+    "hardware_opened": false
+  },
+  "ros_sensor_recording": {
+    "result": "PASS",
+    "ros_domain": 123,
+    "messages_recorded": 109,
+    "metadata_finalized": true,
+    "camera_opened": false,
+    "sonar_opened": false,
+    "hardware_opened": false
+  },
+  "linux_contracts": "PASS",
+  "colcon_build": "PASS",
+  "installed_launch": "PASS",
+  "current_ocs_regressions": [
+    {
+      "suite": "fleet",
+      "returncode": 0,
+      "tests": 533,
+      "log": "fleet-tests.log",
+      "problems": []
+    },
+    {
+      "suite": "graey-unit",
+      "returncode": 0,
+      "tests": 30,
+      "log": "graey-unit-tests.log",
+      "problems": []
+    },
+    {
+      "suite": "ocs",
+      "returncode": 0,
+      "tests": 614,
+      "log": "ocs-tests.log",
+      "problems": []
+    },
+    {
+      "suite": "wifi",
+      "returncode": 0,
+      "tests": 9,
+      "log": "wifi-tests.log",
+      "problems": []
+    }
+  ],
+  "upstream_manifest": "current-reference-2026-11-09/manifest.json",
+  "fingerprints": {
+    "api/pixhawk/gateway_core.py": "026f4388af774eb0283e64ca843fcbdb1cc884ba6f2101da948a567fbfa0f59d",
+    "api/pixhawk/ros_link.py": "83ba8042ab221c484c0b031c335c95e7541dc5dbeb3e77e97152ae52b857a5f8",
+    "api/pixhawk/telemetry_gateway.py": "ed3bf977d5de8a7abdfb52b43384691e4469a01a24163ea8e00d29a84ba9d816",
+    "api/pixhawk/mavlink.py": "46f74d3b129109655706129efb9ba5607c779f63f42e726b3830c09c6c9acf18",
+    "api/comms/run_gate.py": "69d674be8358fda080782088eaa336c06fdd66741871ed3f8a21a4899a0b4d6c",
+    "api/comms/competition_link_node.py": "d48dff73d2f581eb692e74a9953f9fdd3b848813519c88958581b62b31c3d0b2",
+    "api/comms/competition_wifi.py": "3aa1f24731b48010f1ce58659929f7eef0d7827443e977e3143804d4c1873b10",
+    "api/comms/competition_telemetry.py": "2dc8133430511f1aab27220558d54d6650e74db3a7dc449ebb698fbf990bff4c",
+    "api/gui/gui_node.py": "ed4ee9bb8d655080a0d091ed9134222da40b379d2d2638cb18d9d789d433b8ea",
+    "api/gui/communications_view.py": "809c7cf9e07b746c07405f3b17f173965ec64496c35b6f199b8ef0cc867f3929",
+    "api/gui/log_reader.py": "06c67d8f3a5d69f3664ab68dd929eccdaa0918b7eb9e54863a5b83db93669a78",
+    "api/gui/system_info.py": "4c39cbca9eca5839dfab7a97b2a8444c4b6812dabf041667aafacb241131f17d",
+    "api/gui/gcs_transport.py": "1964281b7177d98f5998f6855fe399f06b06283c9c8b90fd1152a6a292038401",
+    "api/gui/gcs_wire.py": "4a8f4b4ce5adfbda21a02df7175928bf2ccf2f1bac054a85d93640e7feb40478",
+    "api/comms/ocs_discovery.py": "b19acc6edefd2912413bd2c0edbec721b90e2db7e6bd0a7bb44e93e408c36aa4",
+    "api/gui/mission_store.py": "e03a8ee414d13f9cfb85fc9aa2c5c337613b4a610dca2c3d40d50da3e45bee0c",
+    "api/gui/recording_service.py": "ce07e87e0d76f6d7d2839897ec1a65b2a687153db528d97dbb7e119b5198e994",
+    "api/gui/bag_recorder.py": "ee25b8788d8b9d9cd45130a113f71f1fddf36316f11d392296ee956dc9936fbc",
+    "api/gui/recording_meter.py": "aa6c28b5f15504201deab3060509fbbb7ebc6a50625b339145d9b53f4fabb5fa"
+  },
+  "hardware_connected": false,
+  "deployed": false,
+  "pushed": false,
+  "scope": "Unified GRAEY Missions course map/pose, Waypoints/Pipeline/525 selection, shared OCS declare/end, visual/numeric Sensors, independent camera/sonar/sensor recording; local only",
+  "communications_regressions": [
+    {
+      "suite": "fleet",
+      "returncode": 0,
+      "tests": 533,
+      "log": "fleet-tests.log",
+      "problems": []
+    },
+    {
+      "suite": "ocs",
+      "returncode": 0,
+      "tests": 614,
+      "log": "ocs-tests.log",
+      "problems": []
+    },
+    {
+      "suite": "graey-unit",
+      "returncode": 0,
+      "tests": 30,
+      "log": "graey-unit-tests.log",
+      "problems": []
+    },
+    {
+      "suite": "wifi",
+      "returncode": 0,
+      "tests": 9,
+      "log": "wifi-tests.log",
+      "problems": []
+    }
+  ],
+  "unified_browser": {
+    "result": "PASS",
+    "synthetic_vehicle": true,
+    "real_tcp": true,
+    "real_ocs_http_proxy": true,
+    "hardware_opened": false,
+    "checks": [
+      "unified mission catalogue",
+      "course map and pose arrow",
+      "plot points",
+      "save/open mission",
+      "pipeline manual recording",
+      "competition gate request",
+      "525 selection",
+      "shared OCS declare/end",
+      "all-four-task tiers",
+      "camera/sonar/sensor selection",
+      "recording survives page change",
+      "numeric and visual sensors",
+      "stale sensors",
+      "mobile width"
+    ],
+    "javascript_errors": []
+  },
+  "installed_source": {
+    "result": "PASS",
+    "files_checked": 139,
+    "mismatches": []
+  },
+  "installed_package_manifest_matches": true,
+  "source_assets": {
+    "missions.html": "f862c7e126bd8f3d157769b70f819bfc989ef2fdeeacd310def49912e6c1b6c0",
+    "missions.js": "ec0f96e363bd0648b6dad5057f323e1c150d369005232831a8f444fde753f54e",
+    "sensors.html": "e9855f1d9ab968d2dc1bde0d7a73498789e86548ff7aad8235d892d8d650325d",
+    "sensors.js": "b747a5ec9fd9fe2750dbbe96b8cf834ad9061b099890f55cbed26d681f74741b",
+    "record.html": "8f6d26e8b5b2654fe55cbbdfc42f4a856fc254846e77cdd013dc9170be931788",
+    "record.js": "93c12567fc18c6cb0799e37ddf0a04f1a34af1d59ee0fc1b11342cfe98388245",
+    "mission.css": "c957b046375a06c23208fb21048226f98de061255a9c9e7e28e586dfbf017ca1",
+    "gui.html": "c93cbabb8204a696b38a5b259c06bcb786883148ad681004f8f0691d732d627d"
+  },
+  "upstream_adaptations": {
+    "bag_recorder": "Crusader main abf7d821, local meter import adjusted",
+    "recording_meter": "Crusader main abf7d821 helpers",
+    "mission_workflow": "Crusader main and feat/runstart-gate-tiers; GRAEY JSON mission catalogue and existing waypoint runner"
+  },
+  "hardware_opened": false
+}

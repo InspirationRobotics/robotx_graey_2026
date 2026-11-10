@@ -1,0 +1,53 @@
+"""Compatibility API over ROS FCU topics; consumers open no UDP or serial socket."""
+import collections
+import json
+import threading
+import time
+from types import SimpleNamespace
+
+
+class RosTransport:
+    def __init__(self,node,component,system):
+        from std_msgs.msg import String
+        from .mavlink import mavutil
+        self.node,self.component,self.system=node,component,system
+        self.String=String
+        self.encoder=mavutil.mavlink.MAVLink(None,srcSystem=system,srcComponent=component)
+        self.decoder=mavutil.mavlink.MAVLink(None)
+        self.frames=collections.deque(maxlen=512)
+        self.send_lock=threading.Lock()
+        self.mav=SimpleNamespace(flightmode='UNKNOWN',close=self.close)
+        self.publisher=node.create_publisher(String,'/graey/fcu/tx',100)
+        self.subscription=node.create_subscription(String,'/graey/fcu/rx',self.receive,200)
+
+    def receive(self,msg):
+        from .mavlink import mavutil
+        try:
+            data=json.loads(msg.data)
+            stamp=data['received_monotonic']
+            if not 0<=time.monotonic()-stamp<.25:return
+            frame=self.decoder.parse_char(bytes.fromhex(data['frame']))
+            if frame is None:return
+            if frame.get_type()=='HEARTBEAT' and frame.get_srcSystem()==1 and frame.get_srcComponent()==1:
+                self.mav.flightmode=mavutil.mode_string_v10(frame)
+            self.frames.append((stamp,frame))
+        except (ValueError,TypeError,KeyError,mavutil.mavlink.MAVError):return
+
+    def send(self,name,*args):
+        if name=='heartbeat_send':return
+        with self.send_lock:
+            message=getattr(self.encoder,name.removesuffix('_send')+'_encode')(*args)
+            raw=bytes(message.pack(self.encoder))
+            self.encoder.seq=(self.encoder.seq+1)%256
+        self.publisher.publish(self.String(data=json.dumps(dict(component=self.component,
+            sent_monotonic=time.monotonic(),frame=raw.hex()))))
+
+    def drain(self,handler):
+        deadline=time.monotonic()+.02
+        while self.frames and time.monotonic()<deadline:
+            stamp,message=self.frames.popleft()
+            if 0<=time.monotonic()-stamp<.25:handler(message.get_type(),message)
+
+    def close(self):
+        self.node.destroy_subscription(self.subscription)
+        self.node.destroy_publisher(self.publisher)

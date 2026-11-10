@@ -1,0 +1,54 @@
+# Shared vehicle defaults, following the SD Crusader bringup convention.
+# Hardware-specific parameters remain with their existing commissioned sources.
+telemetry_gateway:
+  ros__parameters:
+    mavlink: "udpout:127.0.0.1:14551"
+    stream_ids: [24, 29, 30, 32, 33, 49, 65, 137, 143, 193]
+    stream_hz: [10.0, 10.0, 20.0, 20.0, 10.0, 1.0, 10.0, 10.0, 10.0, 5.0]
+gui_node:
+  ros__parameters:
+    port: 8090
+competition_link_node:
+  ros__parameters:
+    ocs_host: "auto"
+    # Optional known team-router addresses, e.g. ocs_fallback_hosts: ["10.0.0.10"]
+    ocs_discovery_port: 37565
+    ocs_port: 37564
+    team_id: "ASTA"
+    outbox_path: "/root/robotx_ws/logs/competition-outbox.sqlite3"
+
+dvl_node:
+  ros__parameters:
+    ip: "192.168.2.10"
+    port: 16171
+    scale: 1.0
+vn100_node:
+  ros__parameters:
+    port: "/dev/serial/by-id/usb-FTDI_USB-RS232_Cable_AV0K9DQE-if00-port0"
+    baud: 115200
+    flip_180: true
+    yaw_offset_deg: 0.0
+led_node:
+  ros__parameters:
+    port: "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+    baud: 115200
+kill_switch:
+  ros__parameters:
+    kill_channel: 10
+    arm_channel: 11
+    heartbeat_channel: 12
+    mode_channel: 7
+    high: 1700
+    relay_servo: 9
+    relay_kill_pwm: 1900
+    relay_run_pwm: 1100
+    tether_ip: "192.168.2.1"
+    tether_interface: "enP8p1s0"
+    tether_ping_interval_s: 1.0
+    tether_timeout_s: 3.0
+nav_ekf_bridge:
+  ros__parameters:
+    water_density: 1000.0
+    pressure_message: "SCALED_PRESSURE3"
+    fixed_local_navigation: true
+    heading_reference_validated: false

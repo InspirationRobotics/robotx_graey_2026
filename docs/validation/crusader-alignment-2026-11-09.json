@@ -1,0 +1,40 @@
+{
+  "date": "2026-11-09",
+  "scope": "local source and synthetic validation; no hardware opened/deployment/commit/push",
+  "unit_tests": {
+    "run": 464,
+    "skipped": 5,
+    "result": "PASS"
+  },
+  "browser": {
+    "result": "PASS",
+    "copied_crusader_app": true,
+    "copied_crusader_page": true,
+    "real_tcp": true,
+    "synthetic_vehicle": true,
+    "hardware_opened": false,
+    "javascript_errors": []
+  },
+  "ros_runtime": "PASS: actual parameter services on domain125",
+  "ros_rpc": "PASS: copied laptop TCP/HTTP through actual ROS parameter services on domain126",
+  "colcon": "PASS",
+  "installed_launch_discovery": "PASS",
+  "native_laptop_venv_offline": "PASS",
+  "installed_assets_matched": [
+    "robotx_graey_2026\\api\\gui\\laptop\\crusader_theme.css",
+    "robotx_graey_2026\\api\\gui\\laptop\\editor.js",
+    "robotx_graey_2026\\api\\gui\\laptop\\gcs_app.py",
+    "robotx_graey_2026\\api\\gui\\laptop\\graey_adapter.js",
+    "robotx_graey_2026\\api\\gui\\laptop\\graey_app.py",
+    "robotx_graey_2026\\api\\gui\\laptop\\graey_theme.js",
+    "robotx_graey_2026\\api\\gui\\laptop\\graey_tools.html",
+    "robotx_graey_2026\\api\\gui\\laptop\\map.js",
+    "robotx_graey_2026\\api\\gui\\laptop\\page.html",
+    "robotx_graey_2026\\api\\gui\\laptop\\__init__.py",
+    "tools\\mission.css",
+    "tools\\scripts\\GRAEY_GUI.cmd"
+  ],
+  "logs": "parent competition-comms/crusader-alignment/",
+  "copied_manifest": "crusader-copied-files-2026-11-09.json",
+  "port": 8152
+}

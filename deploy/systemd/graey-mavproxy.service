@@ -10,7 +10,7 @@ Restart=always
 RestartSec=5
 ExecStartPre=/usr/bin/docker start graey
 ExecStart=/usr/bin/docker exec graey /root/robotx_ws/src/robotx_graey_2026/scripts/start_mavproxy.sh
-ExecStop=-/usr/bin/docker exec graey pkill -f mavproxy.py
+ExecStop=-/usr/bin/docker exec graey pkill -TERM -f "^python3 .*[/]mavproxy_mission_gate[.]py( |$)"
 
 [Install]
 WantedBy=multi-user.target

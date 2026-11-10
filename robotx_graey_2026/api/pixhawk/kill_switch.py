@@ -44,6 +44,7 @@ import uuid
 from collections import OrderedDict
 
 from rcl_interfaces.msg import ParameterDescriptor
+from robotx_graey_2026.api.runtime_parameters import result,tether_timing
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
 
@@ -231,7 +232,7 @@ class KillSwitch(Node):
         for name, value in defaults.items():
             self.declare_parameter(
                 name, value,
-                ParameterDescriptor(read_only=True),
+                ParameterDescriptor(read_only=name not in ('tether_ping_interval_s','tether_timeout_s'),description='Live timing change only disarmed with ESC power inhibited' if name in ('tether_ping_interval_s','tether_timeout_s') else 'Startup control wiring/ownership; restart required'),
             )
 
         def value(name):
@@ -246,7 +247,7 @@ class KillSwitch(Node):
         self.relay_kill_pwm = value('relay_kill_pwm')
         self.relay_run_pwm = value('relay_run_pwm')
 
-        self.link = Link(value('mavlink'), 194, self.get_logger())
+        self.link = Link(value('mavlink'), 194, self.get_logger(), node=self)
         self.started = self.now()
 
         self.source = 'RF'
@@ -282,6 +283,7 @@ class KillSwitch(Node):
             value('tether_timeout_s'),
         )
 
+        self.add_on_set_parameters_callback(lambda p:result(lambda q:tether_timing(self,q),p))
         self.status_pub = self.create_publisher(String, STATUS_TOPIC, 10)
         self.reply_pub = self.create_publisher(String, REPLY_TOPIC, 10)
 
@@ -636,6 +638,7 @@ class KillSwitch(Node):
     def publish_status(self):
         ping = self.probe.snapshot()
         self.status_pub.publish(String(data=json.dumps({
+            'published_monotonic': self.now(),
             'session': self.session,
             'revision': self.revision,
             'source': self.source,

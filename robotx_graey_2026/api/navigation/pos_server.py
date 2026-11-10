@@ -58,7 +58,7 @@ class PosServer(Node):
         super().__init__('pos_server')
         self.declare_parameter('mavlink', 'udpout:127.0.0.1:14554')
         self.declare_parameter('port', 8081)
-        self.link = Link(self.get_parameter('mavlink').value, 191, self.get_logger())
+        self.link = Link(self.get_parameter('mavlink').value, 191, self.get_logger(), node=self)
 
         self.create_subscription(Bool, '/graey/pole/visible', self.on_vis, 10)
         self.create_subscription(PointStamped, '/graey/pole', self.on_pole, 10)

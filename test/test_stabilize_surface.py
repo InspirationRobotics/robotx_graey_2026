@@ -10,7 +10,8 @@ class StabilizeSurfaceTests(unittest.TestCase):
             self.assertEqual(out[2:],(500,0))
             for a,b in zip(out[:2],expected):
                 self.assertEqual((a>0)-(a<0),b)
-                self.assertLessEqual(abs(a),150)
+                # Existing controller limit is 300; migration must not change its tuning.
+                self.assertLessEqual(abs(a),300)
     def test_stop_clears_integral_and_brakes(self):
         c=StabilizeSurfaceControl()
         for i in range(50):c.step(i*.1,(.1,0,0),(0,0,0),0,0)

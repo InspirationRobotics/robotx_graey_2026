@@ -9,6 +9,9 @@ Auto-reconnects if the socket drops.
 """
 import json
 import socket
+import time
+from rcl_interfaces.msg import ParameterDescriptor
+from robotx_graey_2026.api.runtime_parameters import result, dvl_scale
 
 from rclpy.node import Node
 from std_msgs.msg import Bool, Float32, String
@@ -21,8 +24,8 @@ from robotx_graey_2026.api.navigation.dvl_report import validate_report
 class DVLNode(Node):
     def __init__(self):
         super().__init__('dvl_node')
-        self.declare_parameter('ip', '192.168.2.10')
-        self.declare_parameter('port', 16171)
+        self.declare_parameter('ip', '192.168.2.10',ParameterDescriptor(read_only=True,description='DVL TCP endpoint; restart required'))
+        self.declare_parameter('port',16171,ParameterDescriptor(read_only=True,description='DVL TCP endpoint; restart required'))
         self.declare_parameter('scale', 1.0)        # measured 1.0 wet; RoboSub's 1.15385 does not apply
 
         self.ip = self.get_parameter('ip').value
@@ -35,9 +38,19 @@ class DVLNode(Node):
         self.pub_alt = self.create_publisher(Float32, '/graey/dvl/altitude', 10)
         self.pub_sample = self.create_publisher(String, '/graey/dvl/sample', 10)
 
+        self.runtime_control={};self.runtime_control_at=-float('inf')
+        self.create_subscription(String,'/graey/control_watchdog/status',self.runtime_status,10)
+        self.add_on_set_parameters_callback(lambda p:result(lambda q:dvl_scale(self,q,time.monotonic()),p))
         self.sock = None
         self.buf = b''
         self.create_timer(0.02, self.spin_once)
+
+    def runtime_status(self,msg):
+        try:
+            self.runtime_control=json.loads(msg.data)
+            stamp=self.runtime_control.get('published_monotonic')
+            self.runtime_control_at=stamp if type(stamp) in (int,float) and stamp<=time.monotonic() else -float('inf')
+        except (ValueError,TypeError):pass
 
     def connect(self):
         try:

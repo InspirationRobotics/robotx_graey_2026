@@ -11,6 +11,7 @@ sit on the prequal video.
 """
 import serial
 from rclpy.node import Node
+from rcl_interfaces.msg import ParameterDescriptor
 from std_msgs.msg import Int32
 
 from robotx_graey_2026.api.node_util import run
@@ -22,8 +23,8 @@ STALE_S = 1.0                                       # no state message this long
 class LedNode(Node):
     def __init__(self):
         super().__init__('led_node')
-        self.declare_parameter('port', DEFAULT_PORT)
-        self.declare_parameter('baud', 115200)
+        self.declare_parameter('port', DEFAULT_PORT,ParameterDescriptor(read_only=True,description='Serial owner endpoint; restart required'))
+        self.declare_parameter('baud',115200,ParameterDescriptor(read_only=True,description='Serial wire rate; restart required'))
         self.port = self.get_parameter('port').value
         self.baud = self.get_parameter('baud').value
         self.state = 1                              # RED until told otherwise

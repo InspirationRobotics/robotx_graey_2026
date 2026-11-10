@@ -23,7 +23,7 @@ if [ -n "$1" ]; then
 else                                    # one broadcast per live interface, so this
   OUTS=""                               # works on tether only, WiFi only, or both
   for BCAST in $(ip -o -4 addr show scope global | grep -v docker | awk '/brd/ {print $6}'); do
-    OUTS="$OUTS --out=udpbcast:$BCAST:14570"
+    OUTS="$OUTS --out=udpall:$BCAST:14570"
     echo "telemetry -> $BCAST:14570 (broadcast)"
   done
   [ -z "$OUTS" ] && echo "WARNING: no network interfaces up - QGC will not connect"
@@ -34,10 +34,4 @@ fi
 python3 "$(dirname "$0")/mavproxy_mission_gate.py" --master=$CUBE --baudrate=115200 $DAEMON \
   --state-basedir=/root/robotx_ws/logs \
   $OUTS \
-  --out=udpin:0.0.0.0:14551 \
-  --out=udpin:0.0.0.0:14552 \
-  --out=udpin:0.0.0.0:14553 \
-  --out=udpin:0.0.0.0:14554 \
-  --out=udpin:0.0.0.0:14555 \
-  --out=udpin:0.0.0.0:14556 \
-  --out=udpin:127.0.0.1:14557
+  --out=udpin:127.0.0.1:14551

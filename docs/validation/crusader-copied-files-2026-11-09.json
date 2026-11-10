@@ -1,0 +1,52 @@
+{
+  "robotx_graey_2026\\api\\gui\\laptop\\gcs_app.py": {
+    "category": "COPIED",
+    "source": "competition-comms\\current-reference-2026-11-09\\crusader-communications\\crusader_groundstation\\crusader_groundstation\\laptop\\gcs_app.py",
+    "sha256": "c78ef9a59f291fb323e03cee74c4ed7d32891e20a058b0aad2b6f91cba42f1b8"
+  },
+  "robotx_graey_2026\\api\\gui\\laptop\\page.html": {
+    "category": "COPIED",
+    "source": "competition-comms\\current-reference-2026-11-09\\crusader-communications\\crusader_groundstation\\crusader_groundstation\\laptop\\page.html",
+    "sha256": "0a71f871699821c3e1c5709a3292664fcbb63547e00cc07731ba98ce1d687476"
+  },
+  "robotx_graey_2026\\api\\gui\\laptop\\map.js": {
+    "category": "COPIED",
+    "source": "competition-comms\\current-reference-2026-11-09\\crusader-communications\\crusader_groundstation\\crusader_groundstation\\laptop\\map.js",
+    "sha256": "a1d77a26507a599a3cbabdb12322dd81494ad16fc46169c6a27bf492231df1af"
+  },
+  "robotx_graey_2026\\api\\gui\\laptop\\editor.js": {
+    "category": "COPIED",
+    "source": "competition-comms\\current-reference-2026-11-09\\crusader-communications\\crusader_groundstation\\crusader_groundstation\\laptop\\editor.js",
+    "sha256": "e8a01b82d12cc068917c225ab2186b331266b87cd4cfe7a2dfe6cf9c0905e754"
+  },
+  "robotx_graey_2026\\api\\gui\\gcs_wire.py": {
+    "category": "COPIED",
+    "source": "competition-comms\\current-reference-2026-11-09\\crusader-communications\\crusader_groundstation\\crusader_groundstation\\gcs_wire.py",
+    "sha256": "4a8f4b4ce5adfbda21a02df7175928bf2ccf2f1bac054a85d93640e7feb40478"
+  },
+  "robotx_graey_2026\\api\\gui\\mission_xml.py": {
+    "category": "COPIED",
+    "source": "competition-comms\\current-reference-2026-11-09\\crusader-communications\\crusader_groundstation\\crusader_groundstation\\mission_xml.py",
+    "sha256": "66688de5d169e17f33e89beeaa26eebe541aa095bbea77c85fffcf41e8a9e102"
+  },
+  "robotx_graey_2026\\api\\gui\\param_client.py": {
+    "category": "COPIED",
+    "source": "competition-comms\\current-reference-2026-11-09\\crusader-communications\\crusader_groundstation\\crusader_groundstation\\param_client.py",
+    "sha256": "5f5f919eeb1d6b387d489d17a940dfddee42c25b2801c668e82dcf96cd061e93"
+  },
+  "robotx_graey_2026\\api\\gui\\recorder.py": {
+    "category": "COPIED",
+    "source": "competition-comms\\current-reference-2026-11-09\\crusader-communications\\crusader_groundstation\\crusader_groundstation\\recorder.py",
+    "sha256": "760f8947b16dba4959c72e17ffcc5a19645971b97db98f242119892703e8c965"
+  },
+  "robotx_graey_2026\\api\\gui\\crusader_system_info.py": {
+    "category": "COPIED",
+    "source": "competition-comms\\current-reference-2026-11-09\\crusader-communications\\crusader_groundstation\\crusader_groundstation\\system_info.py",
+    "sha256": "2fbddb73ede0dff59f8d78321975ee969128d26fb11f1b6966f0acbae742ff79"
+  },
+  "robotx_graey_2026\\api\\gui\\log_buffer.py": {
+    "category": "COPIED",
+    "source": "competition-comms\\current-reference-2026-11-09\\crusader-communications\\crusader_groundstation\\crusader_groundstation\\log_buffer.py",
+    "sha256": "d593a34a8f9281f9b7470d2a7b39880b8c64016f8b186811306f21443e3a77d7"
+  }
+}

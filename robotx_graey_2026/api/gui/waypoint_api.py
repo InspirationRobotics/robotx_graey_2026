@@ -7,6 +7,7 @@ import time
 import uuid
 
 from robotx_graey_2026.api.navigation.waypoint_logic import validate_plan, geo_to_ne
+from robotx_graey_2026.api.navigation.route_plan import validate_route
 
 
 
@@ -72,7 +73,8 @@ class WaypointAPI:
 
     def preview(self, plan, nav, source='gui'):
 
-        plan = validate_plan(plan)
+        route = isinstance(plan, dict) and 'points' in plan
+        plan = validate_route(plan) if route else validate_plan(plan)
         if source=='qgc':plan['qgc_goto']=True
 
         if plan['mode']!='surface':raise ValueError('Only surface missions are supported in navigation_new')
@@ -83,7 +85,7 @@ class WaypointAPI:
 
         distance = math.hypot(*target) if base.get('relative') else math.dist(target, base['local'][:2])
 
-        if source!='qgc' and not plan.get('alignment_only') and not .3 <= distance <= 20:
+        if not route and source!='qgc' and not plan.get('alignment_only') and not .3 <= distance <= 20:
 
             raise ValueError('Waypoint must be 0.3 to 20 m away')
 

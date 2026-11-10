@@ -1,4 +1,8 @@
-# Graey UUV — RobotX 2026
+# Graey UUV â€” RobotX 2026
+
+Current laptop launcher: `tools/scripts/GRAEY_GUI.cmd` (localhost8152; `--graey GRAEY_WIFI_IP`). See [Crusader alignment, runtime updates and operator setup](docs/crusader-alignment-2026-11-09.md).
+
+Current local operator interface: [unified Missions, Sensors and Record](docs/unified-operator-guide.md). Hardware installation/commissioning is still pending.
 
 Autonomy software for **Graey**, Team Inspiration's uncrewed underwater vehicle
 (UUV) for the 2026 Maritime RobotX Challenge. Built from scratch on ROS 2 Humble.
@@ -7,7 +11,7 @@ Graey works alongside **Crusader** (USV) and **BabyDragon** (UAV). Its competiti
 job is Mission Task 2 (Infrastructure Survey & Repair). Its Proof of Readiness
 (prequalification) run was submitted in August 2026.
 
-> **Full documentation:** in the team Drive — the complete operating manual:
+> **Full documentation:** in the team Drive â€” the complete operating manual:
 > hardware, wiring, procedures, troubleshooting, and design decisions. This README
 > is just the quick reference.
 
@@ -25,7 +29,7 @@ The local ArduSub software-in-the-loop workflow is documented in
   Humble + CUDA/TensorRT), which holds only the environment. Edit outside the
   container, build and run inside it.
 - **Flight controller:** CubePilot Cube Orange running ArduSub, frame
-  VECTORED_6DOF (8 thrusters). Owned by exactly one program — **MAVProxy** — which
+  VECTORED_6DOF (8 thrusters). Owned by exactly one program â€” **MAVProxy** â€” which
   rebroadcasts MAVLink over UDP to the ROS 2 nodes and to QGroundControl. Nothing
   else may open the Cube's serial port.
 - **Navigation (no GPS underwater):** Water Linked DVL A50 velocity + VectorNav
@@ -33,7 +37,7 @@ The local ArduSub software-in-the-loop workflow is documented in
 - **Perception:** two Luxonis OAK-D cameras, forward and downward. Status is shown
   on a NeoPixel strip driven by an Arduino.
 - **Autostart:** two systemd units on the Jetson *host* bring everything up on
-  boot — `graey-mavproxy.service`, then `graey-ros.service`. Normal operation
+  boot â€” `graey-mavproxy.service`, then `graey-ros.service`. Normal operation
   needs no terminal at all.
 
 ## Quick start
@@ -45,7 +49,7 @@ the control GUI in a browser:
 http://graey.local:8090
 ```
 
-QGroundControl needs no configuration — MAVProxy broadcasts to every subnet the
+QGroundControl needs no configuration â€” MAVProxy broadcasts to every subnet the
 Jetson is on, so it appears on the router *and* over the tether.
 
 To get a shell:
@@ -74,12 +78,12 @@ sudo systemctl stop graey-ros graey-mavproxy
 # 2. enter the container (colcon lives here, NOT on the host)
 docker exec -it graey bash
 
-# 3. terminal 1 — MAVProxy, first, because it owns the Pixhawk
+# 3. terminal 1 â€” MAVProxy, first, because it owns the Pixhawk
 cd /root/robotx_ws
 ./src/robotx_graey_2026/scripts/start_mavproxy.sh          # broadcast to all subnets
 ./src/robotx_graey_2026/scripts/start_mavproxy.sh <IP>     # or one address
 
-# 4. terminal 2 — the always-on stack
+# 4. terminal 2 â€” the always-on stack
 cd /root/robotx_ws && source install/setup.bash
 ros2 launch robotx_graey_2026 core.launch.py
 ```
@@ -115,15 +119,15 @@ robotx_graey_2026/api/
 
 | Node | Role |
 |------|------|
-| `dvl_node` | DVL A50 → velocity / altitude topics |
-| `vn100_node` | VN-100 IMU → attitude / heading topics |
-| `fused_nav_bridge` | DVL/VN motion with pressure-gated GPS corrections → Cube EKF (MAVLink ODOMETRY) |
+| `dvl_node` | DVL A50 â†’ velocity / altitude topics |
+| `vn100_node` | VN-100 IMU â†’ attitude / heading topics |
+| `fused_nav_bridge` | DVL/VN motion with pressure-gated GPS corrections â†’ Cube EKF (MAVLink ODOMETRY) |
 | `kill_switch` | RC kill / arm / mode switches; commands the hardware kill relay |
-| `led_node` | status colour → Arduino strip |
+| `led_node` | status colour â†’ Arduino strip |
 | `pixhawk_led_node` | derives status (disarmed=red, manual=yellow, auto=green) |
 | `gui_node` | serves the control GUI on port 8090 |
 | `pos_server` | live position feed for the map planner |
-| `pole_tracker` | camera → detected target bearing and range |
+| `pole_tracker` | camera â†’ detected target bearing and range |
 | `prequal_mission`, `prequal_mission_cv` | prequalification state machines (kept as reference) |
 | `demo_mission` | instrumented GUIDED run for depth-hold diagnosis |
 

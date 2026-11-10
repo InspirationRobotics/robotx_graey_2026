@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Graey GUI, including RF/tether failsafe selection.
+"""GRAEY ground station, following the SD fleet's operator conventions.
 
-The existing tools/gui.html is served with an additional control panel.
-No modification to gui.html or additional ROS message package is required.
+Shared theme, transport/run/outbox snapshots, process and sensor status,
+incremental logs and host measurements accompany the existing vehicle controls.
 
 Safety requests and acknowledgements use std_msgs/String JSON messages.
 Only kill_switch owns the selected watchdog and recovery state.
@@ -24,7 +24,26 @@ from urllib.parse import urlparse, parse_qs
 from robotx_graey_2026.api.steady_node import SteadyNode as Node
 from std_msgs.msg import Int32, Bool, Float32, String
 from geometry_msgs.msg import TwistWithCovarianceStamped
+from sensor_msgs.msg import Imu
+from rcl_interfaces.msg import Log
+from robotx_graey_2026.api.gui.log_buffer import LogBuffer
 from robotx_graey_2026.api.gui.navigation_view import NavigationView
+from robotx_graey_2026.api.gui.communications_view import CommunicationsView
+from robotx_graey_2026.api.gui.system_info import SystemInfo
+from robotx_graey_2026.api.gui.log_reader import read_log
+from robotx_graey_2026.api.gui.recording_service import RecordingService
+from robotx_graey_2026.api.gui.mission_store import MissionStore
+
+communications = CommunicationsView()
+tiers_requests = queue.Queue(maxsize=1)
+gateway_view = CommunicationsView()
+system_info = SystemInfo()
+recording_service = None
+parameter_bridge = None
+parameter_graph = []
+parameter_defaults = {}
+fleet_logs=LogBuffer(1500)
+mission_store = MissionStore(Path(os.environ.get('GRAEY_MISSION_DIR',str(Path.home()/'robotx_ws/missions'))))
 from robotx_graey_2026.api.gui.waypoint_api import WaypointAPI
 from robotx_graey_2026.api.gui.calibration_jobs import CalibrationJobs, ServiceQueue
 
@@ -48,8 +67,24 @@ CORE_MANAGED_EXECUTABLES = frozenset(
 ) | {'navigation_supervisor', 'nav_ekf_bridge'}
 READ_ONLY = {
     'mavproxy': ('MAVProxy', ['mavproxy.py']),
+    'gcs': ('Laptop GCS bridge · core', ['gcs_bridge']),
+    'gateway': ('FCU telemetry gateway · core', ['telemetry_gateway']),
+    'watchdog': ('Control watchdog · core', ['kill_switch']),
+    'communications': ('WiFi reporting · opt-in core', ['competition_link_node']),
 }
 FILES = {
+    '/missions':'missions.html',
+    '/sensors':'sensors.html',
+    '/record':'record.html',
+    '/missions.js':'missions.js',
+    '/sensors.js':'sensors.js',
+    '/record.js':'record.js',
+    '/mission.css':'mission.css',
+    '/ti_logo.jpg': 'ti_logo.jpg',
+    '/asta_logo.png': 'asta_logo.png',
+    '/station.css': 'station.css',
+    '/station_theme.js': 'station_theme.js',
+    '/simple-sequence': 'simple_sequence.html',
     '/vendor/leaflet/leaflet.js': 'vendor/leaflet/leaflet.js',
     '/vendor/leaflet/leaflet.css': 'vendor/leaflet/leaflet.css',
     '/navigation': 'navigation.html',
@@ -70,6 +105,33 @@ TYPES = {
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
 }
+
+def page_navigation(html, path):
+    """Shared navigation across existing pages; retain every page and control."""
+    theme='<link rel="stylesheet" href="/station.css"><script src="/station_theme.js"></script>'
+    html=html.replace('</head>',theme+'</head>',1) if '</head>' in html else theme+html
+    if path in ('/','/missions','/sensors','/record'):return html
+    groups = (
+        ('Missions', '/missions', ('/missions','/waypoint','/pool-map','/planner','/simple-sequence')),
+        ('Sensors', '/sensors', ('/navigation','/sensors','/navigation-supervisor')),
+        ('Record', '/record', ('/record',)),
+        ('Prepare & Calibration','/calibration',('/calibration',)),
+    )
+    links = ''.join('<a href="'+url+'"'+(' aria-current="page"' if path in paths else '')+'>'+label+'</a>'
+                    for label, url, paths in groups)
+    extras = '<a href="/vehicle-controls">Vehicle controls</a>'
+    bar = ('<style>.graey-tabs{display:flex;flex-wrap:wrap;gap:8px;padding:10px 14px;'
+           'background:#15222e;border-bottom:1px solid #47647a;flex:none;position:relative;z-index:2000}'
+           '.graey-tabs a{padding:10px 14px;color:#e5edf2;text-decoration:none;border-radius:6px;'
+           'font:600 14px system-ui}.graey-tabs a[aria-current]{background:#216b85}'
+           '.graey-tabs a:focus-visible{outline:2px solid #ffda89}</style>'
+           '<nav class="graey-tabs" aria-label="Main navigation">'+links+extras+'</nav>')
+    # Pages with implicit body start at their header. Explicit-body pages insert
+    # immediately after its opening tag, keeping all existing scripts intact.
+    start=html.lower().find('<body')
+    end=html.find('>',start)+1 if start>=0 else html.lower().find('<header')
+    if end<0:end=0
+    return html[:end]+bar+html[end:]
 # Explicit allowlist for packaged georeferenced imagery; no arbitrary file route.
 for _z,_x0,_y0,_radius in ((16,11450,26416,1),(19,91604,211332,3)):
     for _x in range(_x0-_radius,_x0+_radius+1):
@@ -193,26 +255,33 @@ def waypoint_request(body):
             raise ValueError('Current mission run ID required')
         waypoint_aborts.put(body['run_id'])
         return dict(ok=True, msg='Abort requested; verify MANUAL mode and take control')
-    if action != 'start':
+    if action not in ('start', 'simple_start'):
         raise ValueError('Unknown waypoint action')
-    if calibration_jobs is not None and calibration_jobs.snapshot().get('busy'):
-        raise ValueError('Finish or cancel navigation preparation before starting a mission')
-    item, duplicate = waypoint_api.consume(body.get('plan_id'), nav)
-    if duplicate:
-        return dict(ok=True, run_id=item['run_id'], duplicate=True)
     cap = waypoint_capabilities()
-    if not cap['enabled']:
-        raise ValueError('Live waypoint commissioning is not enabled')
-    if not cap['simulation']:
-        if item['plan']['map'] == 'pool':
-            raise ValueError('Pool image registration is approximate; survey required for live pool targets')
-        c = control_bridge.snapshot()
-        if not (c.get('online') and c.get('vehicle_fresh') and not c.get('inhibit')
-                and not c.get('sa_active') and c.get('esc_commanded_on')):
-            raise ValueError('Control watchdog/ESC permission unavailable')
+    if action == 'simple_start':
+        item = {'plan': {'kind': 'simple_sequence', 'mode': 'surface'}}
+    else:
+        if calibration_jobs is not None and calibration_jobs.snapshot().get('busy'):
+            raise ValueError('Finish or cancel navigation preparation before starting a mission')
+        item, duplicate = waypoint_api.consume(body.get('plan_id'), nav)
+        if duplicate:
+            return dict(ok=True, run_id=item['run_id'], duplicate=True)
+        cap = waypoint_capabilities()
+        if not cap['enabled']:
+            raise ValueError('Live waypoint commissioning is not enabled')
+        if not cap['simulation']:
+            if item['plan']['map'] == 'pool':
+                raise ValueError('Pool image registration is approximate; survey required for live pool targets')
+            c = control_bridge.snapshot()
+            if not (c.get('online') and c.get('vehicle_fresh') and not c.get('inhibit')
+                    and not c.get('sa_active') and c.get('esc_commanded_on')):
+                raise ValueError('Control watchdog/ESC permission unavailable')
     if any_mission_running() or (waypoint_process is not None and waypoint_process.poll() is None):
         raise ValueError('Another mission is running')
     run_id = uuid.uuid4().hex
+    if type(body.get('competition',False)) is not bool:
+        raise ValueError('competition must be a boolean')
+    item['plan']['competition']=body.get('competition',False)
     folder = Path(os.environ.get('GRAEY_WAYPOINT_LOG_DIR', str(Path.home()/'robotx_ws/logs')))
     folder.mkdir(parents=True, exist_ok=True)
     argv = ['ros2', 'run', 'robotx_graey_2026', 'waypoint_mission', '--ros-args',
@@ -330,14 +399,14 @@ function watchdogRender() {
     ' | ESC command: ' + (s.esc_commanded_on ? 'ON' : 'OFF') +
     ' | ' + (s.inhibit ? 'Inhibited: ' + s.inhibit : 'Ready');
 
-  const age = s.ping_age === null
+  const age = !Number.isFinite(s.ping_age)
     ? 'no successful reply'
     : s.ping_age.toFixed(1) + ' s since reply';
 
   document.getElementById('watchdogLinks').textContent =
     'RF heartbeat: ' + (s.rf_alive ? 'OK' : 'LOST') +
     ' | Tether: ' + (s.tether_alive ? 'OK' : 'UNREACHABLE') +
-    ' (' + s.tether_ip + ' via ' + s.tether_interface + ', ' + age + ')' +
+    ' (' + (s.tether_ip||'not configured') + ' via ' + (s.tether_interface||'unknown interface') + ', ' + age + ')' +
     ' | Cube telemetry: ' + (s.vehicle_fresh ? 'OK' : 'STALE') +
     (s.sa_active ? ' | SA KILL active' : '') +
     (s.autonomous ? ' | Autonomous flight mode' : '');
@@ -724,7 +793,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path not in ('/api/controller', '/api/navigation/reset', '/api/waypoint', '/api/calibration'):
+        if path not in ('/api/controller', '/api/navigation/reset', '/api/waypoint', '/api/calibration', '/api/communications/tiers','/api/recording','/api/missions','/api/recording/session','/api/params'):
             self.send_error(404)
             return
 
@@ -740,12 +809,58 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             size = int(self.headers.get('Content-Length', '0'))
-            if not 0 < size <= 2048:
+            if not 0 < size <= (65536 if path in ('/api/recording','/api/missions') else 2048):
                 raise ValueError('invalid body size')
             self.connection.settimeout(3.0)
             body = json.loads(self.rfile.read(size))
             if not isinstance(body, dict):
                 raise ValueError('expected object')
+
+            if path == '/api/params':
+                node=body.get('node');changes=body.get('values')
+                if parameter_bridge is None or node not in parameter_graph or not isinstance(changes,dict):raise ValueError('Known node and parameter values required')
+                with operation_lock:
+                    if any_mission_running():raise ValueError('Stop missions before live parameter updates')
+                    rows=parameter_bridge.set(node,changes)
+                ok=all(row['ok'] for row in rows)
+                self.reply_json(200 if ok else 409,dict(ok=ok,msg='Live parameters applied' if ok else '; '.join(row['reason'] for row in rows if not row['ok']),results=rows))
+                return
+            if path == '/api/recording/session':
+                if recording_service is None or body.get('action')!='delete':raise ValueError('Unknown recording operation')
+                self.reply_json(200,recording_service.delete(body.get('name')))
+                return
+            if path == '/api/recording':
+                if recording_service is None:raise ValueError('Recording service unavailable')
+                recording_service.submit(body)
+                result=recording_service.wait_result(body['action'])
+                self.reply_json(200 if result.get('ok') else 409,result)
+                return
+            if path == '/api/missions':
+                action=body.get('action')
+                if action=='save':result=mission_store.save(body.get('name'),body.get('mission'))
+                elif action=='delete':mission_store.delete(body.get('name'));result=None
+                else:raise ValueError('Unknown mission-library action')
+                self.reply_json(200,dict(ok=True,mission=result,missions=mission_store.list()))
+                return
+            if path == '/api/communications/tiers':
+                snapshot=communications.snapshot()
+                data=snapshot['data']
+                tiers=body.get('tiers')
+                mission=body.get('mission','')
+                if (not snapshot['fresh'] or snapshot['connection']!='connected'
+                        or not data.get('ocs_run') or data.get('remote_state') in ('DECLARED','RUNNING')):
+                    self.reply_json(409,dict(ok=False,msg='A connected OCS with no declared/running run is required.'))
+                    return
+                if (not isinstance(tiers,dict) or set(tiers)!={'task1','task2','task3','task4'}
+                        or any(v not in ('TIER_NONE','TIER_CORE','TIER_ADVANCED','TIER_DISRUPTIVE') for v in tiers.values())
+                        or not isinstance(mission,str) or len(mission)>128):
+                    raise ValueError('All four valid task tiers and a mission name of at most 128 characters are required.')
+                try:tiers_requests.put_nowait(dict(tiers=tiers,mission=mission,requested_monotonic=time.monotonic()))
+                except queue.Full:
+                    self.reply_json(409,dict(ok=False,msg='Another tier request is pending.'))
+                    return
+                self.reply_json(202,dict(ok=True,msg='Request handed to communications; check the OCS reply.'))
+                return
 
             if path == '/api/calibration':
                 with operation_lock:
@@ -811,10 +926,71 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         query = parse_qs(u.query)
 
+        if u.path == '/api/fleet/logs':
+            try:
+                rows,cursor,dropped=fleet_logs.read(int(query.get('after',['0'])[0]),int(query.get('min_level',['20'])[0]))
+                self.reply_json(200,dict(items=rows,cursor=cursor,dropped=dropped))
+            except ValueError:self.reply_json(400,dict(ok=False,msg='Invalid log cursor/level'))
+            return
+        if u.path == '/api/params':
+            name=query.get('node',[None])[0]
+            if name is None:self.reply_json(200,dict(graph=list(parameter_graph)));return
+            if parameter_bridge is None or name not in parameter_graph:
+                self.reply_json(404,dict(ok=False,msg='Unknown GRAEY ROS node'));return
+            try:
+                rows=parameter_bridge.list(name,parameter_defaults.get(name.lstrip('/'),{}).get('ros__parameters',{}))
+                self.reply_json(200,dict(ok=True,params=rows))
+            except (ValueError,RuntimeError,TimeoutError) as exc:self.reply_json(409,dict(ok=False,msg=str(exc)))
+            return
+        if u.path == '/api/recording/archive':
+            if recording_service is None:
+                self.reply_json(503,dict(ok=False,msg='Recording service unavailable'));return
+            name=query.get('name',[''])[0]
+            from robotx_graey_2026.api.gui.recorder import safe_session_dir
+            folder=safe_session_dir(str(recording_service.root),name)
+            session=recording_service.snapshot().get('session') or {}
+            if folder is None or not os.path.isdir(folder) or (session.get('active') and session.get('name')==name):
+                self.reply_json(409,dict(ok=False,msg='Select a stopped existing recording session'));return
+            self.send_response(200);self.send_header('Content-Type','application/gzip');self.send_header('Connection','close');self.end_headers();self.close_connection=True
+            recording_service.archive_into(name,self.wfile)
+            return
+        if u.path == '/api/recording/sessions':
+            self.reply_json(200,dict(sessions=recording_service.sessions() if recording_service else []))
+            return
+        if u.path == '/api/recording':
+            self.reply_json(200,recording_service.snapshot() if recording_service else dict(error='Recording service unavailable',topics=[]))
+            return
+        if u.path == '/api/missions':
+            try:
+                name=query.get('name',[None])[0]
+                self.reply_json(200,dict(ok=True,mission=mission_store.get(name)) if name else dict(ok=True,missions=mission_store.list()))
+            except (ValueError,OSError) as exc:self.reply_json(404,dict(ok=False,msg=str(exc)))
+            return
+        if u.path.startswith('/api/run/'):
+            self.reply_json(503,dict(ok=False,msg='Open the laptop GUI to access the shared OCS run.'))
+            return
+        if u.path == '/api/system':
+            self.reply_json(200,system_info.snapshot())
+            return
+
+        if u.path == '/api/logs':
+            try:
+                self.reply_json(200,read_log(ROS_LOG,int(query.get('after',['0'])[0]),
+                    query.get('generation',[''])[0],query.get('errors',['0'])[0]=='1'))
+            except (ValueError,OSError) as exc:
+                self.reply_json(400,dict(msg=str(exc)))
+            return
+
         if u.path == '/api/calibration':
             self.reply_json(200,dict(job=calibration_jobs.snapshot() if calibration_jobs else {},
                 controller=control_bridge.snapshot() if control_bridge else {},
                 navigation=navigation.snapshot()))
+            return
+
+        if u.path == '/api/communications':
+            self.reply_json(200,dict(**communications.snapshot(),gateway=gateway_view.snapshot(),
+                controller=control_bridge.snapshot() if control_bridge else {},
+                mission=navigation.snapshot()['streams'].get('waypoint',{})))
             return
 
         if u.path == '/api/waypoint':
@@ -872,6 +1048,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(400, 'unknown power action')
                 return
 
+            c=control_bridge.snapshot() if control_bridge else {}
+            if not (c.get('online') and c.get('vehicle_fresh') and c.get('armed') is False) or any_mission_running():
+                self.reply_json(409,dict(ok=False,msg='Power action requires fresh disarmed telemetry and stopped missions.'))
+                return
+            origin=self.headers.get('Origin')
+            if origin and urlparse(origin).netloc != self.headers.get('Host'):
+                self.reply_json(403,dict(ok=False,msg='Origin rejected.'))
+                return
             os.makedirs(os.path.dirname(REQUESTS[what]), exist_ok=True)
             with open(REQUESTS[what], 'w') as f:
                 f.write(str(time.time()))
@@ -965,11 +1149,14 @@ class Handler(BaseHTTPRequestHandler):
                 start = html.lower().find('<body')
                 end = html.find('>', start) if start >= 0 else -1
                 if end >= 0:
-                    html = html[:end + 1] + CONTROL_PANEL + html[end + 1:]
+                    marker='<section id="overview" style="display:none">'
+                    html=html.replace(marker,marker+CONTROL_PANEL,1) if marker in html else html[:end + 1]+CONTROL_PANEL+html[end + 1:]
                 else:
                     html = CONTROL_PANEL + html
                 body = html.encode('utf-8')
 
+            if fname.endswith('.html'):
+                body=page_navigation(body.decode('utf-8'),u.path).encode('utf-8')
             self.reply(200, body, TYPES[os.path.splitext(fname)[1]])
         except OSError:
             self.send_error(404, fname + ' not found in ' + web_dir)
@@ -981,11 +1168,12 @@ class Handler(BaseHTTPRequestHandler):
 class GuiNode(Node):
     def __init__(self):
         super().__init__('gui_node')
-        global web_dir, link, control_bridge, calibration_jobs
+        global web_dir, link, control_bridge, calibration_jobs, recording_service, parameter_bridge, parameter_defaults
 
-        self.declare_parameter('port', 8090)
-        self.declare_parameter('web_dir', web_dir)
-        self.declare_parameter('mavlink', 'udpout:127.0.0.1:14555')
+        from rcl_interfaces.msg import ParameterDescriptor
+        self.declare_parameter('port',8090,ParameterDescriptor(read_only=True,description='HTTP listener; restart required'))
+        self.declare_parameter('web_dir',web_dir,ParameterDescriptor(read_only=True,description='Asset root; restart required'))
+        self.declare_parameter('mavlink','udpout:127.0.0.1:14555',ParameterDescriptor(read_only=True,description='FCU transport ownership; restart required'))
 
         web_dir = self.get_parameter('web_dir').value
         port = self.get_parameter('port').value
@@ -994,11 +1182,27 @@ class GuiNode(Node):
             self.get_parameter('mavlink').value,
             195,
             self.get_logger(),
-        )
+            node=self)
+        from robotx_graey_2026.api.gui.param_client import ParamBridge
+        parameter_bridge=ParamBridge(self)
+        try:
+            import yaml
+            config=Path(web_dir).parent/'config/graey_params.yaml'
+            parameter_defaults=yaml.safe_load(config.read_text(encoding='utf-8')) or {}
+        except (ImportError,OSError,ValueError):parameter_defaults={}
+        self.create_timer(1.,self.update_parameter_graph)
+        self.create_subscription(Log,'/rosout',lambda m:fleet_logs.add(m.name,m.level,m.msg,stamp=m.stamp.sec+m.stamp.nanosec*1e-9),100)
+        self.tiers_pub=self.create_publisher(String,'/graey/comms/tiers_request',10)
+        self.create_timer(.1,self.flush_tiers)
+        recording_service=RecordingService(os.environ.get('GRAEY_RECORD_DIR',str(Path.home()/'robotx_ws/recordings')))
+        self.recording_service=recording_service
+        self.create_timer(1.,lambda:recording_service.update_sources(self.get_topic_names_and_types(),navigation.snapshot()))
         self.led_pub = self.create_publisher(
             Int32, '/graey/led_state', 10
         )
         self.led_checked = 0.0
+        self.create_subscription(String,'/graey/comms/status',self.on_communications,10)
+        self.create_subscription(String,'/graey/fcu/gateway_status',self.on_gateway,10)
 
         control_bridge = ControlBridge()
         self.control_bridge = control_bridge
@@ -1040,6 +1244,11 @@ class GuiNode(Node):
         )
 
         self.create_timer(1.0, self.link.heartbeat)
+        self.create_subscription(Imu,'/graey/vn100/imu',lambda m:navigation.put('vn_imu',dict(
+            angular_velocity=[m.angular_velocity.x,m.angular_velocity.y,m.angular_velocity.z],
+            linear_acceleration=[m.linear_acceleration.x,m.linear_acceleration.y,m.linear_acceleration.z],
+            orientation=[m.orientation.x,m.orientation.y,m.orientation.z,m.orientation.w],
+            frame=m.header.frame_id)),10)
         self.create_subscription(TwistWithCovarianceStamped, '/graey/dvl/velocity',
             lambda m: navigation.put('dvl_velocity', {'xyz': [m.twist.twist.linear.x,
                 m.twist.twist.linear.y, m.twist.twist.linear.z], 'frame': m.header.frame_id}), 10)
@@ -1055,7 +1264,7 @@ class GuiNode(Node):
         self.create_timer(0.2, self.hold_led)
 
         self.http_server = ThreadingHTTPServer(
-            ('0.0.0.0', port), Handler
+            ('127.0.0.1', port), Handler
         )
         self.http_server.daemon_threads = True
         threading.Thread(
@@ -1063,7 +1272,7 @@ class GuiNode(Node):
             daemon=True,
         ).start()
 
-        self.get_logger().info(f'GUI on http://0.0.0.0:{port}')
+        self.get_logger().info(f'GRAEY backend on http://127.0.0.1:{port}; use the Crusader-layout laptop launcher')
 
     def on_waypoint_status(self, msg):
         try:
@@ -1095,6 +1304,27 @@ class GuiNode(Node):
             self.waypoint_abort_runs.discard(current.get('run_id'))
         for run_id in self.waypoint_abort_runs:
             self.waypoint_abort_pub.publish(String(data=run_id))
+
+    def on_gateway(self,msg):
+        try:gateway_view.update(json.loads(msg.data))
+        except (ValueError,TypeError):pass
+
+    def update_parameter_graph(self):
+        global parameter_graph
+        from robotx_graey_2026.api.gui.param_client import visible_nodes
+        parameter_graph=visible_nodes([(namespace.rstrip('/')+'/'+name) for name,namespace in self.get_node_names_and_namespaces()])
+
+    def flush_tiers(self):
+        try:request=tiers_requests.get_nowait()
+        except queue.Empty:return
+        if 0<=time.monotonic()-request['requested_monotonic']<1:
+            self.tiers_pub.publish(String(data=json.dumps(request)))
+
+    def on_communications(self, msg):
+        try:
+            communications.update(json.loads(msg.data))
+        except (ValueError,TypeError) as exc:
+            self.get_logger().warning('Invalid communications status: '+str(exc))
 
     def hold_led(self):
         global led_off
@@ -1156,6 +1386,7 @@ class GuiNode(Node):
         self.link.drain(consume)
 
     def destroy_node(self):
+        if hasattr(self,'recording_service'):self.recording_service.close()
         if hasattr(self, 'http_server'):
             self.http_server.shutdown()
             self.http_server.server_close()

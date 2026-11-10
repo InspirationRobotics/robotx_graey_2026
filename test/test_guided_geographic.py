@@ -10,14 +10,23 @@ from robotx_graey_2026.api.navigation.waypoint_logic import ne_to_geo
 
 def simulate(offset=73., gps_jump=False, dropout=False, abort=False, current=None):
     e=RelativeEstimator();e.set_origin((33.,-117.,200.))
+    # Manual registration is now the prerequisite; automatic corridor fitting
+    # was retired. Preserve Cube-local heading and supply the measured map yaw.
+    e.map.align(33.,-117.,(0.,0.),offset)
     p=[0.,0.];v=[0.,0.];heading=0.;cmd=(0.,0.,0.);desired=0.;mode=19;armed=False
     target=(10.,3.);lat,lon=ne_to_geo(*target,(33.,-117.))
     run=None;leg=SurfaceLeg();begun=False;stages=[];previous=None
     pilot=StabilizeSurfaceControl()
+    guided_target=None
     for i in range(14000 if current is not None else 10000):
         t=100+i*.05
         rate=max(-.15,min(.15,((desired-heading+math.pi)%(2*math.pi)-math.pi)*2))
         heading+=rate*.05
+        if guided_target is not None and armed and mode==4:
+            delta=[guided_target[j]-p[j] for j in (0,1)]
+            norm=math.hypot(*delta)
+            cmd=tuple(d*min(.4,.18/max(norm,1e-9)) for d in delta)+(0.,)
+        else:cmd=(0.,0.,0.)
         demanded=cmd
         if current is not None:
             output=pilot.step(t,cmd,(*e.filter.x[2:4],0.),heading,desired) if armed else (0,0,500,0)
@@ -48,16 +57,21 @@ def simulate(offset=73., gps_jump=False, dropout=False, abort=False, current=Non
             surfaced=True,fusion_policy='continuous',state='Ready')
         gps_current=e.gps.status(t)['qualified'] and e.last_correction is not None and t-e.last_correction<.35
         o=dict(fresh=b['healthy'],failure='',abort=abort and i>280,supervisor=s,bridge=b,
-            armed=armed,mode=mode,local=(*e.position[:2],0.),velocity_ned=(*v,0.),depth=0.,yaw=heading,
+            # Registered odometry presented to Cube is north/east, rather than
+            # the estimator's internal pre-registration local XY.
+            armed=armed,mode=mode,local=(*b['position_ned'][:2],0.),velocity_ned=(*rotation(v,offset),0.),depth=0.,yaw=heading+math.radians(offset),
             speed=math.hypot(*v),surface_gps_current=gps_current,navigation_hold_safe=b['healthy'],
             surface_measurement=dict(ready=True),dvl_continuity=b['dvl_continuity'],
             **{'global':(glat,glon)})
         if run.stage!=previous:stages.append(run.stage);previous=run.stage
         for action,payload in run.step(t,o):
-            if action=='guided':mode=0
+            if action=='guided':mode=4
             elif action=='arm':armed=True
             elif action=='disarm':armed=False;cmd=(0.,0.,0.)
             elif action=='manual':mode=19;cmd=(0.,0.,0.)
+            elif action in ('guided_target','guided_orient','guided_hold'):
+                guided_target=(*rotation(payload[:2],-offset),payload[2])
+                if action=='guided_orient':desired=payload[3]-math.radians(offset)
             elif action=='align_velocity':cmd=(*payload[:2],0.);desired=payload[2]
             elif action=='stop':cmd=(0.,0.,0.);desired=payload[0]
             elif action=='target':
@@ -71,6 +85,8 @@ class GeographicTests(unittest.TestCase):
     def test_startup_has_no_qualification_dwell(self):
         r=GuidedSurfaceRun(dict(lat=33.,lon=-117.,mode='surface',map='geographic',alignment_corridor_confirmed=True),'r',0.)
         o=dict(fresh=True,local=(0,0,0),yaw=0.,bridge=dict(enabled=True,configuration_verified=True,estimator_health=dict(usable=True)),mode=19,armed=False)
+        frame=GeographicFrame();frame.align(33.,-117.,(0.,0.),0.)
+        o['bridge']['map_transform']=frame.snapshot()
         r.step(.1,o)
         self.assertEqual(r.stage,'GUIDED')
 
@@ -105,7 +121,7 @@ class GeographicTests(unittest.TestCase):
             self.assertEqual(run.stage,'COMPLETE',(run.reason,stages,e.north_alignment.status()))
             self.assertIn('TRANSIT',stages);self.assertFalse(any(x.startswith('ALIGN_') for x in stages))
             self.assertLess(math.dist(rotation(p,offset),(10.,3.)),1.55)
-            self.assertIn('TRANSIT_CHECK',stages)
+            self.assertIn('ORIENT',stages)
             self.assertEqual(run.segment_checks,0)
             self.assertLess(abs((e.map.angle-offset+180)%360-180),2.)
             self.assertEqual(e.north_offset,0.);self.assertEqual(e.heading_bias,0.)
@@ -118,6 +134,8 @@ class GeographicTests(unittest.TestCase):
             else:self.assertNotEqual(run.stage,'ABORTED',(args,run.reason,stages))
             if e.map.angle is not None:self.assertLess(abs(e.map.angle-73.),2.)
 
-    def test_no_corridor_no_mission(self):
-        with self.assertRaisesRegex(ValueError,'5 m'):
-            GuidedSurfaceRun(dict(lat=33.,lon=-117.,mode='surface',map='geographic'),'r',0.)
+    def test_missing_registration_holds_without_requesting_motion(self):
+        run=GuidedSurfaceRun(dict(lat=33.,lon=-117.,mode='surface',map='geographic'),'r',0.)
+        actions=run.step(.1,dict(fresh=True,local=(0,0,0),yaw=0.,bridge=dict(enabled=True,configuration_verified=True,estimator_health=dict(usable=True)),mode=19,armed=False))
+        self.assertEqual(run.stage,'WAIT_SURFACE')
+        self.assertEqual(actions,[])

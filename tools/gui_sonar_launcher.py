@@ -163,7 +163,7 @@ def cam_status():
             size = os.path.getsize(_rec["path"])
         except OSError:
             pass
-    return {"camRunning": _cam_running(),
+    return {"recording_session_v1": True, "camRunning": _cam_running(),
             "camUp": _web_up(CAM_PORT),
             "camSince": _cam["since"],
             "camLog": _tail(4, CAM_LOG),
@@ -204,14 +204,20 @@ def cam_stop():
     return "ok" if not _cam_running() else "the cameras did not stop"
 
 
-def rec_start(name):
+def rec_start(name,session=None):
     if _rec["proc"] is not None and _rec["proc"].poll() is None:
         return "already recording " + os.path.basename(_rec["path"])
     if not _web_up(CAM_PORT):
         return "no camera stream on port 8080 - start the cameras first"
     name = re.sub(r"[^A-Za-z0-9_-]", "_", name or "cam")[:40] or "cam"
-    os.makedirs(REC_DIR, exist_ok=True)
-    path = os.path.join(REC_DIR, f"{name}_{time.strftime('%Y%m%d_%H%M%S')}.mjpg")
+    if session is not None:
+        sys.path.insert(0,os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from robotx_graey_2026.api.recording_paths import session_record_path
+        path=str(session_record_path(os.environ.get('GRAEY_RECORD_DIR','~/robotx_ws/recordings'),session,'camera',name))
+        os.makedirs(os.path.dirname(path),exist_ok=True)
+    else:
+        os.makedirs(REC_DIR,exist_ok=True)
+        path=os.path.join(REC_DIR,f"{name}_{time.strftime('%Y%m%d_%H%M%S')}.mjpg")
     _rec["proc"] = subprocess.Popen(["curl", "-s", "-N", f"http://127.0.0.1:{CAM_PORT}/stream", "-o", path],
                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                     stderr=subprocess.DEVNULL, start_new_session=True)
@@ -261,7 +267,9 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path == "/camera/stop":
                 msg = cam_stop()
             elif u.path == "/record/start":
-                msg = rec_start(parse_qs(u.query).get("name", ["cam"])[0])
+                args=parse_qs(u.query)
+                try:msg=rec_start(args.get("name",["cam"])[0],args.get("session",[None])[0])
+                except ValueError as error:msg=str(error)
             elif u.path == "/record/stop":
                 msg = rec_stop()
             else:

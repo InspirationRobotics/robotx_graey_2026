@@ -6,6 +6,7 @@ from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import Mock
 from robotx_graey_2026.api.navigation.relative_estimator import RelativeEstimator
+from robotx_graey_2026.api.navigation.continuous_estimator import ContinuousEstimator
 
 
 class SegmentedBridgeTests(unittest.TestCase):
@@ -15,7 +16,7 @@ class SegmentedBridgeTests(unittest.TestCase):
         method=next(n for c in tree.body if isinstance(c,ast.ClassDef)
                     for n in c.body if isinstance(n,ast.FunctionDef) and n.name=='mission_alignment_status')
         module=ast.Module(body=[method],type_ignores=[])
-        ns=dict(json=json,math=math,time=NS(monotonic=lambda:10.),RelativeEstimator=RelativeEstimator)
+        ns=dict(json=json,math=math,time=NS(monotonic=lambda:10.),RelativeEstimator=RelativeEstimator,ContinuousEstimator=ContinuousEstimator)
         exec(compile(module,str(path),'exec'),ns)
         e=RelativeEstimator();e.motion_at=10.;e.motion_valid=True
         e.status=Mock(return_value=dict(healthy=True,gps_admission=dict(qualified=True)))

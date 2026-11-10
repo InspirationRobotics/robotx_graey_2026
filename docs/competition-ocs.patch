@@ -1,0 +1,248 @@
+--- a/bridge.toml
++++ b/bridge.toml
+@@ -41,16 +41,16 @@
+ type = "TYPE_USV"
+ 
+ [[vehicle]]
++
+ id = "UUV1"                 # Graey
++
+ type = "TYPE_UUV"
+-relay_via = "USV1"          # submerged; Crusader carries its reports
+-# UNVALIDATED. Graey reaches Crusader over a 9600-baud acoustic modem, so a
+-# 1 s threshold would fire on essentially every frame and bury the warnings
+-# that matter. 10 s is a guess chosen to be quiet rather than a measurement --
+-# replace it once the modem has been timed on the water, and see docs/ for the
+-# open question to RoboNation about whether a submerged vehicle can miss the
+-# 2 Hz obligation at all.
+-stale_ms = 10000.0
++
++# Same-router Wi-Fi to GRAEY. RFD/acoustic integration is deferred.
++
++prefer = "wifi"
++
++
+ 
+ [[vehicle]]
+ id = "UAV1"                 # Ekko
+--- a/rx_bridge/bridge.py
++++ b/rx_bridge/bridge.py
+@@ -873,6 +873,26 @@
+             return self._bad_vehicle_frame(payload, conn, exc)
+         if isinstance(obj, dict) and "ocs_hello" in obj:
+             return self._on_hello(payload, obj, conn)
++        if isinstance(obj, dict) and ('graey_sync' in obj or 'graey_report' in obj):
++            # Wi-Fi-only GRAEY metadata never reaches the external protobuf.
++            if conn.agent != 'graey_competition' or 'UUV1' not in conn.vids or conn.link != 'wifi':
++                return self._bad_vehicle_frame(payload, conn, 'GRAEY envelope requires its identified Wi-Fi link')
++            if 'graey_sync' in obj:
++                self._send_run('GRAEY sync', ['UUV1'], link='wifi')
++                return None
++            envelope = obj['graey_report']
++            if not isinstance(envelope, dict):
++                return self._bad_vehicle_frame(payload, conn, 'invalid GRAEY envelope')
++            with self._lock:
++                matching = (self.machine.state.name == 'RUNNING'
++                            and type(envelope.get('run_id')) is int
++                            and envelope['run_id'] == self.machine.run_id)
++            obj = envelope.get('report')
++            if not matching:
++                self._send_run('GRAEY run mismatch', ['UUV1'], link='wifi')
++                return None  # retained at source, never attributed to another run
++            if not isinstance(obj, dict) or obj.get('vehicle_id') != 'UUV1':
++                return self._bad_vehicle_frame(payload, conn, 'GRAEY envelope must carry UUV1')
+         if isinstance(obj, dict) and "ocs_fence" in obj:
+             # Not a report and never one: it is read here and goes nowhere else --
+             # not the governor, not a seq, not RoboCommand.
+@@ -1601,7 +1621,9 @@
+ 
+         def make(vid):
+             reply = (replies or {}).get(vid)
+-            return {"ocs_run": dict(run, reply=reply) if reply else run}
++            # Capability is local vehicle-link metadata, never an RxReport field.
++            snapshot = dict(run, graey_report_v1=True) if vid == "UUV1" else run
++            return {"ocs_run": dict(snapshot, reply=reply) if reply else snapshot}
+ 
+         reached, missed = self._deliver(targets, make, "ocs_run (%s)" % why, link)
+         self._say_delivered("ocs_run", why, reached, missed)
+--- /dev/null
++++ b/tests/test_graey_wifi.py
+@@ -0,0 +1,148 @@
++"""GRAEY's real TCP client -> SD Bridge -> official protobuf and broker receipts.
++
++TCP sockets/framing/reconnects, SQLite and protobuf are real. Most tests record
++MQTT; one drives a real local broker and paho PUBACK callback.
++No physical vehicles, radio, course-network access or control commands.
++"""
++import sys
++import time
++import unittest
++from pathlib import Path
++
++sys.path.insert(0,str(Path(__file__).resolve().parents[3] / 'robotx_graey_2026'))
++try:
++    from robotx_graey_2026.api.comms.competition_wifi import CompetitionSender, WifiLink
++    from robotx_graey_2026.api.comms import competition_codec as rx
++except ModuleNotFoundError as exc:
++    if exc.name.startswith('robotx_graey_2026'):
++        raise unittest.SkipTest('set PYTHONPATH to the GRAEY checkout for Wi-Fi integration tests') from exc
++    raise
++from tests.harness import BridgeCase, wait_for
++
++
++def status(sender,now=0,depth=1.23):
++    sender.update_status(now=now,depth_m=depth,robot_state=rx.STATE_AUTO,lat=1.2806,lon=103.8557,
++        spd_mps=.4,hdg_deg=90,roll_deg=1,pitch_deg=2,alt_m=5.9,task=3)
++
++
++class TestWifiChain(BridgeCase):
++    def setUp(self):
++        super().setUp()
++        self.declared(('UUV1',))
++        self.bridge.machine.on_run_start(self.bridge.machine.declaration_seq,70000)
++        self.sender = CompetitionSender(Path(self._tmp.name)/'graey.sqlite3')
++        self.addCleanup(self.sender.close)
++        self.link = WifiLink('127.0.0.1',self.port)
++        self.addCleanup(self.link.close)
++
++    def pump(self,predicate,timeout=4):
++        def step():
++            now = time.monotonic()
++            self.sender.set_surface(True,now)
++            self.link.tick(self.sender)
++            return predicate()
++        self.assertTrue(wait_for(step,timeout=timeout),self.link.status())
++
++    def test_socket_to_protobuf_then_puback(self):
++        self.pump(lambda:self.sender.run==70000)
++        self.sender.survey('survey',1.2806,103.8557,[1,2,1])
++        self.pump(lambda:len(self.reports_to_rc('UUV1'))==1)
++        report = self.reports_to_rc('UUV1')[0]
++        self.assertEqual(list(report.pipeline_survey.segments),[1,2,1])
++        self.assertEqual(self.sender.status(time.monotonic())['pending'],1)
++        self.bridge._on_rc_publish(None,None,self.bridge.rc.mids[-1])
++        self.pump(lambda:self.sender.status(time.monotonic())['broker_acknowledged']==1)
++
++    def test_measured_depth_reaches_official_protobuf(self):
++        self.pump(lambda:self.sender.run==70000)
++        status(self.sender,time.monotonic(),depth=.34)
++        self.pump(lambda:len(self.reports_to_rc('UUV1'))==1)
++        self.assertAlmostEqual(self.reports_to_rc('UUV1')[0].heartbeat.depth_m,.34,places=4)
++
++    def test_resource_reaches_official_protobuf(self):
++        self.pump(lambda:self.sender.run==70000)
++        self.sender.resource('resource',2,3)
++        self.pump(lambda:len(self.reports_to_rc('UUV1'))==1)
++        report = self.reports_to_rc('UUV1')[0].resource_delivery
++        self.assertEqual((report.task,report.resource_color,report.delivery_circle_color),(3,2,3))
++
++    def test_socket_reconnect_resends_same_event_without_second_publish(self):
++        self.pump(lambda:self.sender.run==70000)
++        self.sender.survey('survey',1.2806,103.8557,[2,1])
++        self.pump(lambda:len(self.reports_to_rc('UUV1'))==1)
++        self.bridge._on_rc_publish(None,None,self.bridge.rc.mids[-1])
++        # Drop before the client drains its ACK. On reconnect retry is answered
++        # from the SD bridge's dedup receipt cache, without another publish.
++        self.link.drop('test blackout');self.sender.disconnected()
++        self.pump(lambda:self.link.connections>=2 and self.sender.status(time.monotonic())['broker_acknowledged']==1,timeout=6)
++        self.assertEqual(len(self.reports_to_rc('UUV1')),1)
++
++    def test_wrong_run_envelope_is_not_published(self):
++        self.pump(lambda:self.sender.run==70000)
++        self.sender.survey('survey',1.28,103.85,[1])
++        self.sender.set_surface(True,time.monotonic())
++        self.sender.next_event = 0
++        frame = self.sender.due(time.monotonic())[0]
++        frame['graey_report']['run_id'] = 69999
++        self.assertTrue(self.link.send(frame))
++        self.link.send({'graey_sync':{}})
++        before = self.sender.remote_at
++        self.pump(lambda:self.sender.remote_at != before)
++        self.assertEqual(self.reports_to_rc('UUV1'),[])
++
++    def test_unknown_and_ended_runs_hold_reports_locally(self):
++        self.pump(lambda:self.sender.run==70000)
++        self.sender.survey('survey',1.28,103.85,[1])
++        self.bridge.end()
++        self.link.send({'graey_sync':{}})
++        # Prevent a send while the request/response is in flight.
++        self.sender.disconnected()
++        self.pump(lambda:self.sender.remote_state=='ENDED')
++        self.assertEqual(self.reports_to_rc('UUV1'),[])
++        self.assertEqual(self.sender.status(time.monotonic())['pending'],1)
++
++    def test_native_snapshot_silence_does_not_reconnect_healthy_link(self):
++        self.pump(lambda:self.sender.run==70000)
++        self.assertTrue(self.sender.native_run)
++        self.sender.remote_at=time.monotonic()-60
++        self.link.tick(self.sender)
++        self.assertEqual(self.link.connections,1)
++        self.assertTrue(self.sender.status(time.monotonic())['run_confirmed'])
++
++    def test_native_tiers_refused_during_run_then_accepted_after_end(self):
++        self.pump(lambda:self.sender.run==70000)
++        tiers={f'task{i}':'TIER_NONE' for i in range(1,5)}
++        tiers['task2']='TIER_CORE'
++        self.link.send_tiers(tiers,'GRAEY survey')
++        self.pump(lambda:self.sender.tiers_reply is not None)
++        self.assertFalse(self.sender.tiers_reply['ok'])
++        self.bridge.end()
++        self.pump(lambda:self.sender.remote_state=='ENDED')
++        self.sender.tiers_reply=None
++        self.link.send_tiers(tiers,'GRAEY survey')
++        self.pump(lambda:self.sender.tiers_reply is not None)
++        self.assertTrue(self.sender.tiers_reply['ok'])
++        self.assertEqual(self.sender.run_snapshot['tiers'],tiers)
++        self.assertEqual(self.sender.remote_state,'ENDED')
++
++    def test_real_local_mqtt_broker_acknowledges_the_report(self):
++        # SD's own local-broker fixture, with a real paho publish/PUBACK callback.
++        from tests.test_rcfind import Broker, _free_port
++        import paho.mqtt.client as mqtt
++        port = _free_port()
++        broker = Broker('127.0.0.1',port,'Alpha')
++        self.addCleanup(broker.stop)
++        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,client_id='graey-wifi-test-ocs')
++        client.on_publish = self.bridge._on_rc_publish
++        client.connect('127.0.0.1',port,15)
++        client.loop_start()
++        def stop_client():
++            client.disconnect();client.loop_stop()
++        self.addCleanup(stop_client)
++        self.bridge.rc = client
++        self.pump(lambda:self.sender.run==70000)
++        self.sender.survey('mqtt-survey',1.2806,103.8557,[1,2])
++        self.pump(lambda:self.sender.status(time.monotonic())['broker_acknowledged']==1)
++
++
++if __name__ == '__main__':unittest.main()
+--- a/tests/test_vehicle_link.py
++++ b/tests/test_vehicle_link.py
+@@ -210,7 +210,7 @@
+     def test_the_shipped_config_prefers_ekkos_radio_and_the_boat_has_no_preference(self):
+         cfg = load(Path(__file__).resolve().parents[1] / "bridge.toml")
+         self.assertEqual({v.id: v.prefer for v in cfg.vehicles},
+-                         {"USV1": None, "UUV1": None, "UAV1": "radio"})
++                         {"USV1": None, "UUV1": "wifi", "UAV1": "radio"})
+         self.assertTrue(all(v.send_info for v in cfg.vehicles))
+ 
+ 
+--- a/tests/test_fence_gate.py
++++ b/tests/test_fence_gate.py
+@@ -734,14 +734,14 @@
+     def test_the_console_status_names_robocommands_polygon_and_each_aircraft(self):
+         self.assertIn("uav fence  RoboCommand's: none (no course received yet)", self.bridge.status())
+         self.course("ALPHA")
+-        self.confirm_fence("UAV1")
++        self.confirm_fence("UAV1", read_at=time.time()-.1)
+         line = next(l for l in self.bridge.status().splitlines() if l.startswith("uav fence"))
+         self.assertIn("RoboCommand's course boundary inset 2.0 m, 4 vertices", line)
+         self.assertIn("UAV1 read 0 s ago, RoboCommand's on it, declares 5 vertices to 39 m HAE", line)
+ 
+     def test_and_what_stops_it(self):
+         self.course("ALPHA")
+-        self.confirm_fence("UAV1", held=[self.rc_open()])
++        self.confirm_fence("UAV1", held=[self.rc_open()], read_at=time.time()-.1)
+         line = next(l for l in self.bridge.status().splitlines() if l.startswith("uav fence"))
+         self.assertIn("UAV1 read 0 s ago, RoboCommand's on it, CANNOT declare: UAV1: its autopilot "
+                       "holds only RoboCommand's polygon", line)

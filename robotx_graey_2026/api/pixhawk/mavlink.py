@@ -6,8 +6,10 @@ order matters and is not optional: ODOMETRY (msg 331) does not exist on v1, and
 pymavlink only reads these vars at import time. Import this module before any
 other pymavlink use.
 
-Each consumer gets its own MAVProxy udpin port and its own component id so the
-Cube can tell them apart - see documentation section 3.3 for the port map.
+Production ROS consumers pass their node and use the single telemetry_gateway
+over ROS topics. Their component IDs and the existing command API are preserved.
+Only the gateway owns the MAVProxy UDP connection; MAVProxy owns Cube serial.
+The direct form remains for explicitly isolated SITL and legacy bench tools.
 
 Every send and receive is guarded. A udpout socket is CONNECTED, so once MAVProxy
 stops listening the kernel answers with ICMP port-unreachable and the socket
@@ -50,10 +52,16 @@ REOPEN_LOG_S = 5.0                                  # a flapping link must not f
 class Link:
     """A MAVProxy UDP connection plus the handful of things Graey sends over it."""
 
-    def __init__(self, url, component, logger=None, system=1):
+    def __init__(self, url, component, logger=None, system=1, node=None):
         self.url, self.system, self.component = url, system, component
         self.log = logger
         self.last_reopen = self.last_reopen_log = 0.0
+        self.ros_transport = None
+        if node is not None:
+            from .ros_link import RosTransport
+            self.ros_transport=RosTransport(node,component,system)
+            self.mav=self.ros_transport.mav
+            return
         if logger:
             logger.info(f'opening MAVLink {url} as {system}/{component}')
         self._open()
@@ -100,6 +108,8 @@ class Link:
         Otherwise the message is dropped rather than raised - MAVLink is lossy by
         design and every caller re-sends.
         """
+        if getattr(self,'ros_transport',None) is not None:
+            return self.ros_transport.send(name,*args)
         for retry in (False, True):
             try:
                 getattr(self.mav.mav, name)(*args)
@@ -113,6 +123,8 @@ class Link:
 
     def drain(self, handler):
         """Bound receive work so continuous telemetry cannot starve ROS timers."""
+        if getattr(self,'ros_transport',None) is not None:
+            return self.ros_transport.drain(handler)
         deadline = time.monotonic()+.02
         for _ in range(256):
             if time.monotonic() >= deadline:

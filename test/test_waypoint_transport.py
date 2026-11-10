@@ -36,7 +36,7 @@ class WaypointTransportTest(unittest.TestCase):
         node.safety['inhibit']=False
         node.bridge_time=.1
         node.bridge=dict(published_monotonic=.1,healthy=True,navigation_valid=True,
-                         transmitting=True,configuration_verified=True)
+                         transmitting=True,configuration_verified=True,depth_m=.1)
         self.assertTrue(node.observation(.1)['navigation_hold_safe'])
         # GPS freshness is not required underwater; healthy local Cube/bridge
         # data is. A stale bridge or real estimator failure cannot authorize hold.

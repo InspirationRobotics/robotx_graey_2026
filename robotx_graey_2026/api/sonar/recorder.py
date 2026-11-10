@@ -55,7 +55,12 @@ class Recorder:
             self.stop()
         slug = re.sub(r"[^A-Za-z0-9]+", "-", note).strip("-")[:40]
         name = time.strftime("rec_%Y%m%d_%H%M%S") + (f"_{slug}" if slug else "")
-        self.dir = os.path.join(self.base_dir, name)
+        if note.startswith('GRAEY_SESSION:'):
+            from robotx_graey_2026.api.recording_paths import session_record_path
+            _,session,owner=note.split(':',2)
+            self.dir=str(session_record_path(os.environ.get('GRAEY_RECORD_DIR','~/robotx_ws/recordings'),session,'sonar',owner))
+        else:
+            self.dir=os.path.join(self.base_dir,name)
         os.makedirs(self.dir, exist_ok=True)
         self._t0 = time.monotonic()
         self.sweeps = 0

@@ -41,8 +41,8 @@ def euler_to_quat(roll, pitch, yaw):
 class VN100Node(Node):
     def __init__(self):
         super().__init__('vn100_node')
-        self.declare_parameter('port', DEFAULT_PORT)
-        self.declare_parameter('baud', 115200)
+        self.declare_parameter('port', DEFAULT_PORT,ParameterDescriptor(read_only=True,description='Serial owner endpoint; restart required'))
+        self.declare_parameter('baud',115200,ParameterDescriptor(read_only=True,description='Serial wire rate; restart required'))
         # Cached frame settings must not accept runtime writes that would only
         # change parameter readback, leaving the published transform unchanged.
         for name, default in (('flip_180', True), ('yaw_offset_deg', 0.0)):

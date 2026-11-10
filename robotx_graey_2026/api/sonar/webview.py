@@ -985,7 +985,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if self.path == '/state':
             with _lock:
-                state = {'target': _target, 'note': _note, 'editable': _editable,
+                state = {'recording_session_v1': True, 'target': _target, 'note': _note, 'editable': _editable,
                          'range': _range, 'rangeEditable': _range_editable,
                          'rangeMin': _range_lo, 'rangeMax': _range_hi, 'map': _map_on,
                          'sector': list(_sector) if _sector else None,
