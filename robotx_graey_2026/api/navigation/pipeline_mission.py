@@ -430,7 +430,9 @@ def buoy_distance(a, b):
 
 class PipelineMission(MissionBase):
     def __init__(self):
-        super().__init__('pipeline_mission', component=197)
+        # 198: the mission component. Beichen's telemetry_gateway (Nov 9) only lets 198 set modes, arm and
+        # send setpoints; 197 is the navigation bridge's (odometry only).
+        super().__init__('pipeline_mission', component=198)
         self.phase = None
         self.scan = None                    # 'far' or 'close'
         self.map_origin = None              # (n, e, yaw) of map (0,0) and its +y

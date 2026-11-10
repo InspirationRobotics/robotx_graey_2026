@@ -36,6 +36,7 @@ SE_CHANNEL = 9              # SE, momentary (mission_base.py's rc_start_channel)
 RC_HIGH = 1700              # pressed above this (mission_base.py's rc_high)
 LEG_TIMEOUT_S = 600.0       # one surface leg (Beichen's mission) - abort it after this long
 NAV_WAYPOINT = 16           # MAV_CMD_NAV_WAYPOINT
+COMPONENT = 198             # the mission component in Beichen's telemetry_gateway
 MISSION_CMD = [sys.executable, '-c',
                'from robotx_graey_2026.api.navigation.pipeline_mission import main; main()']
 
@@ -69,24 +70,64 @@ def distance_bearing(a, b):
 
 # ---------------- MAVLink: the SE button and the QGC plan ----------------
 
-def wait_for_se(link):
-    """Until SE goes from released to pressed. Old RC values from before count as released."""
-    seen_low, last_hb, last_req = False, 0.0, 0.0
-    while True:
-        now = time.monotonic()
-        if now - last_hb >= 1.0:
-            link.heartbeat()        # MAVProxy only sends to us after we send
-            last_hb = now
-        if now - last_req >= 5.0:   # ArduPilot only streams RC_CHANNELS if something asks
-            try:
-                link.mav.mav.command_long_send(1, 1, 511, 0, 65, 100000, 0, 0, 0, 0, 0)   # SET_MESSAGE_INTERVAL
-            except OSError:
-                pass
-            last_req = now
+class Fcu:
+    """MAVLink through Beichen's telemetry_gateway (Nov 9): it owns the only MAVProxy port and passes frames
+    over the ROS topics /graey/fcu/rx and /graey/fcu/tx. We send as the mission component, 198 - the gateway
+    refuses unregistered ones. It already streams RC_CHANNELS at 10 Hz, so we ask for nothing."""
+
+    def __init__(self):
+        import threading
+        import rclpy
+        from rclpy.node import Node
+        # No rclpy signal handlers: Ctrl-C stays a KeyboardInterrupt and SIGTERM still ends the program
+        # (with rclpy's handlers only the spin thread stopped and this kept waiting for SE).
+        from rclpy.signals import SignalHandlerOptions
+        rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
+        self.rclpy = rclpy
+        self.node = Node('survey_run')
+        self.link = Link('ros', COMPONENT, Logger(), node=self.node)
+        self.spin = threading.Thread(target=self._spin, daemon=True)
+        self.spin.start()
+
+    def _spin(self):
         try:
-            m = link.mav.recv_match(type='RC_CHANNELS', blocking=True, timeout=0.5)
-        except OSError:
-            m = None
+            self.rclpy.spin(self.node)
+        except Exception:       # shutdown
+            pass
+
+    def send(self, name, *args):
+        self.link.send(name, *args)
+
+    def recv(self, types, timeout):
+        """The next fresh message from the Cube of one of these types, or None after timeout s."""
+        end = time.monotonic() + timeout
+        while True:
+            got = []
+            self.link.drain(lambda kind, m: got.append(m) if kind in types and m.get_srcSystem() == 1
+                            and m.get_srcComponent() == 1 else None)
+            if got:
+                return got[0]
+            if time.monotonic() >= end:
+                return None
+            time.sleep(0.01)
+
+    def close(self):
+        try:
+            self.rclpy.shutdown()       # wakes the spin thread so it ends before the node goes
+        except Exception:
+            pass
+        self.spin.join(timeout=2.0)
+        try:
+            self.node.destroy_node()
+        except Exception:
+            pass
+
+
+def wait_for_se(fcu):
+    """Until SE goes from released to pressed. Old RC values from before count as released."""
+    seen_low = False
+    while True:
+        m = fcu.recv(('RC_CHANNELS',), 0.5)
         if m is None:
             continue
         v = getattr(m, f'chan{SE_CHANNEL}_raw', 0)
@@ -96,28 +137,28 @@ def wait_for_se(link):
             return
 
 
-def read_plan(link):
+def read_plan(fcu):
     """The points uploaded from QGC: the Cube's mission items 1.. that are NAV_WAYPOINTs (item 0 is the
     Cube's home). Reading changes nothing on the Cube."""
-    mav = link.mav
     for _ in range(3):
-        mav.mav.mission_request_list_send(1, 1, 0)
-        cnt = mav.recv_match(type='MISSION_COUNT', blocking=True, timeout=3)
+        fcu.send('mission_request_list_send', 1, 1, 0)
+        cnt = fcu.recv(('MISSION_COUNT',), 3)
         if cnt is not None:
             break
     else:
-        raise RuntimeError('the Cube did not answer the request for the QGC plan')
+        raise RuntimeError('the Cube did not answer the request for the QGC plan (is the gateway letting '
+                           'MISSION_REQUEST_LIST through? /graey/fcu/gateway_status shows its last refusal)')
     items = []
     for seq in range(cnt.count):
         for _ in range(3):
-            mav.mav.mission_request_int_send(1, 1, seq, 0)
-            it = mav.recv_match(type=['MISSION_ITEM_INT', 'MISSION_ITEM'], blocking=True, timeout=2)
+            fcu.send('mission_request_int_send', 1, 1, seq, 0)
+            it = fcu.recv(('MISSION_ITEM_INT', 'MISSION_ITEM'), 2)
             if it is not None and it.seq == seq:
                 break
         else:
             raise RuntimeError(f'point {seq} of the QGC plan did not arrive')
         items.append(it)
-    mav.mav.mission_ack_send(1, 1, 0, 0)        # MAV_MISSION_ACCEPTED: the download is finished
+    fcu.send('mission_ack_send', 1, 1, 0, 0)        # MAV_MISSION_ACCEPTED: the download is finished
     pts = []
     for it in items:
         if it.seq == 0 or it.command != NAV_WAYPOINT:
@@ -193,9 +234,9 @@ def recordings(args, run, start):
 
 # ---------------- one run ----------------
 
-def one_run(args, link, run):
+def one_run(args, fcu, run):
     try:
-        pts = read_plan(link)
+        pts = read_plan(fcu)
     except (RuntimeError, OSError) as e:
         log(f'run {run}: {e} - not started')
         return
@@ -247,7 +288,6 @@ def main():
     ap.add_argument('--dry', action='store_true')
     ap.add_argument('--skip-path', action='store_true')
     ap.add_argument('--alt', type=float, default=4.0, help='m above the floor (pool_alt_m)')
-    ap.add_argument('--mavlink', default='udpout:127.0.0.1:14553')
     ap.add_argument('--gui', type=int, default=8090)
     ap.add_argument('--launcher', type=int, default=8096)
     ap.add_argument('--map', type=int, default=8095)
@@ -263,28 +303,18 @@ def main():
     log(f'survey run{" (DRY - nothing moves)" if args.dry else ""}{" (pool test: no path)" if args.skip_path else ""}'
         f' - log {LOG_FILE}')
     run = 0
-    while True:
-        # The mission port is shared: Beichen's waypoint mission and pipeline_mission use it while they run,
-        # so this program opens it only to wait for SE and read the plan.
-        link = Link(args.mavlink, 192, Logger())
-        log('waiting for SE on the RadioMaster (drive the sub on the radio and move points in QGC meanwhile)')
-        try:
-            wait_for_se(link)
-        except KeyboardInterrupt:
-            log('stopped (Ctrl-C)')
-            return
-        run += 1
-        log(f'SE pressed - run {run}')
-        try:
-            one_run(args, link, run)
-        except KeyboardInterrupt:
-            log('stopped (Ctrl-C)')
-            return
-        finally:
-            try:
-                link.mav.close()
-            except Exception:
-                pass
+    fcu = Fcu()
+    try:
+        while True:
+            log('waiting for SE on the RadioMaster (drive the sub on the radio and move points in QGC meanwhile)')
+            wait_for_se(fcu)
+            run += 1
+            log(f'SE pressed - run {run}')
+            one_run(args, fcu, run)
+    except KeyboardInterrupt:
+        log('stopped (Ctrl-C)')
+    finally:
+        fcu.close()
 
 
 if __name__ == '__main__':

@@ -1,7 +1,9 @@
 """Central FCU admission rules. No ROS or I/O; ArduSub-specific command ownership."""
 import math
 
-READ_MESSAGES = {20,21,43,66,111,117,119,122,321}
+# 47 MISSION_ACK and 51 MISSION_REQUEST_INT (Ruth, Nov 10): with 43 they read the QGC plan stored on the Cube
+# (tools/survey_run.py). Uploading still cannot pass: 44 MISSION_COUNT and 73 MISSION_ITEM_INT are not admitted.
+READ_MESSAGES = {20,21,43,47,51,66,111,117,119,122,321}
 MOTION_MESSAGES = {69,70,82,84,86}
 COMPONENTS = {191,193,194,195,197,198,201}
 
