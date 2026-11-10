@@ -18,6 +18,7 @@ class ServiceQueue:
         self.clients = {}
         for name, path, kind in (
             ('pause','/graey/navigation/pause_odometry',Trigger),
+            ('resume','/graey/navigation/resume_odometry',Trigger),
             ('prepare','/graey/navigation/prepare',SetBool),
             ('align_heading','/graey/navigation/align_heading',SetParametersAtomically),
             ('calibrate','/graey/vn100/calibrate_start',Trigger),
@@ -141,7 +142,10 @@ class CalibrationJobs:
                 self.update(sensor=sensor)
                 if sensor.get('log') and sensor['log']!=previous_log:
                     if sensor.get('phase')=='collected':
-                        self.update(phase='collected',busy=False,message=sensor.get('reason','VN calibration collected'))
+                        if sensor.get('saved') is not True:
+                            raise ValueError('VN calibration collected but persistence was not confirmed')
+                        resumed=self.service('resume')
+                        self.update(phase='collected',busy=False,message=sensor.get('reason','VN calibration saved')+'; '+resumed)
                         return
                     if sensor.get('phase')=='failed':raise ValueError(sensor.get('reason','VN calibration failed'))
                 self.sleep(.5)

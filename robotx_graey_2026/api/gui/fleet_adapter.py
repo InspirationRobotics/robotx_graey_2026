@@ -26,6 +26,9 @@ class FleetAdapter:
             def sample(key,limit=2):
                 row=streams.get(key,{})
                 return row.get('data',{}) if row.get('age',999)<limit else {}
+            corrected=sample('bridge',1)
+            if p and corrected.get('heading_reference_validated') and corrected.get('map_heading_deg') is not None:
+                p=dict(p,heading_deg=corrected['map_heading_deg'])
             att=sample('attitude',.7).get('rpy',[None,None,None]);gps=sample('gps');m=sample('waypoint')
             live=control.get('online') and control.get('vehicle_fresh');run=comms.get('data',{}).get('ocs_run') if comms.get('fresh') else None
             mission=None if not m else dict(state='WAITING_RUN_START' if m.get('stage')=='WAIT_RUN_START' else m.get('stage'),name=m.get('plan',{}).get('kind','GRAEY mission'),elapsed_s=m.get('elapsed_s'),waiting_s=None,running_node=m.get('stage'),current_task=m.get('current_task'),warning=m.get('reason'),last=m.get('reason'))

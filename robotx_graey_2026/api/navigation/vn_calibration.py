@@ -20,6 +20,7 @@ class VNCalibration:
         self.phase, self.reason = 'idle', 'Keep VN mounted. Calibration requires rotation through all six faces.'
         self.faces, self.started, self.sample_at = [0]*6, None, None
         self.path = None
+        self.saved = False
 
     @property
     def running(self):
@@ -39,6 +40,7 @@ class VNCalibration:
         self.record('before', {str(r):transact(port,f'VNRRG,{r:02d}') for r in (1,4,23,26,35,44,47)})
         relative_heading(port)
         self.faces, self.sample_at = [0]*6, None
+        self.saved = False
         self.started, self.phase = self.clock(), 'collecting'
         try:
             transact(port,'VNWRG,44,2,3,1')
@@ -67,14 +69,29 @@ class VNCalibration:
         if after['44'] != ['0','3','1'] or len(after['35']) != 4 or after['35'][1] != '1':
             raise OSError('VN relative-mode or calibration-freeze readback failed')
         covered = min(self.faces) >= 5
+        if covered and not failed:
+            self.reason = 'Calibration save not confirmed; inspect the reported error before use'
+            # Register 47 is the calculated result; persist it in user register 23.
+            values = after['47']
+            if len(values) != 12 or not all(math.isfinite(float(v)) for v in values):
+                raise OSError('Invalid calculated VN calibration; not saved')
+            transact(port,'VNWRG,23,'+','.join(values))
+            readback = transact(port,'VNRRG,23')
+            if len(readback)!=12 or any(not math.isclose(float(a),float(b),rel_tol=1e-5,abs_tol=1e-7) for a,b in zip(values,readback)):
+                raise OSError('VN calibration compensation readback failed; not saved')
+            transact(port,'VNWRG,44,0,1,1')
+            if transact(port,'VNRRG,44') != ['0','1','1']:
+                raise OSError('VN saved-compensation selection readback failed; not saved')
+            transact(port,'VNWNV',timeout=3.)
+            self.saved = True
         self.phase = 'failed' if failed or not covered else 'collected'
-        self.reason = reason or ('Coverage collected; not saved. Prepare navigation and validate heading next'
-            if covered else 'Insufficient six-face coverage; repeat calibration')
+        self.reason = reason or ('Calibration automatically saved to VN nonvolatile memory; north reference remains separate'
+            if self.saved else 'Insufficient six-face coverage; repeat calibration')
         self.record('after', dict(registers=after, faces=self.faces, phase=self.phase,
-                                  accepted=False,saved=False,reason=self.reason))
+                                  accepted=self.saved,saved=self.saved,reason=self.reason))
 
     def status(self):
         return dict(phase=self.phase, reason=self.reason, faces=self.faces[:],
                     remaining_s=max(0.,self.seconds-(self.clock()-self.started)) if self.running else 0.,
-                    log=str(self.path) if self.path else None, saved=False,
-                    heading_mode='relative', accepted=False)
+                    log=str(self.path) if self.path else None, saved=self.saved,
+                    heading_mode='relative', accepted=self.saved)

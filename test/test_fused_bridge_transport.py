@@ -40,10 +40,17 @@ class TransportTests(unittest.TestCase):
         request=NS(parameters=[NS(name='true_heading_deg',value=NS(type=3,double_value=90.))])
         result=self.b.align_heading(request,NS(result=NS()))
         self.assertTrue(result.result.successful,result.result.reason)
-        self.assertIn('output paused',result.result.reason)
+        self.assertIn('output enabled',result.result.reason)
+        self.assertTrue(self.b.output_permitted)
+        self.assertTrue(self.b.start_checked)
         self.assertTrue(self.b.est.manual_north)
         self.assertAlmostEqual(yaw(self.b.est.orientation()),90.)
         self.b.link.send.assert_not_called();self.b.link.command.assert_not_called()
+        self.b.configured=lambda now:True
+        self.b.tick()
+        sent=self.b.link.odometry.call_args
+        self.assertIsNotNone(sent)
+        self.assertAlmostEqual(yaw(sent.args[1]),90.)
 
     def test_heading_correction_reaches_odometry_with_one_reset_counter_change(self):
         self.b.est=ContinuousEstimator()
