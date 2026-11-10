@@ -48,5 +48,10 @@
     "category": "COPIED",
     "source": "competition-comms\\current-reference-2026-11-09\\crusader-communications\\crusader_groundstation\\crusader_groundstation\\log_buffer.py",
     "sha256": "d593a34a8f9281f9b7470d2a7b39880b8c64016f8b186811306f21443e3a77d7"
+  },
+  "tools/crusader_map.js": {
+    "category": "COPIED",
+    "source": "competition-comms/current-reference-2026-11-09/crusader-communications/crusader_groundstation/crusader_groundstation/laptop/map.js",
+    "sha256": "a1d77a26507a599a3cbabdb12322dd81494ad16fc46169c6a27bf492231df1af"
   }
 }

@@ -166,11 +166,15 @@ class CompetitionSender:
             reports.append(dict(team_id=self.team_id,vehicle_id='UUV1',sent_at=timestamp(self.wall()),
                                 heartbeat=self.heartbeat_body))
         if (self.remote_at is not None and (self.native_run or 0 <= now-self.remote_at < 5) and self.remote_state == 'RUNNING'
-                and self.report_envelope and self.run is not None and self.run == self.remote_run and now >= self.next_event):
+                and (self.native_run or self.report_envelope) and self.run is not None and self.run == self.remote_run and now >= self.next_event):
             self.next_event = now+2
             row = self.db.execute("SELECT report FROM events WHERE run=? AND verdict='pending' ORDER BY id LIMIT 1",
                                   (self.run,)).fetchone()
-            if row:reports.append(dict(graey_report=dict(run_id=self.run,report=json.loads(row[0]))))
+            if row:
+                report=json.loads(row[0])
+                # Native team OCS takes the same standard RxReport as Crusader.
+                # Retain the old envelope only for legacy SD fixtures/clients.
+                reports.append(report if self.native_run else dict(graey_report=dict(run_id=self.run,report=report)))
         return reports
 
     def status(self,now):
@@ -183,8 +187,8 @@ class CompetitionSender:
             telemetry_fresh=bool(self.status_at is not None and now-self.status_at < 1.5),pending=counts.get('pending',0),
             broker_acknowledged=counts.get('acknowledged',0),rejected=counts.get('held',0)+counts.get('dropped',0),
             reports=reports,course=self.course,ocs_run=self.run_snapshot,ocs_directive=self.directive,tiers_reply=self.tiers_reply,
-            report_transport_ready=self.report_envelope,
-            report_hold_reason=None if self.report_envelope else 'OCS needs the GRAEY run-tag compatibility patch for retained observations',
+            report_transport_ready=self.native_run or self.report_envelope,
+            report_hold_reason=None if (self.native_run or self.report_envelope) else 'Waiting for the OCS run snapshot',
             previous_run_pending=self.db.execute("SELECT count(*) FROM events WHERE verdict='pending' AND run!=?",(self.run,)).fetchone()[0])
 
     def close(self):self.db.close()
@@ -300,7 +304,7 @@ class WifiLink:
                     if len(self.buffer) < length+4:break
                     data = bytes(self.buffer[4:4+length]);del self.buffer[:4+length]
                     sender.receive(json.loads(data.decode('utf-8')),now)
-            if not sender.native_run and now >= self.next_sync:
+            if sender.report_envelope and not sender.native_run and now >= self.next_sync:
                 self.next_sync = now+2
                 self.send({'graey_sync':{}})
             if not sender.native_run and now-(sender.remote_at if sender.remote_at is not None else self.connected_at) >= 7:

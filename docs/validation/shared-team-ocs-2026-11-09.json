@@ -1,0 +1,25 @@
+{
+  "result": "PASS",
+  "upstream": "https://github.com/InspirationRobotics/rx26_ocs.git",
+  "commit": "9ccbb8c2538d1d7636b05852161ab7c4b5366ef7",
+  "team_worktree_clean": true,
+  "active_checkout": "team-ocs",
+  "launcher": "parent OCS.cmd -> unchanged team-ocs/OCS.cmd",
+  "local_config": "team-ocs/run/laptop.toml (supported map settings only)",
+  "ocs_tests": {
+    "run": 610,
+    "skipped": 1
+  },
+  "fleet_tests": {
+    "run": 533,
+    "skipped": 0
+  },
+  "graey_tests": {
+    "run": 464,
+    "skipped": 5
+  },
+  "stock_ocs_tcp_integration_tests": 8,
+  "hardware_opened": false,
+  "graey_followup_pushed": false,
+  "team_source_patched": false
+}

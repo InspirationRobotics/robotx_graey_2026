@@ -2,7 +2,7 @@
 (function () {
   var t = null;
   try { t = localStorage.getItem("crsd-theme"); } catch (e) {}
-  if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  if (t !== "light" && t !== "dark") t = "light";
   document.documentElement.setAttribute("data-theme", t);
 })();
 

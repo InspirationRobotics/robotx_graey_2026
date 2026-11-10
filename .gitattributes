@@ -12,3 +12,4 @@ robotx_graey_2026/api/gui/log_buffer.py -text
 robotx_graey_2026/api/gui/laptop/crusader_theme.css -text
 *.cmd text eol=crlf
 docs/competition-ocs.patch -whitespace
+tools/crusader_map.js -text whitespace=cr-at-eol

@@ -1,5 +1,7 @@
 # GRAEY competition WiFi integration
 
+**Current OCS:** [Shared team OCS](shared-team-ocs.md) supersedes the former patched OCS/skip-fleet instructions below. Native GRAEY reporting now works with unchanged team main; no OCS patch is required.
+
 **Current upstream update:** See [current fleet adaptation](current-fleet-adaptation-2026-11-09.md) for the laptop GCS bridge, automatic OCS discovery, native run snapshots, tier controls and current-main compatibility patch. That guide supersedes the earlier SD-only startup/snapshot instructions below.
 
 GRAEY and the laptop join the same router or hotspot. GRAEY initiates a TCP connection to the laptop OCS on port 37564. The OCS remains the only connection to RoboCommand. This implementation follows the November 7 SD-card competition source; GRAEY RFD integration is deferred. The subsequent [operator and gateway standardization](operator-standardization.md) adds the fleet-style GUI, shared ROS FCU gateway and competition-only RunStart workflow.

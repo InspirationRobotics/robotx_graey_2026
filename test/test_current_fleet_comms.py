@@ -29,11 +29,14 @@ class TestCurrentRun(unittest.TestCase):
         self.assertFalse(self.sender.status(100)['run_confirmed'])
         self.assertEqual(self.sender.due(100),[])
 
-    def test_stock_native_ocs_does_not_receive_unknown_report_envelopes(self):
+    def test_stock_native_ocs_receives_standard_report_without_a_patch(self):
         self.run_snapshot()
         self.sender.survey('one',1,2,[1]);self.sender.set_surface(True,0)
-        self.assertEqual(self.sender.due(0),[])
-        self.assertFalse(self.sender.status(0)['report_transport_ready'])
+        report=self.sender.due(0)[0]
+        self.assertEqual(report['vehicle_id'],'UUV1')
+        self.assertIn('pipeline_survey',report)
+        self.assertNotIn('graey_report',report)
+        self.assertTrue(self.sender.status(0)['report_transport_ready'])
         self.assertEqual(self.sender.status(0)['pending'],1)
 
     def test_all_native_pre_run_states_accepted_without_start(self):

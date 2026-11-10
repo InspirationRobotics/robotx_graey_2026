@@ -1,5 +1,7 @@
 # GRAEY adaptation to current Crusader and Ekko
 
+**Current OCS:** [Shared team OCS](shared-team-ocs.md) supersedes the former patched OCS/skip-fleet instructions below. Native GRAEY reporting now works with unchanged team main; no OCS patch is required.
+
 **Unified operator update:** [Missions, Sensors and Record guide](unified-operator-guide.md) supersedes the earlier separated Map/Mission/5–2–5 workflow and Communications-tier location. Declare/End now use the shared OCS API from Missions.
 
 Local development, November 9, 2026. No hardware deployment, vehicle parameter changes, commit or push. This document supersedes the earlier SD-only connection/startup instructions in the operator and WiFi guides.

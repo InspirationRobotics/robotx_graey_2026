@@ -1,5 +1,7 @@
 # GRAEY Missions, Sensors and Record
 
+**Current OCS:** [Shared team OCS](shared-team-ocs.md) supersedes the former patched OCS/skip-fleet instructions below. Native GRAEY reporting now works with unchanged team main; no OCS patch is required.
+
 Local implementation, November 9, 2026. This replaces the separate Map / waypoint / 5â€“2â€“5 operator workflow. It follows the inspected Crusader mission catalogue, course plotting, OCS tier and recording conventions, adapted to the submarine. No vehicle installation, deployment or online push has been performed.
 
 ## Connect
@@ -16,7 +18,7 @@ Double-click `tools/scripts/GRAEY_GUI.cmd`, or the parent workspace `GRAEY_GUI.c
 
 The course boundary comes from OCS. The blue arrow shows the fresh Cube-derived geographic pose and attitude heading, including underwater when that estimate is available. Last-known pose and unavailable sources are marked stale rather than extrapolated. Without a course, geographic coordinate plotting and the vehicle pose still work; this is a north-up course/grid view rather than a satellite-image requirement.
 
-Use **Fit course / route**, **Follow GRAEY**, drag to pan and scroll to zoom. Saved missions are stored on GRAEY and can be opened from the same page. Saving/opening does not execute them. Mission names are restricted to safe file names. The library lives under `~/robotx_ws/missions`, configurable with `GRAEY_MISSION_DIR`.
+The map renderer is copied directly from Crusader and uses actual received coordinates, including Singapore. Legacy waypoint/pool/planner URLs open this same page. Use **Plot points** to enable/disable plotting (Esc also stops it), **Fit course / route**, **Follow GRAEY**, drag to pan and scroll to zoom. Saved missions are stored on GRAEY and can be opened from the same page. Saving/opening does not execute them. Mission names are restricted to safe file names. The library lives under `~/robotx_ws/missions`, configurable with `GRAEY_MISSION_DIR`.
 
 Check the route and supervision acknowledgement, then **Start mission**. Waypoints and pipeline routes pass through the existing reviewed-plan API, frame checks, controller permissions and commissioning gates. Stop uses the existing onboard mission abort interface. No new arming, ESC recovery or Cube serial path was introduced.
 

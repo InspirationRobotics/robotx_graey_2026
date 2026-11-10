@@ -20,7 +20,7 @@ def make_handler(link,hub,allowed_hosts,missions=None):
     class GraeyHandler(base):
         def adaptation(self,method):
             path=urlsplit(self.path).path
-            mine=path=='/' or path in ('/graey-adapter.js','/graey-tools','/crusader-theme.css','/graey-theme.js') or path.startswith(('/api/','/vehicle/')) or path in ('/missions','/sensors','/record','/mission.css','/missions.js','/sensors.js','/record.js','/station.css','/station_theme.js','/vehicle-controls','/calibration')
+            mine=path=='/' or path in ('/graey-adapter.js','/graey-tools','/crusader-theme.css','/graey-theme.js') or path.startswith(('/api/','/vehicle/')) or path in ('/missions','/waypoint','/pool-map','/planner','/crusader-map.js','/sensors','/record','/mission.css','/missions.js','/sensors.js','/record.js','/station.css','/station_theme.js','/vehicle-controls','/calibration')
             if not mine:return False
             if not self._allowed():return True
             origin=self.headers.get('Origin')

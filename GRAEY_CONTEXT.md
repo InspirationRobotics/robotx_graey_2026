@@ -1,6 +1,28 @@
 # GRAEY project context
 
+## Follow-up publication scope — November 9, 2026
+
+User authorized pushing the pending changes to main and leaving Crusader map settings in place. This follow-up includes light-mode preference, exact Crusader map renderer in unified Missions, stock team OCS report compatibility and portable tools/scripts/OCS.cmd with tools/root aliases. Retained incoming teammate survey commits 434633b and 376137d without modification. Map renderer SHA256 remains identical to Crusader; no further map settings changed. The publication snapshot passed 464 tests (17 platform/optional skips); optional sibling-repository tests account for twelve extra skips versus the complete workspace. A first Windows socket-origin check was aborted by the host; the repeat full snapshot suite passed. Copied upstream staged bytes match the provenance manifest. Team OCS source remains clean and requires no upstream commit. Hardware deployment remains pending.
+
+## Shared team OCS correction — November 9, 2026
+
+Publication follow-up: user authorized pushing these changes to main. Fetched and retained Ruth’s survey commits 434633b and 376137d. Crusader map hashes still match; no further map-setting changes were made. Repository tools/scripts/OCS.cmd now carries the portable unchanged-team-OCS delegation, with root/tools aliases; the team OCS repository itself has no source modifications. Hardware deployment remains unperformed.
+
+Final shared-OCS validation: 610 team OCS tests pass (1 skip), all 533 fleet tests pass after restoring the SD team Mesh generated dialect at its normal Mesh/dialect/gen/robotx.py location, eight GRAEY-to-stock-OCS integrations pass (including actual local MQTT PUBACK), and 464 GRAEY tests pass (5 Windows skips). OCS/fleet CLI and runtime imports pass. Team OCS Git working tree remains clean. No serial/radio was opened.
+
+User requires their OCS to match teammates. Root OCS.cmd now calls the unchanged team-ocs/OCS.cmd from a fresh clone of https://github.com/InspirationRobotics/rx26_ocs.git at main 9ccbb8c2538d1d7636b05852161ab7c4b5366ef7. No OCS source or tracked team configuration changes; git diff/status clean. Normal upstream fleet_link startup is restored: GRAEY RFD development remains deferred, which does NOT disable teammates' fleet/radio service. Wrapper adds the local venv to PATH because system python on this laptop is an unusable Windows alias. Runtime dependencies are available through an ignored local .pth to competition-comms/.deps. No persistent sequence/run state was copied from old OCS instances.
+
+Supported per-laptop config team-ocs/run/laptop.toml is stock bridge.toml plus Singapore map overview [1.2806,103.8557] and existing GUI links with GRAEY localhost8152 replacing its old direct Jetson link. This display center is not a measured vehicle fix or a declared course. Tracked team bridge.toml and launchers remain unchanged. Top-level OCS.cmd passes --config run/laptop.toml; ordinary caller arguments still pass through.
+
+GRAEY native OCS sessions now send standard RxReport JSON directly, as Crusader does; no custom graey_report envelope or initial graey_sync is sent to native OCS. Existing SQLite/run matching, surfaced-state checks, receipts and previous-run quarantine remain on GRAEY. Old SD envelope support is only legacy compatibility. The standard native report has no run_id field: do not claim unmodified OCS independently checks each report against a GRAEY envelope run ID. It follows the team's normal session/report semantics; a run transition with a report already in flight has the same transport race as the fleet baseline.
+
+The earlier competition-comms/OCS patched copy, rx26_ocs dirty clone and docs/competition-ocs.patch are historical/preserved, not active or required. Do NOT apply that patch to the team OCS. Do not start the team's fallback graey_ocs_client.py concurrently with the onboard reporting node. No radio/vehicle was opened or deployed during this change. These follow-up changes have not been pushed.
+
 ## Current Crusader baseline and runtime updates — November 9, 2026
+
+Map correction (user, November 9): inspected Crusader main and communications map.js; both have the same SHA256 a1d77a26507a599a3cbabdb12322dd81494ad16fc46169c6a27bf492231df1af. The map is an offline canvas metre-grid anchored to received coordinates, not a satellite/tile map or fixed city. Unified Missions now loads that exact renderer from tools/crusader_map.js. GRAEY adaptation supplies actual OCS polygon, fresh Cube pose/heading, stale state and mission draft; common pan/zoom/trail/arrow/waypoint-click behavior remains. Legacy /waypoint, /pool-map and /planner resolve to unified Missions, preventing old San Diego pool imagery from appearing in operator navigation. Historical imagery/source files remain preserved. No guessed Singapore vehicle position/course is substituted: absent course and pose remain unavailable. Changes are local, not pushed/deployed.
+
+User requested light mode after publication. GRAEY adapter switches existing browsers to light once, then preserves explicit theme-toggle choices; embedded pages default light too. Copied Crusader page remains unchanged. This follow-up is local until separately pushed.
 
 Naming correction: GRAEY-facing CLI now uses --graey ADDRESS and --graey-port PORT. The adapter translates these into unchanged Crusader internals; old --boat forms are hidden compatibility aliases. Operator and OCS links are two application TCP connections over the SAME WiFi network/interface, matching Crusader, not two required WiFi adapters or networks. Verified reference gcs_app.py and ocs_client_node.py.
 

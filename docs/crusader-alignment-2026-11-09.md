@@ -1,5 +1,7 @@
 # Crusader alignment — November 9, 2026
 
+**Current OCS:** [Shared team OCS](shared-team-ocs.md) supersedes the former patched OCS/skip-fleet instructions below. Native GRAEY reporting now works with unchanged team main; no OCS patch is required.
+
 This is the current operator implementation; earlier custom laptop flows are superseded. No hardware deployment, commit or push occurred.
 
 ## Sources
@@ -35,3 +37,9 @@ Double-click tools/scripts/GRAEY_GUI.cmd in this repository, or GRAEY_GUI.cmd in
 ## Hardware commissioning still required
 
 Deploy only when authorized and GRAEY is available. Confirm WiFi address/firewall TCP14559, persistent shared recordings volume, same GRAEY_RECORD_DIR mapping for camera/sonar/ROS, versioned recorder capability and actual sources. Local tests use synthetic telemetry/devices and do not verify hardware wiring or present vehicle parameters.
+
+## Course map follow-up
+
+Map correction (user, November 9): inspected Crusader main and communications map.js; both have the same SHA256 a1d77a26507a599a3cbabdb12322dd81494ad16fc46169c6a27bf492231df1af. The map is an offline canvas metre-grid anchored to received coordinates, not a satellite/tile map or fixed city. Unified Missions now loads that exact renderer from tools/crusader_map.js. GRAEY adaptation supplies actual OCS polygon, fresh Cube pose/heading, stale state and mission draft; common pan/zoom/trail/arrow/waypoint-click behavior remains. Legacy /waypoint, /pool-map and /planner resolve to unified Missions, preventing old San Diego pool imagery from appearing in operator navigation. Historical imagery/source files remain preserved. No guessed Singapore vehicle position/course is substituted: absent course and pose remain unavailable. Changes are local, not pushed/deployed.
+
+Use Plot points to enable/disable waypoint clicks (Esc also ends plotting), Fit course / route, Follow GRAEY, wheel zoom, drag pan and double-click follow, using the copied renderer. Pipeline endpoint labels remain in the route table; numbered draft markers follow Crusader.

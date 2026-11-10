@@ -2,6 +2,15 @@
    page.html/map.js/editor.js/gcs_app.py remain byte-for-byte Crusader. */
 'use strict';
 document.title='GRAEY GCS';
+// User-requested light mode, including browsers with an older dark preference.
+// Apply once; subsequent explicit theme choices retain Crusader's persistence.
+try {
+  if(localStorage.getItem('graey-light-default-v1')!=='1') {
+    themeSet('light',true);
+    localStorage.setItem('graey-light-default-v1','1');
+  }
+} catch(e) { themeSet('light',false); }
+themeChosen=true;
 for(const node of document.querySelectorAll('body *'))for(const text of node.childNodes){if(text.nodeType===Node.TEXT_NODE&&text.textContent.trim()==='Crusader')text.textContent=text.textContent.replace('Crusader','GRAEY')}
 const originalShow=show;
 const embeds={};
