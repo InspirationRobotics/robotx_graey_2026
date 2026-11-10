@@ -70,7 +70,7 @@ READ_ONLY = {
     'gcs': ('Laptop GCS bridge · core', ['gcs_bridge']),
     'gateway': ('FCU telemetry gateway · core', ['telemetry_gateway']),
     'watchdog': ('Control watchdog · core', ['kill_switch']),
-    'communications': ('WiFi reporting · opt-in core', ['competition_link_node']),
+    'communications': ('OCS client · automatic discovery / reconnect', ['competition_link_node']),
 }
 FILES = {
     '/missions':'missions.html',

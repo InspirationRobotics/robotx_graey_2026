@@ -91,7 +91,7 @@ class NavigationView:
                 self.boot_ms = m.time_boot_ms
                 # Display the same GLOBAL_POSITION_INT coordinates as QGC,
                 # independently of Jetson frame registration/navigation permission.
-                self.put('qgc_global',dict(lat=m.lat/1e7,lon=m.lon/1e7,
+                self.put('qgc_global',dict(lat=m.lat/1e7,lon=m.lon/1e7,velocity=[m.vx/100,m.vy/100,m.vz/100],
                     valid=(-900000000<=m.lat<=900000000 and -1800000000<=m.lon<=1800000000 and (m.lat!=0 or m.lon!=0)),
                     heading_deg=None if m.hdg==65535 else m.hdg/100))
                 self._geo('global', m.lat/1e7, m.lon/1e7, m.alt/1000,

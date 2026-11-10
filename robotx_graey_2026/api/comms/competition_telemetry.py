@@ -61,14 +61,11 @@ class CompetitionTelemetry:
         else:
             sender.surface = None
         try:
-            if bridge.get('age', math.inf) >= .5:
-                raise ValueError('navigation bridge stale')
-            b = bridge['data']
-            if b.get('navigation_valid') is not True:
-                raise ValueError('navigation invalid')
-            cube = snapshot['cube_estimate']
-            if not cube['valid'] or cube['heading_deg'] is None:
-                raise ValueError('geographic position/heading unavailable')
+            b = bridge.get('data', {}) if bridge.get('age', math.inf) < .5 else {}
+            cube = snapshot['qgc_pose']
+            global_sample = streams.get('qgc_global', {})
+            if not cube['valid'] or cube['heading_deg'] is None or global_sample.get('age', math.inf) >= 1.5:
+                raise ValueError('fresh Cube geographic position/heading unavailable')
             control = streams.get('control', {})
             if control.get('age', math.inf) >= 1.5:
                 raise ValueError('control status stale')
@@ -79,18 +76,16 @@ class CompetitionTelemetry:
                 raise ValueError('control state incomplete')
             state = (rx.STATE_KILLED if c['sa_active'] or not c['esc_commanded_on']
                      else rx.STATE_AUTO if c['armed'] and (c['autonomous'] or c.get('mission_claimed') is True) else rx.STATE_MANUAL)
-            if self.hae_at is None or not 0 <= now-self.hae_at < 1.5:
-                raise ValueError('fresh GPS ellipsoid altitude unavailable')
+            altitude = self.hae if self.hae_at is not None and 0 <= now-self.hae_at < 1.5 else None
             attitude = streams.get('attitude', {})
-            local = streams.get('local', {})
-            if attitude.get('age', math.inf) >= .5 or local.get('age', math.inf) >= .5:
+            if attitude.get('age', math.inf) >= .5:
                 raise ValueError('attitude/velocity stale')
             roll,pitch,_ = attitude['data']['rpy']
-            velocity = local['data']['velocity']
-            sender.update_status(now=now,depth_m=b['depth_m'],robot_state=state,
+            velocity = global_sample['data']['velocity']
+            sender.update_status(now=now,depth_m=b.get('depth_m'),robot_state=state,
                                  lat=cube['lat'],lon=cube['lon'],hdg_deg=cube['heading_deg'],
                                  spd_mps=math.hypot(*velocity[:2]),roll_deg=roll,pitch_deg=pitch,
-                                 alt_m=self.hae,task=self.task if self.task_at is not None
+                                 alt_m=altitude,task=self.task if self.task_at is not None
                                      and 0<=now-self.task_at<2 and c['armed'] and (c['autonomous'] or c.get('mission_claimed') is True) else rx.TASK_NONE)
             self.reason = None
         except (ValueError,TypeError,KeyError,IndexError) as exc:

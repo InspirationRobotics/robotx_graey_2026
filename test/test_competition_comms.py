@@ -36,13 +36,13 @@ class TestOutbox(unittest.TestCase):
         self.record()
         self.assertEqual(self.sender.run,70000)
 
-    def test_no_transmission_until_surface_known(self):
+    def test_heartbeat_before_surface_known(self):
         self.record();status(self.sender)
-        self.assertEqual(self.sender.due(0),[])
+        self.assertEqual([list(r)[-1] for r in self.sender.due(0)],['heartbeat'])
 
-    def test_underwater_records_but_sends_nothing(self):
+    def test_underwater_retains_reports_but_allows_ip_heartbeat(self):
         self.record();status(self.sender);self.sender.set_surface(False,0)
-        self.assertEqual(self.sender.due(0),[])
+        self.assertEqual([list(r)[-1] for r in self.sender.due(0)],['heartbeat'])
         self.assertEqual(self.sender.status(0)['pending'],1)
 
     def test_two_hz_heartbeat_measured_depth(self):
@@ -125,11 +125,11 @@ class TestTelemetry(unittest.TestCase):
         self.sender = CompetitionSender(':memory:')
         self.addCleanup(self.sender.close)
         self.telemetry = CompetitionTelemetry(lambda:100.)
-        self.sample = dict(cube_estimate=dict(valid=True,lat=1.28,lon=103.85,heading_deg=90),streams={
+        self.sample = dict(qgc_pose=dict(valid=True,lat=1.28,lon=103.85,heading_deg=90),streams={
             'bridge':dict(age=.1,data=dict(surfaced=True,navigation_valid=True,depth_m=.3)),
             'control':dict(age=.1,data=dict(sa_active=False,esc_commanded_on=True,autonomous=True,armed=True,vehicle_fresh=True)),
             'attitude':dict(age=.1,data=dict(rpy=[0,0,90])),
-            'local':dict(age=.1,data=dict(velocity=[.3,.4,0]))})
+            'qgc_global':dict(age=.1,data=dict(velocity=[.3,.4,0]))})
         self.telemetry.view.snapshot = lambda:self.sample
         self.telemetry.hae,self.telemetry.hae_at = 5.9,100
 
@@ -139,28 +139,47 @@ class TestTelemetry(unittest.TestCase):
         self.assertEqual(self.sender.heartbeat_body['spd_mps'],.5)
         self.assertEqual(self.sender.heartbeat_body['depth_m'],.3)
 
-    def test_missing_hae_suppresses_heartbeat(self):
-        self.telemetry.hae_at = None
+    def test_unprepared_navigation_does_not_hide_measured_cube_telemetry(self):
+        self.sample['cube_estimate']=dict(valid=False)
+        self.sample['streams']['bridge']['data'].update(navigation_valid=False,surfaced=None,depth_m=None)
+        self.telemetry.hae_at=None
+        self.telemetry.update(self.sender,100)
+        report=self.sender.due(100)[0]['heartbeat']
+        self.assertEqual(report['position'],dict(latitude=1.28,longitude=103.85))
+        self.assertNotIn('depth_m',report)
+        self.assertNotIn('altitude_hae_m',report)
+
+    def test_stale_position_clears_previously_valid_heartbeat(self):
+        self.telemetry.update(self.sender,100)
+        self.sample['streams']['qgc_global']['age']=2
         self.telemetry.update(self.sender,100)
         self.assertIsNone(self.sender.status_at)
-        self.assertIn('ellipsoid',self.telemetry.reason)
+        self.assertEqual(self.sender.due(100),[])
+
+    def test_missing_hae_omits_altitude(self):
+        self.telemetry.hae_at = None
+        self.telemetry.update(self.sender,100)
+        self.assertIsNotNone(self.sender.status_at)
+        self.assertNotIn('altitude_hae_m',self.sender.heartbeat_body)
 
     def test_control_kill_reports_commanded_permission(self):
         self.sample['streams']['control']['data']['esc_commanded_on'] = False
         self.telemetry.update(self.sender,100)
         self.assertEqual(self.sender.heartbeat_body['state'],'STATE_KILLED')
 
-    def test_stale_bridge_immediately_pauses_transmission(self):
+    def test_stale_bridge_omits_depth_but_retains_heartbeat(self):
         self.telemetry.update(self.sender,100)
         self.sample['streams']['bridge']['age'] = 1
         self.telemetry.update(self.sender,100)
         self.assertIsNone(self.sender.surface)
-        self.assertIsNone(self.sender.status_at)
+        self.assertIsNotNone(self.sender.status_at)
+        self.assertNotIn('depth_m',self.sender.heartbeat_body)
 
-    def test_bad_depth_suppresses_heartbeat(self):
+    def test_missing_depth_omitted(self):
         self.sample['streams']['bridge']['data']['depth_m'] = None
         self.telemetry.update(self.sender,100)
-        self.assertIsNone(self.sender.status_at)
+        self.assertIsNotNone(self.sender.status_at)
+        self.assertNotIn('depth_m',self.sender.heartbeat_body)
 
     def gps(self,fix=3,source=1,stamp=123,alt_ellipsoid=5900):
         return SimpleNamespace(get_srcSystem=lambda:source,get_srcComponent=lambda:1,

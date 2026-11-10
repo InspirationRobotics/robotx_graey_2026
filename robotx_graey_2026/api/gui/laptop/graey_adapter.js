@@ -2,6 +2,13 @@
    page.html/map.js/editor.js/gcs_app.py remain byte-for-byte Crusader. */
 'use strict';
 document.title='GRAEY GCS';
+// GRAEY's competition_link_node is the equivalent of Crusader's ocs_client.
+const originalNodes=nodes;
+nodes=function(){
+  const client=(G.nodes?.items||[]).find(item=>item.name==='communications');
+  if(client)client.note='OCS client · automatic discovery / reconnect';
+  return originalNodes();
+};
 // User-requested light mode, including browsers with an older dark preference.
 // Apply once; subsequent explicit theme choices retain Crusader's persistence.
 try {

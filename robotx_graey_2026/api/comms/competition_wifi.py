@@ -61,16 +61,20 @@ class CompetitionSender:
         self.surface,self.surface_at = surface,now
 
     def update_status(self, *, now,depth_m,**fields):
-        if type(depth_m) not in (int,float) or not math.isfinite(depth_m) or depth_m < 0:
+        if depth_m is not None and (type(depth_m) not in (int,float) or not math.isfinite(depth_m) or depth_m < 0):
             raise ValueError('measured nonnegative depth is required')
+        altitude = fields.get('alt_m')
+        fields['alt_m'] = 0. if altitude is None else altitude
         body = rx.unpack_heartbeat(rx.pack_heartbeat(vehicle=rx.NODE_UUV,flight_phase=0,
-            pos_valid=True,att_valid=True,alt_valid=True,**fields))
+            pos_valid=True,att_valid=True,alt_valid=altitude is not None,**fields))
         if body['robot_state'] == 0 or body['task'] not in rx.RX_TASK or body['task'] == 0 or body['hdg_deg'] is None:
             raise ValueError('heartbeat state, heading and task must be known')
         self.heartbeat_body = dict(vehicle_type='TYPE_UUV',state=rx.ROBOT_STATE[body['robot_state']],
             current_task=rx.RX_TASK[body['task']],position=dict(latitude=body['lat'],longitude=body['lon']),
             spd_mps=body['spd_mps'],heading_deg=body['hdg_deg'],roll_deg=body['roll_deg'],pitch_deg=body['pitch_deg'],
             altitude_hae_m=body['alt_m'],depth_m=depth_m)
+        if depth_m is None:self.heartbeat_body.pop('depth_m')
+        if altitude is None:self.heartbeat_body.pop('altitude_hae_m')
         self.status_at = now
 
     def _event(self, observation_id, kind, body):
@@ -157,7 +161,6 @@ class CompetitionSender:
                                         (verdict,str(receipt.get('detail','')),seq))
 
     def due(self,now):
-        if self.surface is not True or self.surface_at is None or now-self.surface_at >= 2:return []
         reports = []
         if self.status_at is not None and now-self.status_at < 1.5 and now >= self.next_hb:
             # Preserve cadence through ordinary executor jitter, skip missed
@@ -165,6 +168,8 @@ class CompetitionSender:
             self.next_hb = now+.5 if self.next_hb == 0 or now-self.next_hb >= .5 else self.next_hb+.5
             reports.append(dict(team_id=self.team_id,vehicle_id='UUV1',sent_at=timestamp(self.wall()),
                                 heartbeat=self.heartbeat_body))
+        # Routine IP heartbeat follows Crusader; surfaced task observations keep their gate.
+        if self.surface is not True or self.surface_at is None or now-self.surface_at >= 2:return reports
         if (self.remote_at is not None and (self.native_run or 0 <= now-self.remote_at < 5) and self.remote_state == 'RUNNING'
                 and (self.native_run or self.report_envelope) and self.run is not None and self.run == self.remote_run and now >= self.next_event):
             self.next_event = now+2
@@ -183,7 +188,7 @@ class CompetitionSender:
                  for row in self.db.execute('SELECT id,run,observation_id,kind,verdict,detail FROM events ORDER BY id DESC LIMIT 30')]
         return dict(run_id=self.run,remote_run_id=self.remote_run,remote_state=self.remote_state,
             run_confirmed=bool(self.remote_at is not None and (self.native_run or 0 <= now-self.remote_at < 5) and self.remote_state=='RUNNING'),
-            surface=self.surface,transmission_enabled=bool(self.surface is True and self.surface_at is not None and now-self.surface_at < 2),
+            surface=self.surface,transmission_enabled=bool(self.status_at is not None and now-self.status_at < 1.5),
             telemetry_fresh=bool(self.status_at is not None and now-self.status_at < 1.5),pending=counts.get('pending',0),
             broker_acknowledged=counts.get('acknowledged',0),rejected=counts.get('held',0)+counts.get('dropped',0),
             reports=reports,course=self.course,ocs_run=self.run_snapshot,ocs_directive=self.directive,tiers_reply=self.tiers_reply,
