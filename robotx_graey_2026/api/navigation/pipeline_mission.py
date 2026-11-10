@@ -354,6 +354,10 @@ ALT_DZ_SPEED = 0.1      # pool_alt_m's dive, the search's rise and the step down
 SEARCH_MIN_ALT_M = 2.5  # pool_alt_m: while searching, never closer to the bottom than this (DVL)
 ALT_DIVE_WAIT_S = 20.0  # ... no DVL altitude on the dive this long: search from where it is
 ALT_MAX_DEPTH_M = 6.0   # ... and never deeper than this below the start: a DVL reading wrong (Ruth, Oct 25)
+FACE_TOL_DEG = 10.0     # face_end_buoy: within this of the bearing ...
+FACE_HOLD_S = 2.0       # ... for this long before the dive starts
+FACE_MAX_S = 60.0       # ... or dive anyway after this long turning (logged)
+FLOOR_TOL_M = 0.15      # transit_follow_floor: move the depth only when pool_alt_m is off by more than this
 WALK_PIPE_BELOW_M = 1.0 # over the pipe before the walk: down until it is this far under the sonar
 OVER_CHECK_SWEEPS = 2   # over the picked spot: look straight down for this many sweeps ...
 OVER_CHECK_M = 1.0      # ... for the pipe this far either side of the sonar ...
@@ -513,10 +517,30 @@ class PipelineMission(MissionBase):
         if self.dry:
             if not self.dive_logged:
                 self.dive_logged = True
+                if self.face_brg is not None:
+                    self.get_logger().info(f'    [dry] turn at the surface to {math.degrees(self.face_brg):.0f} deg '
+                                           f'(the end buoy), then dive')
                 self.get_logger().info(f'    [dry] dive: down until the DVL reads {self.pool_alt:.2f} m to the bottom')
             return super().reached_depth()
         if self.cur is None:
             return False
+        if self.face_brg is not None and not self.faced:      # face_end_buoy: turn first, at the surface
+            now = self.now()
+            self.face_t0 = self.face_t0 or now
+            err = abs((self.start_yaw - (self.cur_yaw or 0.0) + math.pi) % (2 * math.pi) - math.pi)
+            if self.cur_yaw is not None and err <= math.radians(FACE_TOL_DEG):
+                self.face_t = self.face_t or now
+            else:
+                self.face_t = None
+            if self.face_t is not None and now - self.face_t >= FACE_HOLD_S:
+                self.faced = True
+                self.get_logger().info(f'facing the end buoy ({math.degrees(err):.0f} deg off) - diving')
+            elif now - self.face_t0 >= FACE_MAX_S:
+                self.faced = True
+                self.get_logger().warn(f'still {math.degrees(err):.0f} deg off the end buoy\'s bearing after '
+                                       f'{FACE_MAX_S:.0f} s turning - diving anyway (the transit steers to it)')
+            else:
+                return False                # self.depth stays 0: holding at the surface while it turns
         alt, below = self.alt_now(), self.cur[2] - self.z_surf
         if alt is None:
             if self.dive_wait_t is None:
@@ -607,6 +631,13 @@ class PipelineMission(MissionBase):
         p('start_buoy_gps', '')             # ... the buoys' GPS (Ruth, Oct 28), 'lat lon' in degrees each:
         p('end_buoy_gps', '')               #     the distance between them (and its bearing, logged)
         p('end_short_m', 2.0)               # ... nothing found this far short of it: surface
+        p('face_end_buoy', False)           # transit (Ruth, Nov 10): at the surface, turn to the buoys' GPS bearing
+                                            # (start -> end buoy) before the dive, and transit along it
+        p('transit_only', False)            # transit (Ruth, Nov 10 survey run): no pipe checks - drive the whole
+                                            # way to the end buoy and surface
+        p('transit_follow_floor', True)     # transit (Ruth, Nov 10): keep pool_alt_m above the floor, up and down
+        p('record_external', False)         # tools/survey_run.py records the sonar itself: the mission neither
+                                            # starts nor stops it, its marks go into that recording
         p('scan_time_s', 300.0)             # pool: give up searching (turns + picks) after this
         p('retry_turn_deg', 180.0)          # pool: nothing picked -> turn this much more and look again
         p('scan_stops', 20)                 # stops: this many headings round scan_turn_deg
@@ -935,6 +966,15 @@ class PipelineMission(MissionBase):
             self.end_buoy, brg = buoy_distance(latlon(gps[0]), latlon(gps[1]))
             self.get_logger().info(f'end buoy {self.end_buoy:.1f} m from the start buoy, bearing {brg:.0f} deg '
                                    f'(true north), from the buoys\' GPS')
+        self.face_brg = None                # radians: the heading to turn to before the dive (face_end_buoy)
+        if bool(g('face_end_buoy')):
+            if not any(gps):
+                raise ValueError('face_end_buoy:=true needs the buoys\' GPS (start_buoy_gps, end_buoy_gps)')
+            self.face_brg = math.radians(brg)
+        self.faced, self.face_t, self.face_t0 = False, None, None
+        self.transit_only = bool(g('transit_only'))
+        self.transit_follow_floor = bool(g('transit_follow_floor'))
+        self.rec_external = bool(g('record_external'))
         # only a run that transits needs the end buoy: follow and centre-alone runs start over the pipe
         if self.scan_mode == 'transit' and self.start_with not in ('follow', 'centre') and self.end_buoy <= self.end_short:
             raise ValueError(f'scan_mode:=transit needs end_buoy_m or the buoys\' GPS (start_buoy_gps, end_buoy_gps): '
@@ -952,6 +992,8 @@ class PipelineMission(MissionBase):
         self.stop_tol = math.radians(max(1.0, float(g('stop_tol_deg'))))
         self.stop_turn_rate = math.radians(max(0.0, float(g('stop_turn_dps'))))
         self.record_scan = bool(g('record_scan'))
+        if self.rec_external:               # survey_run.py's recording is already running: marks go into it
+            self.record_scan, self.recording = False, True
         self.pool_max_pick = float(g('pool_max_pick_m'))
         self.pool_alt = max(0.0, float(g('pool_alt_m'))) if self.plan == 'pool' else 0.0
         if self.plan == 'pool':
@@ -989,12 +1031,16 @@ class PipelineMission(MissionBase):
         if s is S.ARM:
             self.z_surf = self.cur[2] if self.cur else 0.0
             self.get_logger().info(f'surface reads {self.z_surf:.2f} m; depths are from there')
+            if self.face_brg is not None:   # face_end_buoy: the transit's heading is the buoys' bearing, not the start's
+                self.get_logger().info(f'facing the end buoy: {math.degrees(self.face_brg):.0f} deg (the sub points '
+                                       f'{math.degrees(self.start_yaw) % 360:.0f} deg) - turning at the surface first')
+                self.start_yaw = self.face_brg
         if s is S.SURFACE and self.plan == 'pool' and self.cur:
             self.surface_at = (self.cur[0], self.cur[1], self.cur_yaw or 0.0)   # up where it is
             self.post_point(None)
         if s is S.SURFACE:
             self.stop_camera()                  # the box summary, however the run ends
-        if s is S.SURFACE and self.recording:    # an early end (timeout, no map) left it running
+        if s is S.SURFACE and self.recording and not self.rec_external:   # an early end left it running
             try:
                 self.map_post('/record', 'stop')
                 self.recording = False
@@ -1976,10 +2022,25 @@ class PipelineMission(MissionBase):
         T['s'] = min(T['s'] + self.transit_speed * dt, along + 0.5)
         tn, te = np.array(T['o']) + T['s'] * u
         rate, _ = self.yaw_rate_to(yaw)
-        self.hold = (here[0], here[1], self.hold[2], yaw)
+        z = self.hold[2]
+        alt = self.alt_now(1.5) if self.transit_follow_floor and self.pool_alt > 0 and not self.dry else None
+        if alt is not None and self.cur is not None:
+            # transit_follow_floor (Ruth, Nov 10): pool_alt_m above the floor, up and down, at ALT_DZ_SPEED -
+            # never above the surface, never deeper than ALT_MAX_DEPTH_M below it
+            want = min(max(self.z_surf, self.cur[2] + alt - self.pool_alt), self.z_surf + self.max_depth)
+            if abs(want - z) > FLOOR_TOL_M:
+                z += max(-ALT_DZ_SPEED * dt, min(ALT_DZ_SPEED * dt, want - z))
+        self.hold = (here[0], here[1], z, yaw)
         self.stream_posvel(tn, te, self.hold[2], self.transit_speed * u[0], self.transit_speed * u[1], rate, 'transit')
         if self.dry and now - self.state_t0 < 0.3:
             self.get_logger().info(f'    dry run: drive the sub along heading {math.degrees(yaw) % 360:.0f} deg')
+        if self.transit_only:               # Nov 10 survey run: no pipe checks, the whole way to the end buoy
+            if now - self.transit_log >= TRANSIT_LOG_S:
+                self.transit_log = now
+                self.get_logger().info(f'    transit: {along:.1f} of {self.end_buoy - self.end_short:.1f} m, '
+                                       f'{self.below_surface(self.hold[2]):.2f} m down, '
+                                       + (f'{alt:.2f} m above the floor' if alt is not None else 'no DVL altitude'))
+            return
         # the sonar: the dots of the last TRANSIT_SWEEPS sweeps, less those near spots already turned down
         self.stop_collect(m)
         sw = m.get('sweep', 0)
@@ -2966,7 +3027,7 @@ class PipelineMission(MissionBase):
     def end_in_poshold(self):
         """Hand the sub over armed and holding: MissionBase sees the mode leave GUIDED and
         ends the mission without disarming, as when the pilot takes over."""
-        if self.recording:
+        if self.recording and not self.rec_external:
             try:
                 self.map_post('/record', 'stop')
                 self.recording = False
