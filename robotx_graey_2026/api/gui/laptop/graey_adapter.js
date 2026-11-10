@@ -31,7 +31,7 @@ const operatorStyle=document.createElement('style');operatorStyle.textContent=`
 :root{--operator-height:calc(100dvh - 140px)}
 #t-mission,#t-sensors{padding:0}
 #t-mission>iframe{display:block;height:var(--operator-height)!important}
-.graey-sensor-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(400px,1fr);gap:6px;height:var(--operator-height);grid-template-rows:minmax(0,1fr) auto}
+.graey-sensor-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(400px,1fr);gap:6px;height:var(--operator-height);grid-template-rows:minmax(0,1fr)}
 .graey-sensor-layout>iframe{display:block;width:100%;height:100%!important;min-width:0;border:0}
 .graey-sensor-layout>details{grid-column:1/-1;border:1px solid var(--line);padding:4px 8px}
 .graey-sensor-layout>details>iframe{height:300px!important;display:block;width:100%}
@@ -39,7 +39,9 @@ const operatorStyle=document.createElement('style');operatorStyle.textContent=`
 @media(max-width:900px){.graey-sensor-layout{height:auto;grid-template-columns:1fr;grid-template-rows:55dvh 65dvh auto}}
 `;document.head.appendChild(operatorStyle);
 const sensorLayout=document.createElement('div');sensorLayout.className='graey-sensor-layout';$('t-sensors').appendChild(sensorLayout);sensorLayout.append(embeds.sensors,preparation);
-const viewers=document.createElement('details');viewers.innerHTML='<summary>Camera / sonar viewers and device controls</summary>';viewers.appendChild(sensorTools);sensorLayout.appendChild(viewers);
+const viewers=document.createElement('details');viewers.className='box wide';viewers.innerHTML='<summary>Camera / sonar live views</summary>';sensorTools.style.height='420px';viewers.appendChild(sensorTools);
+// Presentation only: place the existing viewer inside the same sensor-card grid.
+embeds.sensors.addEventListener('load',()=>{const grid=embeds.sensors.contentDocument.querySelector('main.grid');if(grid)grid.insertBefore(viewers,grid.querySelector('details'))});
 const toolsMenu=document.createElement('select');toolsMenu.setAttribute('aria-label','Tools');toolsMenu.innerHTML='<option value="">Tools…</option>';
 for(const button of document.querySelectorAll('#tabs button')){const id=button.dataset.tab;if(!['mission','sensors','record'].includes(id)){button.hidden=true;if(id!=='map')toolsMenu.add(new Option(button.textContent,id))}}
 $('tabs').appendChild(toolsMenu);toolsMenu.onchange=()=>{if(toolsMenu.value)show(toolsMenu.value)};
@@ -49,7 +51,7 @@ addEventListener('resize',fitOperator);new ResizeObserver(fitOperator).observe(d
 CrsdEditor.enter=()=>{};CrsdEditor.status=()=>{};loadMissions=async()=>{};
 loadCamera=async()=>{};camLoop=()=>{};lidarLoop=()=>{};
 let sensorsVisible=false;
-function syncSensorVisibility(){sensorTools.contentWindow.postMessage({graeySensorsVisible:sensorsVisible&&viewers.open},location.origin)}
+function syncSensorVisibility(){sensorTools.contentWindow?.postMessage({graeySensorsVisible:sensorsVisible&&viewers.open},location.origin)}
 sensorTools.addEventListener('load',syncSensorVisibility);viewers.addEventListener('toggle',syncSensorVisibility);
 show=function(id){if(id==='map')id='mission';originalShow(id);toolsMenu.value=["mission","sensors","record"].includes(id)?"":id;sensorsVisible=id==='sensors';syncSensorVisibility()};
 document.querySelector('[data-tab="map"]').hidden=true;
@@ -65,7 +67,7 @@ show(new URLSearchParams(location.search).get('tab')==='sensors'?'sensors':new U
 // Sensor-specific battery uncertainty must not inherit Crusader's calibration claim.
 battTile=function(h){return ['stale','—','not measured','A fresh GRAEY battery measurement has not been supplied to this adapter']};
 
-function syncGraeyTheme(){const theme=document.documentElement.dataset.theme;for(const frame of [...Object.values(embeds),sensorTools,preparation])frame.contentWindow.postMessage({graeyTheme:theme},location.origin)}
+function syncGraeyTheme(){const theme=document.documentElement.dataset.theme;for(const frame of [...Object.values(embeds),sensorTools,preparation])frame.contentWindow?.postMessage({graeyTheme:theme},location.origin)}
 for(const frame of [...Object.values(embeds),sensorTools,preparation])frame.addEventListener('load',syncGraeyTheme);
 new MutationObserver(syncGraeyTheme).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});syncGraeyTheme();
 for(const node of document.querySelectorAll('span'))if(node.textContent.includes('crusader_params.yaml'))node.textContent=node.textContent.replace('crusader_params.yaml','graey_params.yaml');
