@@ -21,6 +21,15 @@ def navigation_start_reason(c):
     return ''
 
 
+def calibration_reason(c):
+    """VN rotation needs disabled propulsion, not a particular SA/link state."""
+    if not (c.get('online') is True and c.get('vehicle_fresh') is True
+            and c.get('armed') is False and c.get('esc_commanded_on') is False
+            and c.get('mission_claimed') is False and c.get('autonomous') is False):
+        return 'VN rotation requires fresh disarmed state, ESC power off and no active mission'
+    return ''
+
+
 def require_maintenance(check=maintenance_reason):
     with urllib.request.urlopen('http://localhost:8090/api/controller', timeout=.2) as source:
         c = json.load(source)

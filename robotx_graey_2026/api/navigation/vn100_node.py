@@ -23,7 +23,7 @@ import serial
 from robotx_graey_2026.api.node_util import run
 from .vn_protocol import relative_heading, checked, transact
 from .vn_calibration import VNCalibration
-from .maintenance_safety import require_maintenance
+from .maintenance_safety import require_maintenance, calibration_reason
 
 DEFAULT_PORT = '/dev/serial/by-id/usb-FTDI_USB-RS232_Cable_AV0K9DQE-if00-port0'
 
@@ -69,11 +69,11 @@ class VN100Node(Node):
 
     def calibrate_start(self, request, response):
         try:
-            require_maintenance()
+            require_maintenance(check=calibration_reason)
             if self.ser is None:
                 raise ValueError('VN serial unavailable')
             self.calibration.start(self.ser)
-            response.success, response.message = True, 'Rotate now; keep kill engaged. VN odometry input is withheld during calibration.'
+            response.success, response.message = True, 'Rotate now; keep disarmed and ESC power off. VN odometry input is withheld during calibration.'
         except (OSError, ValueError) as error:
             response.success, response.message = False, str(error)
         return response
@@ -90,7 +90,7 @@ class VN100Node(Node):
     def calibration_tick(self):
         if self.calibration.running:
             try:
-                require_maintenance()
+                require_maintenance(check=calibration_reason)
                 if self.ser is None:
                     raise OSError('VN serial lost during calibration')
                 if time.monotonic()-self.calibration.started >= self.calibration.seconds:

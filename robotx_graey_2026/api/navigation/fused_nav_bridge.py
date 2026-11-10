@@ -23,7 +23,7 @@ from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.pixhawk.mavlink import Link
 from .bridge_estimator import BridgeEstimator, yaw
 from .odometry_profile import PROFILE
-from .maintenance_safety import require_maintenance, navigation_start_reason
+from .maintenance_safety import require_maintenance, navigation_start_reason, calibration_reason
 from .automatic_recovery import AutomaticRecovery
 from .land_north import LandNorth
 from .track_north import TrackNorth
@@ -249,7 +249,7 @@ class FusedNavBridge(SteadyNode):
 
     def pause_odometry(self, request, response):
         try:
-            require_maintenance()
+            require_maintenance(check=calibration_reason)
             self.output_permitted = False
             self.est.fault = 'Navigation maintenance; Prepare required before reuse'
             response.success, response.message = True, 'Odometry paused for maintenance'
@@ -259,7 +259,7 @@ class FusedNavBridge(SteadyNode):
 
     def resume_odometry(self, request, response):
         try:
-            require_maintenance()
+            require_maintenance(check=calibration_reason)
             if not self.configured(time.monotonic()):
                 raise ValueError('Cube external-navigation profile unavailable or mismatched')
             if self.est.fault=='Navigation maintenance; Prepare required before reuse':

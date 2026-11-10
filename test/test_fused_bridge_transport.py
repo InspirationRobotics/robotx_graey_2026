@@ -163,7 +163,7 @@ class TransportTests(unittest.TestCase):
         self.clock = NS(now=10.)
         ns = dict(recover_ingress=recover_ingress, ContinuousEstimator=ContinuousEstimator, SteadyNode=object, math=math, json=json, String=NS, PROFILE=PROFILE,
                   yaw=yaw, time=NS(monotonic=lambda: self.clock.now, monotonic_ns=lambda: int(self.clock.now*1e9)),
-                  statistics=statistics, BridgeEstimator=BridgeEstimator,RelativeEstimator=RelativeEstimator,TrackNorth=TrackNorth, require_maintenance=Mock(), navigation_start_reason=Mock(), AutomaticRecovery=AutomaticRecovery)
+                  statistics=statistics, BridgeEstimator=BridgeEstimator,RelativeEstimator=RelativeEstimator,TrackNorth=TrackNorth, require_maintenance=Mock(), navigation_start_reason=Mock(), calibration_reason=Mock(), AutomaticRecovery=AutomaticRecovery)
         exec(compile(tree, str(path), 'exec'), ns)
         self.b = ns['FusedNavBridge'].__new__(ns['FusedNavBridge'])
         self.b.est = BridgeEstimator()

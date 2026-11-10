@@ -4,11 +4,30 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from robotx_graey_2026.api.gui.calibration_jobs import CalibrationJobs
-from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason, navigation_start_reason
+from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason, navigation_start_reason, calibration_reason
 from robotx_graey_2026.api.navigation.vn_calibration import VNCalibration
 
 
 class CalibrationJobsTests(unittest.TestCase):
+    def test_calibration_accepts_sa_released_and_link_lost_with_propulsion_off(self):
+        self.c.update(sa_active=False,inhibit='RF_LOST',rf_alive=False,tether_alive=False)
+        self.assertEqual(calibration_reason(self.c),'')
+        with patch('threading.Thread') as thread:
+            self.job.request(dict(action='calibrate',confirmed=True))
+            thread.return_value.start.assert_called_once()
+        samples=iter([dict(log='old'),dict(log='new',phase='collected',saved=True)])
+        self.job.sample=lambda name:next(samples)
+        self.job.run('calibrate')
+        self.assertEqual(self.calls,[('pause',None),('calibrate',None),('resume',None)])
+        self.assertEqual(self.job.snapshot()['phase'],'collected')
+
+    def test_calibration_rejects_enabled_propulsion_or_unknown_control(self):
+        for key,value in [('armed',True),('esc_commanded_on',True),('vehicle_fresh',False),
+                          ('mission_claimed',True),('autonomous',True)]:
+            with self.subTest(key=key):
+                self.assertTrue(calibration_reason(dict(self.c,**{key:value})))
+        self.assertTrue(calibration_reason({}))
+
     def test_manual_heading_uses_existing_manual_operation_policy_and_service(self):
         with patch('threading.Thread') as thread:
             self.job.request(dict(action='align_heading',true_heading_deg=90.))
