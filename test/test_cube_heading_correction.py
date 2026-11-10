@@ -64,12 +64,18 @@ class CubeHeadingTests(unittest.TestCase):
         r=GuidedSurfaceRun(dict(lat=33.,lon=-117.,mode='surface',map='geographic',alignment_corridor_confirmed=True),'run',0.)
         r.start=(0.,0.,0.);r.align_start=(0.,0.,0.);r.guided_target=(10.,0.,0.)
         r.heading=r.align_heading=0.
+        from robotx_graey_2026.api.navigation.guided_orientation import GuidedOrientation
+        r.orientation=GuidedOrientation((0.,0.,-2.),(10.,0.,-2.))
         reset=dict(revision=1,offset_deg=90.,anchor=[10.,0.,0.])
         r.apply_heading_reset(reset)
         np.testing.assert_allclose(r.guided_target,(10.,0.,0.),atol=1e-9)
         np.testing.assert_allclose(r.align_start,(10.,-10.,0.),atol=1e-9)
         self.assertAlmostEqual(r.heading,math.pi/2)
+        np.testing.assert_allclose(r.orientation.hold,(10.,-10.,-2.),atol=1e-9)
+        self.assertAlmostEqual(r.orientation.heading,math.pi/2)
         r.apply_heading_reset(reset)
+        np.testing.assert_allclose(r.orientation.hold,(10.,-10.,-2.),atol=1e-9)
+        self.assertAlmostEqual(r.orientation.heading,math.pi/2)
         self.assertAlmostEqual(r.heading,math.pi/2)
         np.testing.assert_allclose(r.align_start,(10.,-10.,0.),atol=1e-9)
 

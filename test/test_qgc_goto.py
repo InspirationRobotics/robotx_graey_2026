@@ -2,11 +2,30 @@ import sys
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock,patch
 sys.path.insert(0,str(Path(__file__).parents[1]/'scripts'))
-from mavproxy_mission_gate import hook_source
+from mavproxy_mission_gate import hook_source,install_continuous_broadcast
 from mission_input_gate import MissionInputGate
 
 class NativeGotoTests(unittest.TestCase):
+    def test_broadcast_destination_survives_client_reply(self):
+        import socket
+        from pymavlink import mavutil
+        link=SimpleNamespace(destination_addr=('192.168.2.255',14570),port=Mock())
+        original=Mock(return_value=link)
+        with patch.object(mavutil,'mavlink_connection',original):
+            install_continuous_broadcast()
+            connection=mavutil.mavlink_connection
+            self.assertIs(connection('udpall:192.168.2.255:14570'),link)
+            original.assert_called_once_with('udpbcast:192.168.2.255:14570')
+            link.destination_addr=('192.168.2.7',14570)
+            link.write(b'telemetry')
+            link.port.sendto.assert_called_with(b'telemetry',('192.168.2.255',14570))
+            link.port.sendto.side_effect=socket.error('temporary network loss')
+            link.write(b'telemetry')
+            connection('udpin:127.0.0.1:14551')
+            original.assert_called_with('udpin:127.0.0.1:14551')
+
     def test_native_commands_forward_without_router_or_mode_rewrite(self):
         source="def process():\n    for m in msgs:\n        if True:\n            output.write(m.get_msgbuf())\n"
         built=hook_source(source)

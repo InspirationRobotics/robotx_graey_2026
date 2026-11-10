@@ -42,6 +42,19 @@ class NavigationTests(unittest.TestCase):
         self.assertFalse(c['valid']);self.assertTrue(c['local_valid'])
         self.assertIsNone(c['heading_deg'])
 
+    def test_qgc_display_is_raw_cube_position_without_changing_navigation_permission(self):
+        m=SimpleNamespace(lat=12800000,lon=1038500000,alt=1000,vx=0,vy=0,vz=0,hdg=6200,time_boot_ms=100,
+                          get_srcSystem=lambda:1,get_srcComponent=lambda:1)
+        self.view.consume('GLOBAL_POSITION_INT',m)
+        self.view.put('attitude',dict(rpy=[0.,0.,64.]))
+        self.view.put('bridge',dict(coordinate_frame='fixed_local',instance='test',map_transform={}))
+        s=self.view.snapshot()
+        self.assertEqual((s['qgc_pose']['lat'],s['qgc_pose']['lon'],s['qgc_pose']['heading_deg']),(1.28,103.85,64.))
+        self.assertTrue(s['qgc_pose']['valid'])
+        self.assertFalse(s['cube_estimate']['valid'])
+        self.now+=3
+        self.assertFalse(self.view.snapshot()['qgc_pose']['valid'])
+
     def setUp(self):
         self.now = 10
         self.view = module.NavigationView(lambda: self.now)

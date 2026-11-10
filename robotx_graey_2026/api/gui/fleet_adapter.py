@@ -22,7 +22,7 @@ class FleetAdapter:
     def frames(self):
         try:
             nav=self.http('/api/navigation');control=self.http('/api/controller');comms=self.http('/api/communications')
-            cube=nav.get('cube_estimate',{});streams=nav.get('streams',{});p=cube if cube.get('valid') else {}
+            cube=nav.get('cube_estimate',{});streams=nav.get('streams',{});display=nav.get('qgc_pose',cube);p=display if display.get('valid') else {}
             def sample(key,limit=2):
                 row=streams.get(key,{})
                 return row.get('data',{}) if row.get('age',999)<limit else {}

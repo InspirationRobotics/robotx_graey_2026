@@ -89,6 +89,11 @@ class NavigationView:
                     else:
                         self.reset_state = 'idle'
                 self.boot_ms = m.time_boot_ms
+                # Display the same GLOBAL_POSITION_INT coordinates as QGC,
+                # independently of Jetson frame registration/navigation permission.
+                self.put('qgc_global',dict(lat=m.lat/1e7,lon=m.lon/1e7,
+                    valid=(-900000000<=m.lat<=900000000 and -1800000000<=m.lon<=1800000000 and (m.lat!=0 or m.lon!=0)),
+                    heading_deg=None if m.hdg==65535 else m.hdg/100))
                 self._geo('global', m.lat/1e7, m.lon/1e7, m.alt/1000,
                           {'velocity': [m.vx/100, m.vy/100, m.vz/100],
                            'heading': None if m.hdg == 65535 else m.hdg/100})
@@ -183,6 +188,11 @@ class NavigationView:
             if 'global' in streams:
                 streams['global']['data']['valid'] &= bool(self.position_healthy())
                 streams['global']['data']['position_healthy'] = bool(self.position_healthy())
+            raw=streams.get('qgc_global',{})
+            attitude=streams.get('attitude',{})
+            qgc_pose=dict(raw.get('data',{}),valid=bool(raw.get('fresh') and raw.get('data',{}).get('valid')),
+                          age=raw.get('age'),source='GLOBAL_POSITION_INT')
+            if attitude.get('fresh'):qgc_pose['heading_deg']=attitude['data']['rpy'][2]
             supervisor = streams.get('supervisor', {})
             reference = copy.deepcopy(supervisor.get('data', {}).get('reference'))
             target = copy.deepcopy(supervisor.get('data', {}).get('target_gps'))
@@ -227,7 +237,7 @@ class NavigationView:
                     trail.append([*p,now,cube['lat'],cube['lon']]);self.mapped_trail=trail[-1000:]
                 self.trails['global']=list(getattr(self,'mapped_trail',[]))
             return {'streams': streams, 'origin': copy.deepcopy(self.origin), 'session': self.session,
-                    'cube_estimate': cube,
+                    'cube_estimate': cube, 'qgc_pose': qgc_pose,
                     'mission_reference': reference,
                     'mission_target': target,
                     'origin_revision': self.origin_revision,

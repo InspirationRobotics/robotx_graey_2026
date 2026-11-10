@@ -1,0 +1,27 @@
+{
+  "result": "PASS",
+  "live_gui_controls_visible": true,
+  "ocs_connected_indicator_visible": true,
+  "qgc_pose": {
+    "lat": 1.2814767,
+    "lon": 103.8543671,
+    "valid": true,
+    "heading_deg": 116.55290248784716,
+    "age": 0.02297625600022002,
+    "source": "GLOBAL_POSITION_INT"
+  },
+  "no_javascript_errors": true,
+  "vehicle_disarmed_killed": true,
+  "graey_tests": {
+    "run": 465,
+    "skipped": 5
+  },
+  "ocs_tests": {
+    "run": 611,
+    "skipped": 1
+  },
+  "shared_ocs_patch": "shared-ocs-live-link.patch",
+  "mission_upload_or_auto_sync": false,
+  "real_motion_or_calibration_started": false,
+  "pushed": false
+}

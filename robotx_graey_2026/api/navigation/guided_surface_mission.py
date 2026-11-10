@@ -30,6 +30,11 @@ class GuidedSurfaceRun(WaypointRun):
         if revision==self.heading_reset_revision:return
         self.heading_reset_revision=revision
         angle=reset['offset_deg'];anchor=reset['anchor']
+        if self.orientation is not None:
+            p=self.orientation.hold
+            xy=rotation((p[0]-anchor[0],p[1]-anchor[1]),angle)
+            self.orientation.hold=(xy[0]+anchor[0],xy[1]+anchor[1],*p[2:])
+            self.orientation.heading=(self.orientation.heading+math.radians(angle)+math.pi)%(2*math.pi)-math.pi
         for name in ('start','align_start','guided_target','target'):
             p=getattr(self,name,None)
             if p is not None:

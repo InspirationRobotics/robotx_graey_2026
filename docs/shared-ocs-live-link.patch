@@ -1,0 +1,54 @@
+diff --git a/ocs_web/index.html b/ocs_web/index.html
+index b6f56de..30134c1 100644
+--- a/ocs_web/index.html
++++ b/ocs_web/index.html
+@@ -225,6 +225,7 @@ function linkState(l) {
+ function linkLine(v, name) {
+   const l = (v.links || {})[name];
+   const tags = [];
++  if(name==='wifi'&&l?.connected)tags.push(pill('ok','IP connected · tether / WiFi'));
+   if (v.prefer === name) tags.push(pill('idle', 'preferred'));
+   if (l && v.active_link === name) tags.push(pill('ok', 'active'));
+   if (!l) return `<div><b>${name}</b> <span class="muted">not connected</span> ${tags.join(' ')}</div>`;
+diff --git a/ocs_web/map.html b/ocs_web/map.html
+index 7ea7fbe..61960d9 100644
+--- a/ocs_web/map.html
++++ b/ocs_web/map.html
+@@ -304,6 +304,8 @@ function recFromOcs(v) {
+     label: v.id + ' (OCS)', kind: KIND_OF_TYPE[v.type] || 'other', src: 'OCS',
+     mode: fresh && hb.state ? String(hb.state).replace(/^STATE_/, '') : null,
+     armed: null,
++    ipConnected: !!(v.links && v.links.wifi && v.links.wifi.connected),
++    ipPeer: v.links?.wifi?.peer || null,
+     hbAge: silent,
+     // a report that has a position carries it in the same frame it arrived in
+     posAge: pos ? silent : null, posSrc: pos ? 'OCS report' : null,
+@@ -575,6 +577,7 @@ function rowHtml(r) {
+     + '<b>' + esc(r.name) + '</b>' + (r.sysid != null ? ' · ' + esc(r.sysid) : '')
+     + ' ' + pill('idle', esc(r.src || '—')) + ' '
+     + field('mode', r.mode ? esc(r.mode) : '—') + field('armed', armed)
++    + (r.ocs ? field('IP link', pill(r.ipConnected?'ok':'idle',r.ipConnected?'CONNECTED · tether / WiFi':'not connected')+(r.ipConnected&&r.ipPeer?' '+esc(r.ipPeer):'')) : '')
+     + field('hb', ageText(r.hbAge)) + '</div>'
+     + '<div>' + field('pos', ageText(r.posAge) + (r.posSrc ? ' ' + esc(r.posSrc) : ''))
+     + field('lat/lon', fix ? fix[0].toFixed(5) + ', ' + fix[1].toFixed(5)
+diff --git a/rx_bridge/tcpserver.py b/rx_bridge/tcpserver.py
+index b681b56..f7f17d1 100644
+--- a/rx_bridge/tcpserver.py
++++ b/rx_bridge/tcpserver.py
+@@ -196,6 +196,16 @@ class TcpServer:
+ 
+     def _serve(self, sock: socket.socket, addr) -> None:
+         who = "%s:%d" % addr[:2]
++        # A tether unplug may leave a quiet TCP socket half-open. Probe transport
++        # liveness without fabricating vehicle heartbeats or navigation fields.
++        try:
++            sock.setsockopt(socket.SOL_SOCKET,socket.SO_KEEPALIVE,1)
++            if hasattr(socket,'SIO_KEEPALIVE_VALS'):
++                sock.ioctl(socket.SIO_KEEPALIVE_VALS,(1,5000,2000))
++            else:
++                for name,value in [('TCP_KEEPIDLE',5),('TCP_KEEPINTVL',2),('TCP_KEEPCNT',3)]:
++                    if hasattr(socket,name):sock.setsockopt(socket.IPPROTO_TCP,getattr(socket,name),value)
++        except OSError as exc:self.log('vehicle link keepalive unavailable: %s'%exc)
+         conn = Conn(sock, who)
+         self.log("vehicle link: %s connected" % who)
+         reader = FrameReader()
