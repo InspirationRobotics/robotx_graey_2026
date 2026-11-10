@@ -48,13 +48,16 @@ addEventListener('resize',fitOperator);new ResizeObserver(fitOperator).observe(d
 
 CrsdEditor.enter=()=>{};CrsdEditor.status=()=>{};loadMissions=async()=>{};
 loadCamera=async()=>{};camLoop=()=>{};lidarLoop=()=>{};
-show=function(id){if(id==='map')id='mission';originalShow(id);toolsMenu.value=["mission","sensors","record"].includes(id)?"":id;sensorTools.contentWindow.postMessage({graeySensorsVisible:id==='sensors'},location.origin)};
+let sensorsVisible=false;
+function syncSensorVisibility(){sensorTools.contentWindow.postMessage({graeySensorsVisible:sensorsVisible&&viewers.open},location.origin)}
+sensorTools.addEventListener('load',syncSensorVisibility);viewers.addEventListener('toggle',syncSensorVisibility);
+show=function(id){if(id==='map')id='mission';originalShow(id);toolsMenu.value=["mission","sensors","record"].includes(id)?"":id;sensorsVisible=id==='sensors';syncSensorVisibility()};
 document.querySelector('[data-tab="map"]').hidden=true;
 $('gate-release').hidden=true;$('radio-test').hidden=true;
 const radioNote=document.createElement('p');radioNote.textContent='GRAEY RFD reporting is deferred; WiFi is the active reporting link.';$('t-radio').prepend(radioNote);
 // Rover dock/search/obstacle planner profiles are mission-specific.
 planners=async()=>{};for(const id of ['pp-apply','pp-save','pp-name','pp-info','pp-new']){const el=$(id);if(el)el.hidden=true}
-const options=document.createElement('div');options.innerHTML='<label><input type="checkbox" id="graey-rec-camera"> Camera stream (Down + Front)</label> <label><input type="checkbox" id="graey-rec-sonar"> Sonar sweeps</label><p class="muted">Start camera/sonar in Sensors. Recording uses those existing owners and is independent of viewing and mission execution.</p>';$('rec-start').parentElement.prepend(options);
+const options=document.createElement('div');options.innerHTML='<label><input type="checkbox" id="graey-rec-camera"> Camera stream (Down + Front)</label> <label><input type="checkbox" id="graey-rec-sonar"> Sonar sweeps</label><p class="muted">Recording starts selected sources if needed. Viewing and recording are independent; download saved sessions below.</p>';$('rec-start').parentElement.prepend(options);
 $('rec-hz').disabled=true;$('rec-hz').title='GRAEY camera/sonar services record their native streams';
 const originalReq=req;req=function(op,fields={},quiet=false){if(op==='record'&&fields.action==='start')fields={...fields,camera:$('graey-rec-camera').checked,sonar:$('graey-rec-sonar').checked};return originalReq(op,fields,quiet)};
 show(new URLSearchParams(location.search).get('tab')==='sensors'?'sensors':new URLSearchParams(location.search).get('tab')==='record'?'record':'mission');
