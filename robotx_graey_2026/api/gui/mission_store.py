@@ -7,12 +7,12 @@ from ..navigation.route_plan import validate_route
 
 
 def validate_mission(value):
-    if not isinstance(value,dict) or value.get('kind') not in ('waypoints','pipeline','simple_sequence'):
-        raise ValueError('Select Waypoints, Pipeline Survey or 5–2–5')
+    if not isinstance(value,dict) or value.get('kind') not in ('waypoints','pipeline','simple_sequence','radio_submerge'):
+        raise ValueError('Select Waypoints, Pipeline Survey, 5–2–5 or Radio submerge test')
     kind=value['kind']
     if type(value.get('competition',False)) is not bool:raise ValueError('competition must be boolean')
     result=dict(kind=kind,competition=value.get('competition',False))
-    if kind=='simple_sequence':return result
+    if kind in ('simple_sequence','radio_submerge'):return result
     route=validate_route(dict(points=value.get('points'),recording_mode='manual'))
     kinds=[p['kind'] for p in route['points']]
     if kind=='waypoints' and any(k!='waypoint' for k in kinds):raise ValueError('Waypoints mission accepts waypoint points only')

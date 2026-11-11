@@ -68,7 +68,7 @@ class FleetAdapter:
         if op=='record':
             topics=req.get('topics',[])
             action='bag_stop' if req.get('kind')=='bag' and req.get('action')=='stop' else req.get('action')
-            return self.http('/api/recording',dict(action=action,name='graey_session',camera=req.get('camera',False),sonar=req.get('sonar',False),sensors=bool(topics),topics=topics))
+            return self.http('/api/recording',dict(action=action,name='graey_session',camera=req.get('camera',False),sonar=req.get('sonar',False),rfd=req.get('rfd',False),sensors=bool(topics),topics=topics))
         if op=='record_list':
             s=self.http('/api/recording');session=s.get('session') or {};rows=self.http('/api/recording/sessions').get('sessions',[]);folder=session.get('directory')
             if folder:mount,source,persists=system_info.mount_for(folder)

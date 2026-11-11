@@ -256,11 +256,12 @@ def waypoint_request(body):
             raise ValueError('Current mission run ID required')
         waypoint_aborts.put(body['run_id'])
         return dict(ok=True, msg='Abort requested; verify MANUAL mode and take control')
-    if action not in ('start', 'simple_start'):
+    if action not in ('start', 'simple_start', 'radio_submerge_start'):
         raise ValueError('Unknown waypoint action')
     cap = waypoint_capabilities()
-    if action == 'simple_start':
-        item = {'plan': {'kind': 'simple_sequence', 'mode': 'surface'}}
+    if action in ('simple_start', 'radio_submerge_start'):
+        # Fixed local sequences: no route, same onboard checks as 5-2-5.
+        item = {'plan': {'kind': 'simple_sequence' if action == 'simple_start' else 'radio_submerge', 'mode': 'surface'}}
     else:
         if calibration_jobs is not None and calibration_jobs.snapshot().get('busy'):
             raise ValueError('Finish or cancel navigation preparation before starting a mission')
@@ -285,7 +286,12 @@ def waypoint_request(body):
     item['plan']['competition']=body.get('competition',False)
     folder = Path(os.environ.get('GRAEY_WAYPOINT_LOG_DIR', str(Path.home()/'robotx_ws/logs')))
     folder.mkdir(parents=True, exist_ok=True)
-    argv = ['ros2', 'run', 'robotx_graey_2026', 'waypoint_mission', '--ros-args',
+    import sys
+    # The radio test has its own runner, built on the unchanged waypoint_mission.
+    runner = ([sys.executable, '-m', 'robotx_graey_2026.api.navigation.radio_submerge_mission']
+              if item['plan'].get('kind') == 'radio_submerge'
+              else ['ros2', 'run', 'robotx_graey_2026', 'waypoint_mission'])
+    argv = runner + ['--ros-args',
             '-p', "plan_json:='"+json.dumps(item['plan'])+"'", '-p', 'run_id:='+json.dumps(run_id),
             '-p', 'simulation:='+str(cap['simulation']).lower(), '-p', 'commissioned:=true',
             '-p', 'result_file:='+str(folder/('waypoint-'+run_id+'.json'))]
@@ -997,6 +1003,21 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == '/api/waypoint':
             with operation_lock:
                 self.reply_json(200, waypoint_snapshot())
+            return
+
+        if u.path == '/api/radio-test':
+            # Rows of a radio submerge test's CSV after the first `after`, so the laptop
+            # catches up on everything logged while it was out of contact.
+            from robotx_graey_2026.api.navigation.radio_submerge import radio_log_path, read_radio_rows
+            try:
+                folder = Path(os.environ.get('GRAEY_WAYPOINT_LOG_DIR', str(Path.home()/'robotx_ws/logs')))
+                rows, total = read_radio_rows(radio_log_path(folder, query.get('run_id', [''])[0]),
+                                              int(query.get('after', ['0'])[0]))
+                self.reply_json(200, dict(ok=True, rows=rows, total=total))
+            except FileNotFoundError:
+                self.reply_json(404, dict(ok=False, msg='No radio test log for this run'))
+            except (ValueError, OSError) as exc:
+                self.reply_json(400, dict(ok=False, msg=str(exc)))
             return
 
         if u.path == '/api/navigation/supervisor':
