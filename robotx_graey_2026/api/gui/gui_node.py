@@ -45,6 +45,7 @@ parameter_defaults = {}
 fleet_logs=LogBuffer(1500)
 mission_store = MissionStore(Path(os.environ.get('GRAEY_MISSION_DIR',str(Path.home()/'robotx_ws/missions'))))
 from robotx_graey_2026.api.gui.waypoint_api import WaypointAPI
+from robotx_graey_2026.api.gui.survey_launch import SurveyLauncher
 from robotx_graey_2026.api.gui.calibration_jobs import CalibrationJobs, ServiceQueue
 
 from robotx_graey_2026.api.node_util import run
@@ -195,8 +196,34 @@ control_bridge = None
 navigation = NavigationView()
 waypoint_api = WaypointAPI()
 waypoint_aborts = queue.Queue()
+# Crusader's gcs_bridge never decodes raw MAVLink: it reads telemetry_bridge's decoded summaries. Here the gateway's
+# summaries (/graey/fcu/pose, attitude, status) carry these kinds; the raw stream (~235 frames/s) is left for the rest.
+SUMMARY_KINDS = {'pose': 'GLOBAL_POSITION_INT', 'attitude': 'ATTITUDE', 'status': 'HEARTBEAT'}
+# Raw frames older than 0.25 s are dropped (ros_link). At ~235 frames/s a 200-deep queue holds ~0.85 s, so once the GUI
+# fell behind, every frame it reached was too old and its autopilot data went stale for good (Graey, Nov 11: load 13
+# with the sonar map and cameras on). 50 keeps whatever is queued inside the 0.25 s window.
+RAW_RX_DEPTH = 50
+
+
+class SummaryFrame:
+    """A gateway summary, read like the pymavlink message it came from (the Cube: system 1, component 1)."""
+    def __init__(self, kind, fields):
+        self.__dict__.update(fields)
+        self._kind = kind
+
+    def get_type(self):
+        return self._kind
+
+    def get_srcSystem(self):
+        return 1
+
+    def get_srcComponent(self):
+        return 1
+
+
 waypoint_process = None
 waypoint_launch = None
+survey = SurveyLauncher()   # Ruth's survey run (Missions page, Nov 11)
 calibration_jobs = None
 north_process = None
 north_aborts = queue.Queue()
@@ -249,6 +276,29 @@ def waypoint_request(body):
     nav = navigation.snapshot()
     if action in ('preview','qgc_preview'):
         return waypoint_api.preview(body.get('plan'), nav,source='qgc' if action=='qgc_preview' else 'gui')
+    if action == 'survey_start':
+        # Ruth's survey run: the same checks as a live route start (dry: nothing moves, so no motion checks)
+        if calibration_jobs is not None and calibration_jobs.snapshot().get('busy'):
+            raise ValueError('Finish or cancel navigation preparation before starting a mission')
+        if body.get('competition'):
+            raise ValueError('The survey run does not wait for Competition RunStart; untick Competition')
+        dry = body.get('dry', False)
+        if type(dry) is not bool:
+            raise ValueError('dry must be a boolean')
+        if not dry:
+            cap = waypoint_capabilities()
+            if not cap['enabled']:
+                raise ValueError('Live waypoint commissioning is not enabled (Start navigation on Sensors)')
+            if not cap['simulation']:
+                c = control_bridge.snapshot()
+                if not (c.get('online') and c.get('vehicle_fresh') and not c.get('inhibit')
+                        and not c.get('sa_active') and c.get('esc_commanded_on')):
+                    raise ValueError('Control watchdog/ESC permission unavailable')
+        if any_mission_running() or (waypoint_process is not None and waypoint_process.poll() is None):
+            raise ValueError('Another mission is running')
+        return survey.start(body.get('points'), dry)
+    if action == 'survey_stop' or (action == 'abort' and survey.owns(body.get('run_id'))):
+        return survey.stop(body.get('run_id'))
     if action == 'abort':
         status = nav['streams'].get('waypoint', {}).get('data', {})
         expected = waypoint_launch['run_id'] if waypoint_launch and waypoint_process.poll() is None else status.get('run_id')
@@ -277,7 +327,8 @@ def waypoint_request(body):
             if not (c.get('online') and c.get('vehicle_fresh') and not c.get('inhibit')
                     and not c.get('sa_active') and c.get('esc_commanded_on')):
                 raise ValueError('Control watchdog/ESC permission unavailable')
-    if any_mission_running() or (waypoint_process is not None and waypoint_process.poll() is None):
+    if (any_mission_running(ignore_survey=survey.owns(body.get('survey_run_id')))
+            or (waypoint_process is not None and waypoint_process.poll() is None)):
         raise ValueError('Another mission is running')
     run_id = uuid.uuid4().hex
     if type(body.get('competition',False)) is not bool:
@@ -308,7 +359,7 @@ def waypoint_snapshot():
                 data=dict(run_id=waypoint_launch['run_id'], plan=waypoint_launch['plan'],
                           stage='STARTING' if exited is None else 'ABORTED',
                           reason='Waiting for mission process' if exited is None else 'Mission process failed to start; check mission log'))
-    return dict(capabilities=waypoint_capabilities(), navigation=nav)
+    return dict(capabilities=waypoint_capabilities(), navigation=nav, survey=survey.snapshot())
 
 # Serializes GUI-originated mission changes and watchdog changes.
 operation_lock = threading.Lock()
@@ -588,8 +639,10 @@ def pids_for(name):
     return found
 
 
-def any_mission_running():
+def any_mission_running(ignore_survey=False):
+    # ignore_survey: the survey run's own surface legs start while it runs
     return ((north_process is not None and north_process.poll() is None)
+            or (not ignore_survey and survey.running())
             or (waypoint_process is not None and waypoint_process.poll() is None)
             or any(pids_for(name) for name in MISSION_EXECUTABLES))
 
@@ -743,6 +796,9 @@ def mission_start(query):
 
 
 def mission_stop():
+    if survey.running():    # first: the survey aborts its own leg, or its transit surfaces
+        survey.stop(survey.launch['run_id'])
+        return True, 'Survey stop requested: its leg aborts or its transit surfaces; verify and take control'
     if (north_process is not None and north_process.poll() is None) or pids_for('north_maneuver'):
         north_aborts.put(True)
         return True, 'North alignment abort requested; verify neutral thrust and take control'
@@ -1183,7 +1239,13 @@ class GuiNode(Node):
             self.get_parameter('mavlink').value,
             195,
             self.get_logger(),
-            node=self)
+            node=self, rx_depth=RAW_RX_DEPTH)
+        # The newest summary only (depth 1): a busy GUI still shows current data, with its true arrival time.
+        from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+        newest = QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.RELIABLE)
+        for topic, kind in SUMMARY_KINDS.items():
+            self.create_subscription(String, '/graey/fcu/'+topic,
+                                     lambda msg, kind=kind: self.on_fcu_summary(kind, msg), newest)
         from robotx_graey_2026.api.gui.param_client import ParamBridge
         parameter_bridge=ParamBridge(self)
         try:
@@ -1367,21 +1429,31 @@ class GuiNode(Node):
         navigation.put('vn_heading', {'degrees': msg.data})
         tel['heading'], tel['hdg_t'] = msg.data, time.time()
 
+    def on_fcu_summary(self, kind, msg):
+        try:
+            data = json.loads(msg.data)
+            received, fields = float(data['received_monotonic']), dict(data['fields'])
+        except (ValueError, TypeError, KeyError):
+            return
+        age = time.monotonic() - received
+        if not 0 <= age < 5.0:              # another clock, or very old: never shown as new
+            return
+        frame = SummaryFrame(kind, fields)
+        try:
+            navigation.consume(kind, frame, received=received)
+            if kind == 'HEARTBEAT':
+                tel['armed'] = bool(frame.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
+                tel['mode'] = mavutil.mode_string_v10(frame)
+                tel['mav_t'] = time.time() - age
+        except (AttributeError, TypeError, ValueError):
+            return
+
     def pump(self):
         def consume(kind, msg):
+            if kind in SUMMARY_KINDS.values():
+                return                      # these come from the gateway's summaries (on_fcu_summary)
             navigation.consume(kind, msg)
-            if (
-                kind == 'HEARTBEAT'
-                and msg.get_srcSystem() == 1
-                and msg.get_srcComponent() == 1
-            ):
-                tel['armed'] = bool(
-                    msg.base_mode
-                    & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED
-                )
-                tel['mode'] = self.link.mav.flightmode
-                tel['mav_t'] = time.time()
-            elif kind == 'LOCAL_POSITION_NED':
+            if kind == 'LOCAL_POSITION_NED':
                 tel['depth'] = msg.z
 
         self.link.drain(consume)

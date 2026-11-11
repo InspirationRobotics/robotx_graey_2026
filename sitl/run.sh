@@ -46,10 +46,11 @@ finally:
 PY
 CLOCK_ARGS=()
 PARAM_FILE="$RUN_DIR/continuous.parm"
+# SIM_FLOAT_EXCEPT 0: the aarch64 ArduSub 4.5.7 SITL (graey-sitl docker on a Mac) aborts on a float trap at start (Nov 11).
   python3 - "$PARAM_FILE" <<'PY'
 import sys
 from robotx_graey_2026.api.navigation.odometry_profile import PROFILE, SHALLOW_LIMITS
-p=dict(PROFILE, SYSID_THISMAV=1, EK2_ENABLE=0, SCR_ENABLE=0, SIM_GPS_DISABLE=0, LOG_DISARMED=1,
+p=dict(PROFILE, SYSID_THISMAV=1, SIM_FLOAT_EXCEPT=0, EK2_ENABLE=0, SCR_ENABLE=0, SIM_GPS_DISABLE=0, LOG_DISARMED=1,
        SIM_BARO_RND=0, SIM_BARO_DRIFT=0,
        **SHALLOW_LIMITS)
 open(sys.argv[1],'w').write('\n'.join(f'{k} {v}' for k,v in p.items()))

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 
 class RosTransport:
-    def __init__(self,node,component,system):
+    def __init__(self,node,component,system,rx_depth=200):
         from std_msgs.msg import String
         from .mavlink import mavutil
         self.node,self.component,self.system=node,component,system
@@ -18,7 +18,8 @@ class RosTransport:
         self.send_lock=threading.Lock()
         self.mav=SimpleNamespace(flightmode='UNKNOWN',close=self.close)
         self.publisher=node.create_publisher(String,'/graey/fcu/tx',100)
-        self.subscription=node.create_subscription(String,'/graey/fcu/rx',self.receive,200)
+        # rx_depth: a reader that can fall behind keeps only the newest frames (Crusader's short queues).
+        self.subscription=node.create_subscription(String,'/graey/fcu/rx',self.receive,rx_depth)
 
     def receive(self,msg):
         from .mavlink import mavutil

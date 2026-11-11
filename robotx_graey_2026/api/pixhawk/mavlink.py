@@ -52,14 +52,14 @@ REOPEN_LOG_S = 5.0                                  # a flapping link must not f
 class Link:
     """A MAVProxy UDP connection plus the handful of things Graey sends over it."""
 
-    def __init__(self, url, component, logger=None, system=1, node=None):
+    def __init__(self, url, component, logger=None, system=1, node=None, rx_depth=200):
         self.url, self.system, self.component = url, system, component
         self.log = logger
         self.last_reopen = self.last_reopen_log = 0.0
         self.ros_transport = None
         if node is not None:
             from .ros_link import RosTransport
-            self.ros_transport=RosTransport(node,component,system)
+            self.ros_transport=RosTransport(node,component,system,rx_depth)
             self.mav=self.ros_transport.mav
             return
         if logger:

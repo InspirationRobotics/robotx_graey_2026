@@ -63,7 +63,9 @@ class NavigationView:
         if self.reset_state == 'waiting' and self.clock() >= self.reset_deadline:
             self.reset_state = 'timeout'
 
-    def put(self, name, data):
+    def put(self, name, data, received=None):
+        # received: when the data actually arrived (Crusader's StreamCache: a sample carries its true age);
+        # None = now.
         # Never serialize NaN/Infinity into the browser's JSON parser.
         def clean(v):
             if isinstance(v, float) and not math.isfinite(v): return None
@@ -71,9 +73,9 @@ class NavigationView:
             if isinstance(v, (list, tuple)): return [clean(x) for x in v]
             return v
         with self.lock:
-            self.samples[name] = {'data': clean(data), 'received': self.clock()}
+            self.samples[name] = {'data': clean(data), 'received': self.clock() if received is None else received}
 
-    def consume(self, kind, m):
+    def consume(self, kind, m, received=None):
         if m.get_srcSystem() != 1 or m.get_srcComponent() != 1:
             return
         with self.lock:
@@ -93,10 +95,10 @@ class NavigationView:
                 # independently of Jetson frame registration/navigation permission.
                 self.put('qgc_global',dict(lat=m.lat/1e7,lon=m.lon/1e7,velocity=[m.vx/100,m.vy/100,m.vz/100],
                     valid=(-900000000<=m.lat<=900000000 and -1800000000<=m.lon<=1800000000 and (m.lat!=0 or m.lon!=0)),
-                    heading_deg=None if m.hdg==65535 else m.hdg/100))
+                    heading_deg=None if m.hdg==65535 else m.hdg/100),received=received)
                 self._geo('global', m.lat/1e7, m.lon/1e7, m.alt/1000,
                           {'velocity': [m.vx/100, m.vy/100, m.vz/100],
-                           'heading': None if m.hdg == 65535 else m.hdg/100})
+                           'heading': None if m.hdg == 65535 else m.hdg/100}, received=received)
             elif kind == 'GPS_RAW_INT':
                 previous = self.samples.get('gps', {}).get('data', {})
                 if (m.time_usec and previous.get('receiver_time_us') == m.time_usec
@@ -109,11 +111,11 @@ class NavigationView:
                            'vertical_accuracy': getattr(m, 'v_acc', 0)/1000 or None,
                            'receiver_time_us': m.time_usec})
             elif kind == 'LOCAL_POSITION_NED':
-                self.put('local', {'ned': [m.x, m.y, m.z], 'velocity': [m.vx, m.vy, m.vz]})
+                self.put('local', {'ned': [m.x, m.y, m.z], 'velocity': [m.vx, m.vy, m.vz]}, received=received)
             elif kind == 'ATTITUDE':
-                self.put('attitude', {'rpy': [math.degrees(m.roll), math.degrees(m.pitch), math.degrees(m.yaw)%360]})
+                self.put('attitude', {'rpy': [math.degrees(m.roll), math.degrees(m.pitch), math.degrees(m.yaw)%360]}, received=received)
             elif kind == 'HEARTBEAT':
-                self.put('heartbeat', {'armed': bool(m.base_mode & 128), 'mode_id': m.custom_mode})
+                self.put('heartbeat', {'armed': bool(m.base_mode & 128), 'mode_id': m.custom_mode}, received=received)
             elif kind == 'EKF_STATUS_REPORT':
                 self.put('ekf', {'flags': m.flags, 'velocity_variance': m.velocity_variance,
                                  'horizontal_variance': m.pos_horiz_variance,
@@ -121,7 +123,7 @@ class NavigationView:
             elif kind == 'GPS_GLOBAL_ORIGIN':
                 self.put('cube_origin', {'lat': m.latitude/1e7, 'lon': m.longitude/1e7, 'alt': m.altitude/1000})
 
-    def _geo(self, name, lat, lon, alt, extra):
+    def _geo(self, name, lat, lon, alt, extra, received=None):
         self._expire_reset()
         # (0,0) is a real location but also ArduPilot's uninitialized sentinel.
         valid = (-90 <= lat <= 90 and -180 <= lon <= 180
@@ -147,7 +149,7 @@ class NavigationView:
         if valid and self.origin is None and self.reset_state == 'idle':
             self.origin = [lat, lon, alt]
         ned = offset(lat, lon, alt, self.origin) if valid and self.origin else None
-        self.put(name, dict(lat=lat, lon=lon, alt=alt, valid=valid, ned=ned, **extra))
+        self.put(name, dict(lat=lat, lon=lon, alt=alt, valid=valid, ned=ned, **extra), received=received)
         if ned is not None:
             now = self.clock()
             trail = self.trails[name]

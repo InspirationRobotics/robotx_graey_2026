@@ -7,15 +7,17 @@ from ..navigation.route_plan import validate_route
 
 
 def validate_mission(value):
-    if not isinstance(value,dict) or value.get('kind') not in ('waypoints','pipeline','simple_sequence'):
-        raise ValueError('Select Waypoints, Pipeline Survey or 5–2–5')
+    if not isinstance(value,dict) or value.get('kind') not in ('waypoints','pipeline','simple_sequence','survey'):
+        raise ValueError('Select Waypoints, Pipeline Survey, 5–2–5 or Survey run (Ruth)')
     kind=value['kind']
     if type(value.get('competition',False)) is not bool:raise ValueError('competition must be boolean')
     result=dict(kind=kind,competition=value.get('competition',False))
     if kind=='simple_sequence':return result
     route=validate_route(dict(points=value.get('points'),recording_mode='manual'))
     kinds=[p['kind'] for p in route['points']]
-    if kind=='waypoints' and any(k!='waypoint' for k in kinds):raise ValueError('Waypoints mission accepts waypoint points only')
+    if kind in ('waypoints','survey') and any(k!='waypoint' for k in kinds):raise ValueError('Waypoints mission accepts waypoint points only')
+    # Ruth's survey run (Nov 11): the path, then the start buoy and the end buoy
+    if kind=='survey' and len(kinds)<2:raise ValueError('Survey run needs at least 2 points: the start and end buoys last')
     if kind=='pipeline' and kinds!=['pipeline_start','pipeline_end']:
         raise ValueError('Pipeline Survey needs a start and an end')
     result['points']=route['points']

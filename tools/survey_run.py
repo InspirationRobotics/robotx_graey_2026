@@ -5,8 +5,8 @@
      move points in QGC, upload.
   2. On SE: reads the points plotted in QGC and uploaded to the Cube (QGC Plan view -> Upload).
      The last two are the START buoy and the END buoy; any before them are the path to the start buoy.
-  3. Drives at the surface by GPS to each point in turn, up to and including the start buoy - Beichen's
-     waypoint mission, one run per point, started through the GUI on this Jetson (as the Waypoint tab does).
+  3. Drives at the surface by GPS through the points, up to and including the start buoy - Beichen's
+     waypoint mission, one route run, started through the GUI on this Jetson (as the Waypoints mission does).
   4. At the start buoy: starts a sonar recording and a camera recording for this run, then runs
      pipeline_mission: turn at the surface to face the end buoy, dive until the DVL reads pool_alt_m (4 m) to
      the floor (no dive where the water is shallower), transit only - no pipe checks - keeping pool_alt_m above
@@ -18,11 +18,18 @@ Runs inside the graey container: tools/survey.sh starts it (sonar map and camera
   --skip-path  pool test: no surface legs, the transit starts where the sub is (bearing and distance from
                the last two points)
   anything after -- goes to pipeline_mission:   -- -p transit_speed:=0.15
+
+From the GUI (Nov 11): the Missions page's "Survey run (Ruth)" starts this through gui_node with
+  --points '[[lat, lon], ...]' --run-id ID      the GUI's route points (the last two are the start and the end
+                                               buoy); one run at once - no SE, no QGC plan - then it exits.
+  Stop mission sends SIGUSR1: a surface leg is aborted, the transit surfaces (pipeline_mission's STOP), the
+  recordings stop, and it exits.
 """
 import argparse
 import json
 import math
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -34,13 +41,19 @@ from robotx_graey_2026.api.pixhawk.mavlink import Link  # noqa: E402 - sets up p
 
 SE_CHANNEL = 9              # SE, momentary (mission_base.py's rc_start_channel)
 RC_HIGH = 1700              # pressed above this (mission_base.py's rc_high)
-LEG_TIMEOUT_S = 600.0       # one surface leg (Beichen's mission) - abort it after this long
+LEG_TIMEOUT_S = 600.0       # per route point (Beichen's mission) - abort the route after this x points
 NAV_WAYPOINT = 16           # MAV_CMD_NAV_WAYPOINT
 COMPONENT = 198             # the mission component in Beichen's telemetry_gateway
 MISSION_CMD = [sys.executable, '-c',
                'from robotx_graey_2026.api.navigation.pipeline_mission import main; main()']
 
 LOG_FILE = None
+RUN_ID = None               # the GUI's survey run ID (GUI mode): its own leg starts quote it to gui_node
+STOP = []                   # non-empty once the GUI's Stop mission arrived (SIGUSR1)
+
+
+def stopped():
+    return bool(STOP)
 
 
 def log(msg):
@@ -191,37 +204,78 @@ def http(url, body=None, json_body=None, timeout=5.0):
         return {'ok': True, 'text': text}
 
 
-def drive_to(args, n, lat, lon):
-    """One surface leg: Beichen's waypoint mission to (lat, lon). (True, why) once it reports COMPLETE
-    (stopped within 1.5 m and disarmed), (False, why) if it refused, aborted or timed out."""
+def drive_route(args, legs):
+    """The surface part: the path points and the start buoy as ONE route run of Beichen's waypoint mission - what
+    the GUI's Waypoints mission sends (preview a route, start, poll). It arms itself, drives through the points at
+    the surface and stops at the last. (True, why) on COMPLETE, (False, why) if refused, aborted or timed out.
+    Not 'qgc_preview' per point (Nov 10): that is QGC's Go-to, which never arms - SITL Nov 11: 'QGC Go-to cancelled
+    by disarm' - and each run ends disarmed."""
     api = f'http://127.0.0.1:{args.gui}/api/waypoint'
-    p = http(api, json_body={'action': 'qgc_preview',
-                             'plan': {'lat': lat, 'lon': lon, 'mode': 'surface', 'map': 'geographic'}})
+    points = [{'kind': 'waypoint', 'lat': lat, 'lon': lon, 'name': f'Survey {n}'} for n, (lat, lon) in enumerate(legs, 1)]
+    p = http(api, json_body={'action': 'preview', 'plan': {'points': points, 'recording_mode': 'manual'}})
     if not p.get('ok') or 'plan_id' not in p:
-        return False, f'the GUI refused the point: {p.get("msg", p)}'
-    log(f'  point {n}: {p.get("distance_m", float("nan")):.1f} m away')
-    s = http(api, json_body={'action': 'start', 'plan_id': p['plan_id']})
+        return False, f'the GUI refused the route: {p.get("msg", p)}'
+    log(f'  route: {len(points)} point(s), the first {p.get("distance_m", float("nan")):.1f} m away')
+    start = {'action': 'start', 'plan_id': p['plan_id']}
+    if RUN_ID:
+        start['survey_run_id'] = RUN_ID     # gui_node lets the survey's own route start while it runs
+    s = http(api, json_body=start)
     if not s.get('ok') or 'run_id' not in s:
         return False, f'the GUI refused to start it: {s.get("msg", s)}'
     run_id, t0, last = s['run_id'], time.monotonic(), None
-    while time.monotonic() - t0 < LEG_TIMEOUT_S:
+    while time.monotonic() - t0 < LEG_TIMEOUT_S * len(points):
+        if stopped():
+            http(api, json_body={'action': 'abort', 'run_id': run_id})
+            return False, 'Stop mission from the GUI - asked the waypoint mission to abort'
         snap = http(api)
         w = (((snap.get('navigation') or {}).get('streams') or {}).get('waypoint') or {}).get('data') or {}
         if w.get('run_id') == run_id:
-            stage = w.get('stage')
-            if stage != last:
-                log(f'  point {n}: {stage} - {w.get("reason", "")}')
-                last = stage
-            if stage == 'COMPLETE':
-                return True, w.get('reason', '')
-            if stage == 'ABORTED':
-                return False, w.get('reason', 'aborted')
+            now = (w.get('stage'), w.get('reason', ''))
+            if now != last:
+                log(f'  route: {now[0]} - {now[1]}')
+                last = now
+            if now[0] == 'COMPLETE':
+                return True, now[1]
+            if now[0] == 'ABORTED':
+                return False, now[1] or 'aborted'
         time.sleep(1.0)
     http(api, json_body={'action': 'abort', 'run_id': run_id})
-    return False, f'no arrival in {LEG_TIMEOUT_S:.0f} s - asked the waypoint mission to abort'
+    return False, f'no arrival in {LEG_TIMEOUT_S * len(points):.0f} s - asked the waypoint mission to abort'
+
+
+def up(port):
+    try:
+        urllib.request.urlopen(f'http://127.0.0.1:{port}/', timeout=2).close()
+        return True
+    except urllib.error.HTTPError:
+        return True                     # it answered
+    except OSError:
+        return False
+
+
+def ensure_recorders(args):
+    """What tools/survey.sh does first: the sonar map and the cameras, through the GUI's launcher.
+    False if the sonar map isn't running at the end."""
+    for port, cmd, name in ((args.map, 'start?tool=map', 'the sonar map'), (8080, 'camera/start', 'the cameras')):
+        if up(port):
+            continue
+        log(f'starting {name}...')
+        try:
+            http(f'http://127.0.0.1:{args.launcher}/{cmd}', body='', timeout=20)
+        except OSError as e:
+            log(f'  the GUI\'s launcher (port {args.launcher}) didn\'t answer: {e}')
+        for _ in range(30):
+            if up(port):
+                break
+            time.sleep(1.0)
+        log(f'  {name}: {"running" if up(port) else "NOT running"}')
+    return up(args.map)
 
 
 def recordings(args, run, start):
+    if os.environ.get('GRAEY_RUNTIME_SCOPE') == 'sitl':
+        log(f'  [sitl] recordings {"started" if start else "stopped"} - skipped, no sonar or cameras in SITL')
+        return
     cam = http(f'http://127.0.0.1:{args.launcher}/' +
                (f'record/start?name=survey_run_{run:02d}' if start else 'record/stop'), body='')
     try:
@@ -234,35 +288,45 @@ def recordings(args, run, start):
 
 # ---------------- one run ----------------
 
-def one_run(args, fcu, run):
-    try:
-        pts = read_plan(fcu)
-    except (RuntimeError, OSError) as e:
-        log(f'run {run}: {e} - not started')
-        return
+def one_run(args, fcu, run, pts=None):
+    """One survey. pts: the GUI's points; None = read the QGC plan from the Cube.
+    Returns 'done', 'stopped' (Stop mission) or 'failed'."""
+    after = 'Waiting for SE again.' if pts is None else 'Survey over.'
+    if pts is None:
+        try:
+            pts = read_plan(fcu)
+        except (RuntimeError, OSError) as e:
+            log(f'run {run}: {e} - not started')
+            return 'failed'
+        where = 'the QGC plan'
+    else:
+        where = 'the GUI route'
     if len(pts) < 2:
-        log(f'run {run}: the QGC plan has {len(pts)} point(s) - it needs at least 2 (the last two are the '
+        log(f'run {run}: {where} has {len(pts)} point(s) - it needs at least 2 (the last two are the '
             f'start buoy and the end buoy). Not started.')
-        return
+        return 'failed'
     start, end = pts[-2], pts[-1]
     dist, brg = distance_bearing(start, end)
     log(f'run {run}: {len(pts)} points - path {len(pts) - 2} point(s), start buoy {start[0]:.7f} {start[1]:.7f}, '
         f'end buoy {end[0]:.7f} {end[1]:.7f}: {dist:.1f} m at {brg:.0f} deg')
     if dist < 1.0:
         log(f'run {run}: the start and end buoys are only {dist:.2f} m apart - not started')
-        return
+        return 'failed'
     legs = [] if args.skip_path else pts[:-1]       # the path, then the start buoy itself
     for n, (lat, lon) in enumerate(legs, 1):
         tag = 'the start buoy' if n == len(legs) else f'path point {n}'
-        log(f'run {run}: to {tag} ({n} of {len(legs)}) at {lat:.7f} {lon:.7f}')
-        if args.dry:
-            log('  [dry] Beichen\'s waypoint mission would drive there at the surface')
-            continue
-        ok, why = drive_to(args, n, lat, lon)
+        log(f'run {run}: surface route point {n} of {len(legs)}: {tag} at {lat:.7f} {lon:.7f}')
+    if legs and args.dry:
+        log('  [dry] Beichen\'s waypoint mission would drive this route at the surface')
+    elif legs:
+        ok, why = drive_route(args, legs)
         if not ok:
-            log(f'run {run}: stopped at {tag}: {why}. Waiting for SE again.')
-            return
-        log(f'  reached {tag}: {why}')
+            log(f'run {run}: the surface route stopped: {why}. {after}')
+            return 'stopped' if stopped() else 'failed'
+        log(f'  reached the start buoy: {why}')
+    if stopped():
+        log(f'run {run}: Stop mission - no transit. {after}')
+        return 'stopped'
     recordings(args, run, True)
     argv = MISSION_CMD + ['--ros-args', '-p', 'part:=search', '-p', f'dry_run:={str(args.dry).lower()}',
                           '-p', 'scan_mode:=transit', '-p', 'transit_only:=true', '-p', 'face_end_buoy:=true',
@@ -274,12 +338,42 @@ def one_run(args, fcu, run):
         argv += ['-p', 'phase_timeout:=20.0']
     argv += args.extra
     log(f'run {run}: the transit: {" ".join(argv[3:])}')
+    passed_on = False
     try:
-        code = subprocess.call(argv)
+        child = subprocess.Popen(argv)
+        while child.poll() is None:
+            if stopped() and not passed_on:
+                log(f'run {run}: Stop mission - the transit surfaces now')
+                child.send_signal(signal.SIGUSR1)       # pipeline_mission: SURFACE, then disarm + MANUAL
+                passed_on = True
+            time.sleep(0.1)
+        code = child.returncode
     except (OSError, KeyboardInterrupt) as e:
         code = repr(e)
     recordings(args, run, False)
-    log(f'run {run}: done (pipeline_mission exit {code}). Waiting for SE again.')
+    log(f'run {run}: {"stopped" if stopped() else "done"} (pipeline_mission exit {code}). {after}')
+    return 'stopped' if stopped() else 'done' if code == 0 else 'failed'
+
+
+def gui_run(args):
+    """GUI mode: one survey of the GUI's points, then exit (0 done, 1 failed, 2 stopped)."""
+    global RUN_ID
+    RUN_ID = args.run_id
+    signal.signal(signal.SIGUSR1, lambda *_: STOP.append(True))
+    try:
+        pts = [(float(p[0]), float(p[1])) for p in json.loads(args.points)]
+    except (ValueError, TypeError, IndexError) as e:
+        log(f'the GUI points are not [[lat, lon], ...]: {e}')
+        return 1
+    if os.environ.get('GRAEY_RUNTIME_SCOPE') != 'sitl' and not ensure_recorders(args):
+        log('the sonar map is not running (look at Sensors) - survey not started')
+        return 1
+    try:
+        result = one_run(args, None, 1, pts)
+    except KeyboardInterrupt:
+        result = 'stopped'
+    log(f'SURVEY {result.upper()}')
+    return {'done': 0, 'failed': 1, 'stopped': 2}[result]
 
 
 def main():
@@ -293,6 +387,8 @@ def main():
     ap.add_argument('--map', type=int, default=8095)
     ap.add_argument('--logdir', default='/root/robotx_ws/logs')
     ap.add_argument('--mission-cmd', default=None, help=argparse.SUPPRESS)     # tests only
+    ap.add_argument('--points', default=None, help='GUI mode: JSON [[lat, lon], ...]; one run, no SE')
+    ap.add_argument('--run-id', default=None, help='GUI mode: the run ID gui_node gave this survey')
     ap.add_argument('extra', nargs=argparse.REMAINDER)
     args = ap.parse_args()
     args.extra = [a for a in args.extra if a != '--']
@@ -301,7 +397,9 @@ def main():
     if os.path.isdir(args.logdir):
         LOG_FILE = os.path.join(args.logdir, time.strftime('survey-%Y%m%d-%H%M%S.log'))
     log(f'survey run{" (DRY - nothing moves)" if args.dry else ""}{" (pool test: no path)" if args.skip_path else ""}'
-        f' - log {LOG_FILE}')
+        f'{" from the GUI" if args.points else ""} - log {LOG_FILE}')
+    if args.points is not None:
+        sys.exit(gui_run(args))
     run = 0
     fcu = Fcu()
     try:

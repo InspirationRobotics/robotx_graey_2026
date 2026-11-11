@@ -21,7 +21,8 @@ class WaypointGuiTests(unittest.TestCase):
             calibration_jobs=None,
             north_process=None,north_aborts=queue.Queue(),
             pids_for=lambda name:[],MISSION_EXECUTABLES=('waypoint_mission',),
-            subprocess=NS(Popen=Mock()),link=Mock())
+            subprocess=NS(Popen=Mock()),link=Mock(),
+            survey=NS(running=lambda:False,owns=lambda run_id:False))
         exec(compile(tree,str(path),'exec'),self.ns)
 
     def test_client_cannot_enable_live_execution(self):

@@ -129,6 +129,7 @@ target deeper than max_depth is ever sent.
 import json
 import math
 import os
+import signal
 import sys
 import time
 import urllib.request
@@ -476,6 +477,22 @@ class PipelineMission(MissionBase):
         self.step_z = None                  # DESCEND's current target
         self.altitude = None                # (metres above the bottom, time); -1 = no lock
         self.create_subscription(Float32, '/graey/dvl/altitude', self.on_altitude, 10)
+        # STOP (Ruth, Nov 11): the GUI's Stop mission on the survey run reaches here as SIGUSR1, passed on by
+        # tools/survey_run.py. The handler only sets the flag; the timer acts on it between callbacks.
+        self.stop_asked = False
+        signal.signal(signal.SIGUSR1, lambda *_: setattr(self, 'stop_asked', True))
+        self.create_timer(0.1, self.check_stop)
+
+    def check_stop(self):
+        """On STOP: surface, then DONE as usual (disarm + MANUAL). Not under way yet: DONE at once."""
+        if not self.stop_asked or self.state in (S.SURFACE, S.DONE):
+            return
+        if self.state in (S.WAIT_RC, S.WAIT_NAV, S.ARM):
+            self.get_logger().warn('STOP from the GUI - not under way yet: disarm, MANUAL')
+            self.enter(S.DONE)
+        else:
+            self.get_logger().warn(f'STOP from the GUI - surfacing (was {self.state.name})')
+            self.enter(S.SURFACE)
 
     def on_altitude(self, msg):
         self.altitude = (msg.data, self.now())
