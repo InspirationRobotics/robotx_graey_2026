@@ -247,7 +247,8 @@ class KillSwitch(Node):
         self.relay_kill_pwm = value('relay_kill_pwm')
         self.relay_run_pwm = value('relay_run_pwm')
 
-        self.link = Link(value('mavlink'), 194, self.get_logger(), node=self)
+        self.link = Link(value('mavlink'), 194, self.get_logger(), node=self,
+                         kinds=('RC_CHANNELS', 'HEARTBEAT'))   # all pump() reads
         self.started = self.now()
 
         self.source = 'RF'

@@ -57,7 +57,9 @@ class FusedNavBridge(SteadyNode):
             self.est=ContinuousEstimator()
         self.land_north = LandNorth()
         self.raw_gps_health=None
-        self.link = Link(self.settings['mavlink'], 197, self.get_logger(), node=self)
+        self.link = Link(self.settings['mavlink'], 197, self.get_logger(), node=self,
+                         kinds=('HEARTBEAT', 'TIMESYNC', 'PARAM_VALUE', 'GPS_GLOBAL_ORIGIN', 'GPS_RAW_INT',
+                                'SCALED_PRESSURE', 'SCALED_PRESSURE2', 'SCALED_PRESSURE3'))   # all consume() reads
         self.instance = str(uuid.uuid4())
         self.stamps, self.params = {}, {}
         self.ingress_rejections = {}

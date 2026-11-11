@@ -72,15 +72,24 @@ def main():
     print(f'serving {len(opened)} camera(s) on http://0.0.0.0:8080')
 
     last = [None] * len(opened)         # hold the newest frame per camera, so one
-    try:                                # camera stalling never freezes the other
+    sent = 0.0                          # camera stalling never freezes the other
+    try:
         while True:
+            fresh = False
             for i, (_, _, q) in enumerate(opened):
                 pkt = q.tryGet()
                 if pkt is not None:
                     last[i] = pkt.getCvFrame()
-            if any(f is None for f in last):
+                    fresh = True
+            # Encoding is the cost. Re-encoding the same frames, encoding faster than the
+            # cameras run, or encoding with nobody reading /stream (GUI view or recorder)
+            # shows nobody anything new (Crusader: pictures only while someone watches).
+            now = time.monotonic()
+            if (any(f is None for f in last) or not fresh or now - sent < 1.0 / FPS
+                    or not camera.viewing()):
                 time.sleep(0.005)       # never block - Ctrl-C cannot interrupt
                 continue                # a depthai call
+            sent = now
             camera.publish_frame(cv2.hconcat(
                 [label(f.copy(), n) for f, (n, _, _) in zip(last, opened)]))
             time.sleep(0.005)

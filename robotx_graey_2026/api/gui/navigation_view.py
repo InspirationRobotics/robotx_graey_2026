@@ -26,6 +26,11 @@ def offset(lat, lon, altitude, origin):
             -math.cos(a)*math.cos(b)*x-math.cos(a)*math.sin(b)*y-math.sin(a)*z]
 
 
+# Every message type NavigationView.consume branches on. Nodes that only feed it pass this to Link(kinds=...).
+NAVIGATION_VIEW_KINDS = ('GLOBAL_POSITION_INT', 'GPS_RAW_INT', 'LOCAL_POSITION_NED', 'ATTITUDE',
+                         'HEARTBEAT', 'EKF_STATUS_REPORT', 'GPS_GLOBAL_ORIGIN')
+
+
 class NavigationView:
     def __init__(self, clock=time.monotonic):
         self.clock = clock

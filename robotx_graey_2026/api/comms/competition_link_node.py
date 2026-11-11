@@ -6,6 +6,7 @@ import time
 from .competition_wifi import CompetitionSender, WifiLink
 from .competition_telemetry import CompetitionTelemetry
 from ..pixhawk.mavlink import Link
+from ..gui.navigation_view import NAVIGATION_VIEW_KINDS
 
 
 def main(args=None):
@@ -30,7 +31,9 @@ def main(args=None):
                                  fallback_hosts=param('ocs_fallback_hosts'),discovery_port=param('ocs_discovery_port'))
             self.sender = CompetitionSender(param('outbox_path'),team_id=param('team_id'))
             self.telemetry = CompetitionTelemetry(time.monotonic)
-            self.fcu = Link('ros://graey/fcu',191,self.get_logger(),node=self)
+            # CompetitionTelemetry -> NavigationView.consume reads only these.
+            self.fcu = Link('ros://graey/fcu',191,self.get_logger(),node=self,
+                            kinds=NAVIGATION_VIEW_KINDS)
             self.error = None
             self.tiers_request = None
             self.publisher = self.create_publisher(String,'/graey/comms/status',10)

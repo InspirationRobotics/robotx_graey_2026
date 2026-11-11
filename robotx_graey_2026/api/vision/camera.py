@@ -24,6 +24,13 @@ W, H = 640, 360
 
 _frame = None
 _lock = threading.Lock()
+_streams = 0                    # open /stream connections: a browser view or the recorder
+
+
+def viewing():
+    """True while anything reads /stream (the GUI's camera view, or a recording)."""
+    with _lock:
+        return _streams > 0
 
 PAGE = b"""<html><head><title>Graey OAK-D</title></head>
 <body style="margin:0;background:#111;text-align:center">
@@ -54,6 +61,9 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=FRAME')
         self.end_headers()
+        global _streams
+        with _lock:
+            _streams += 1
         try:
             while True:
                 with _lock:
@@ -68,6 +78,9 @@ class _Handler(BaseHTTPRequestHandler):
                 time.sleep(0.08)
         except (ConnectionResetError, BrokenPipeError):
             pass
+        finally:
+            with _lock:
+                _streams -= 1
 
     def log_message(self, *a):
         pass                                        # silence per-request logging

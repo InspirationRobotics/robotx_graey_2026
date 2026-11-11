@@ -51,7 +51,7 @@ def main():
         def receive(self,kind,message):
             if kind=='BAD_DATA':return
             now=time.monotonic()
-            data=dict(received_monotonic=now,frame=bytes(message.get_msgbuf()).hex())
+            data=dict(received_monotonic=now,kind=kind,frame=bytes(message.get_msgbuf()).hex())
             self.rx.publish(String(data=json.dumps(data)))
             self.received+=1
             name={'GLOBAL_POSITION_INT':'pose','ATTITUDE':'attitude','HEARTBEAT':'status','RC_CHANNELS':'rc_channels'}.get(kind)

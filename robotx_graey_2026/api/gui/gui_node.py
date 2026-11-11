@@ -27,7 +27,7 @@ from geometry_msgs.msg import TwistWithCovarianceStamped
 from sensor_msgs.msg import Imu
 from rcl_interfaces.msg import Log
 from robotx_graey_2026.api.gui.log_buffer import LogBuffer
-from robotx_graey_2026.api.gui.navigation_view import NavigationView
+from robotx_graey_2026.api.gui.navigation_view import NAVIGATION_VIEW_KINDS, NavigationView
 from robotx_graey_2026.api.gui.communications_view import CommunicationsView
 from robotx_graey_2026.api.gui.system_info import SystemInfo
 from robotx_graey_2026.api.gui.log_reader import read_log
@@ -1239,7 +1239,9 @@ class GuiNode(Node):
             self.get_parameter('mavlink').value,
             195,
             self.get_logger(),
-            node=self, rx_depth=RAW_RX_DEPTH)
+            node=self, rx_depth=RAW_RX_DEPTH,
+            # pump() feeds raw frames to NavigationView except the summary kinds (on_fcu_summary has those).
+            kinds=tuple(k for k in NAVIGATION_VIEW_KINDS if k not in SUMMARY_KINDS.values()))
         # The newest summary only (depth 1): a busy GUI still shows current data, with its true arrival time.
         from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
         newest = QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.RELIABLE)

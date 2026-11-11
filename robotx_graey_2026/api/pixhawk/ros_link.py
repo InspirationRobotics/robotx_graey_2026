@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 
 class RosTransport:
-    def __init__(self,node,component,system,rx_depth=200):
+    def __init__(self,node,component,system,rx_depth=200,kinds=None):
         from std_msgs.msg import String
         from .mavlink import mavutil
         self.node,self.component,self.system=node,component,system
@@ -17,6 +17,9 @@ class RosTransport:
         self.frames=collections.deque(maxlen=512)
         self.send_lock=threading.Lock()
         self.mav=SimpleNamespace(flightmode='UNKNOWN',close=self.close)
+        # kinds: the message types this node reads (HEARTBEAT always, for flightmode). Others are skipped
+        # before decoding. A frame without a 'kind' label (an older gateway) is decoded as before.
+        self.kinds=None if kinds is None else frozenset(kinds)|{'HEARTBEAT'}
         self.publisher=node.create_publisher(String,'/graey/fcu/tx',100)
         # rx_depth: a reader that can fall behind keeps only the newest frames (Crusader's short queues).
         self.subscription=node.create_subscription(String,'/graey/fcu/rx',self.receive,rx_depth)
@@ -25,6 +28,8 @@ class RosTransport:
         from .mavlink import mavutil
         try:
             data=json.loads(msg.data)
+            kind=data.get('kind')
+            if self.kinds is not None and kind is not None and kind not in self.kinds:return
             stamp=data['received_monotonic']
             if not 0<=time.monotonic()-stamp<.25:return
             frame=self.decoder.parse_char(bytes.fromhex(data['frame']))
