@@ -277,7 +277,9 @@ def main():
         if force or t - last["snap"] >= SNAPSHOT_S:
             snapshot()
             last["snap"] = t
-        if force or t - last["radar"] >= RADAR_S:
+        # The Radar picture is the costly part (~4 renders/s). Draw it only while
+        # a browser has it open; the map data, missions and recording are unchanged.
+        if (force or t - last["radar"] >= RADAR_S) and webview.viewing():
             radar.update(sweep)
             webview.set_radar_geom(args.size, radar.max_range_m)
             webview.set_radar_dots(cmap.radar_dots())

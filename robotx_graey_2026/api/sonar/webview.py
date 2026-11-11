@@ -80,6 +80,16 @@ _rows = []                          # one summary per detection, for the buttons
 _per_page = 10
 _view = {"page": 0, "selected": []}
 _lock = threading.Lock()
+_streams = 0                         # open /stream connections (the Radar picture in a browser)
+_probe_t = 0.0                       # last /probe click, time.monotonic()
+
+
+def viewing(within=5.0):
+    """True while someone is looking at the Radar picture: a /stream is open or
+    a /probe click came in the last `within` s. Missions and recording read
+    /state and /mapdata, never the picture, so they do not count."""
+    with _lock:
+        return _streams > 0 or time.monotonic() - _probe_t < within
 
 
 def set_rows(rows, per_page=10):
@@ -963,8 +973,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(PAGE, 'text/html')
             return
         if self.path.startswith('/probe?'):
+            global _probe_t
             with _lock:
                 fn = _probe
+                _probe_t = time.monotonic()
             try:
                 q = parse_qs(urlparse(self.path).query)
                 x, y = float(q['x'][0]), float(q['y'][0])
@@ -1003,6 +1015,9 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=FRAME')
         self.end_headers()
+        global _streams
+        with _lock:
+            _streams += 1
         try:
             while True:
                 with _lock:
@@ -1020,6 +1035,9 @@ class _Handler(BaseHTTPRequestHandler):
                 time.sleep(0.2)
         except (ConnectionResetError, BrokenPipeError):
             pass
+        finally:
+            with _lock:
+                _streams -= 1
 
     def log_message(self, *a):
         pass                                        # silence per-request logging
