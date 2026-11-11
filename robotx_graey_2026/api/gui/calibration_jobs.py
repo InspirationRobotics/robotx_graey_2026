@@ -5,7 +5,7 @@ import queue
 import threading
 import time
 import uuid
-from robotx_graey_2026.api.navigation.maintenance_safety import maintenance_reason, navigation_start_reason
+from robotx_graey_2026.api.navigation.maintenance_safety import calibration_reason, navigation_start_reason
 
 
 class ServiceQueue:
@@ -18,6 +18,7 @@ class ServiceQueue:
         self.clients = {}
         for name, path, kind in (
             ('pause','/graey/navigation/pause_odometry',Trigger),
+            ('resume','/graey/navigation/resume_odometry',Trigger),
             ('prepare','/graey/navigation/prepare',SetBool),
             ('align_heading','/graey/navigation/align_heading',SetParametersAtomically),
             ('calibrate','/graey/vn100/calibrate_start',Trigger),
@@ -95,7 +96,7 @@ class CalibrationJobs:
             if action=='cancel':
                 self.job['cancel']=True
                 return self.snapshot()
-            reason=(navigation_start_reason if action in ('prepare','align_heading') else maintenance_reason)(self.controller())
+            reason=(navigation_start_reason if action in ('prepare','align_heading') else calibration_reason)(self.controller())
             if reason or self.mission_running():
                 raise ValueError(reason or 'Stop the mission before calibration/startup')
             if self.job.get('busy'):raise ValueError('An operation is already running')
@@ -131,17 +132,20 @@ class CalibrationJobs:
             self.waypoint_permission=False
             previous_log=self.sample('vn_calibration').get('log')
             self.service('calibrate')
-            self.update(phase='collecting',message='Rotate all axes slowly; keep kill engaged')
+            self.update(phase='collecting',message='Rotate all axes slowly; keep disarmed and ESC power off')
             deadline=self.clock()+145
             while self.clock()<deadline:
-                if self.snapshot().get('cancel') or maintenance_reason(self.controller()):
+                if self.snapshot().get('cancel') or calibration_reason(self.controller()):
                     self.service('cancel')
                     raise ValueError('Calibration cancelled')
                 sensor=self.sample('vn_calibration')
                 self.update(sensor=sensor)
                 if sensor.get('log') and sensor['log']!=previous_log:
                     if sensor.get('phase')=='collected':
-                        self.update(phase='collected',busy=False,message=sensor.get('reason','VN calibration collected'))
+                        if sensor.get('saved') is not True:
+                            raise ValueError('VN calibration collected but persistence was not confirmed')
+                        resumed=self.service('resume')
+                        self.update(phase='collected',busy=False,message=sensor.get('reason','VN calibration saved')+'; '+resumed)
                         return
                     if sensor.get('phase')=='failed':raise ValueError(sensor.get('reason','VN calibration failed'))
                 self.sleep(.5)

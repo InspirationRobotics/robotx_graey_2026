@@ -59,7 +59,7 @@ class TestRecordingService(unittest.TestCase):
     def request(self,port,path,body=None):
         self.calls.append((port,path,body))
         if port==8096:
-            if path=='/status':return dict(recording_session_v1=True,camUp=True,recording=bool(self.camera),recFile=self.camera,recBytes=100)
+            if path=='/status':return dict(recording_session_v1=True,camUp=True,webUp=True,recording=bool(self.camera),recFile=self.camera,recBytes=100)
             if path.startswith('/record/start'):
                 self.camera=path.split('name=')[1]+'.mjpg';return dict(recording=True,recFile=self.camera)
             if path=='/record/stop':self.camera=None;return dict(recording=False)
@@ -78,6 +78,25 @@ class TestRecordingService(unittest.TestCase):
         self.assertTrue(self.service.session['sources']['sonar']['recording'])
         self.assertEqual(self.bag.start_count,0)
         self.service.stop();self.assertIsNone(self.camera);self.assertIsNone(self.sonar)
+    def test_recording_starts_sources_without_any_viewer_and_stop_keeps_sources(self):
+        original=self.request
+        running={'camUp':False,'webUp':False}
+        def request(port,path,body=None):
+            if path in ('/camera/start','/start?tool=map'):
+                self.calls.append((port,path,body))
+                running['camUp' if path=='/camera/start' else 'webUp']=True
+                return dict(msg='ok')
+            result=original(port,path,body)
+            if path=='/status':result.update(running)
+            return result
+        self.service.request_service=request
+        self.service.start(dict(self.command,camera=True,sonar=True,sensors=False))
+        self.service.sample();self.service.stop()
+        self.assertTrue(all(running.values()))
+        self.assertTrue(all(self.service.session['sources'][k]['acquired'] for k in ('camera','sonar')))
+        self.assertFalse(any(path in ('/camera/stop','/stop') for _,path,_ in self.calls))
+        manifest=json.loads((Path(self.service.session['directory'])/'session.json').read_text())
+        self.assertEqual(set(manifest['sources']),{'camera','sonar'})
     def test_never_takes_over_or_stops_external_recording(self):
         self.camera='other_operator.mjpg';self.sonar='other_survey'
         self.service.start(dict(self.command,camera=True,sonar=True))

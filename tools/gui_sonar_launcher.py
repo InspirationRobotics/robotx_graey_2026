@@ -42,7 +42,7 @@ WEB_PORT = 8095                 # where the tools serve their page
 PYTHON = "/usr/bin/python3"
 SONAR = "/dev/serial/by-id/usb-FTDI_FT230X_Basic_UART_D2010VWF-if00-port0"
 TOOLS = {
-    "map":   ["tools/sonar_map.py", "--device", SONAR, "--port", str(WEB_PORT)],
+    "map":   ["tools/sonar_map.py", "--device", SONAR, "--port", str(WEB_PORT), "--no-save"],
     "radar": ["tools/sonar_pole_test.py", "--device", SONAR, "--web",
               "--port", str(WEB_PORT), "--range", "4"],
 }

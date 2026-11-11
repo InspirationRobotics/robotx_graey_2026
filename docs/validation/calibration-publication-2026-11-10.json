@@ -1,0 +1,68 @@
+{
+  "date": "2026-11-10",
+  "purpose": "Publish previously deployed calibration autosave and corrected-heading propagation, followed by verification of later OCS publication",
+  "graey_base_commit": "249d641f451b95fd9786eab01ba1644267714c00",
+  "deployed_release_backup": "/home/graey/robotx_ws/releases/calibration-autoapply-20261110",
+  "saved_archive_sha256": "44d040e358289f0449f711c1294d5904cf60d9fc93f2b68c731574ce4b245086",
+  "application_files": [
+    {
+      "path": "robotx_graey_2026/api/gui/calibration_jobs.py",
+      "sha256": "c167252567dbfef72560c374f6c3baa5c8846a2e4704740cbd35d8ea03afaddd",
+      "matches_saved_deployed_archive_bytes": true
+    },
+    {
+      "path": "robotx_graey_2026/api/gui/fleet_adapter.py",
+      "sha256": "9786975f13655c66fc73ab005c8fabcc00c003ebe770eaa4eb865a8b58fc1cf6",
+      "matches_saved_deployed_archive_bytes": true
+    },
+    {
+      "path": "robotx_graey_2026/api/navigation/fused_nav_bridge.py",
+      "sha256": "578e3ed15b2bb7f468bdc54d976dce0e1fca98eb6c5cfdf007aa63247c856287",
+      "matches_saved_deployed_archive_bytes": true
+    },
+    {
+      "path": "robotx_graey_2026/api/navigation/vn_calibration.py",
+      "sha256": "3edda91ef4bac8f25353ae9eef8b85058c54f213e5c025161b56d8be68ff0643",
+      "matches_saved_deployed_archive_bytes": true
+    },
+    {
+      "path": "tools/calibration.html",
+      "sha256": "d29582b904102a655128a99462e04f9aa674b7a286a04503370b8c79299c7f18",
+      "matches_saved_deployed_archive_bytes": true
+    },
+    {
+      "path": "tools/missions.js",
+      "sha256": "bd05ec45f3a3f215be0fc9eccd47c62c6eaa0daee98e9db71e954f15345ce93a",
+      "matches_saved_deployed_archive_bytes": true
+    },
+    {
+      "path": "tools/sensors.js",
+      "sha256": "153d4b124f6b1a2b96215b5c3eb5ab9171d57cca5d15e16f2ff099ac99eaf656",
+      "matches_saved_deployed_archive_bytes": true
+    }
+  ],
+  "vehicle_access_this_publication": "SSH 192.168.2.2 timed out; current live filesystem not re-read. Compared exact saved deployment archive and prior live deployment evidence. No deployment or runtime changes made.",
+  "validation": {
+    "unittest_discover": {
+      "run": 471,
+      "skipped": 5,
+      "result": "OK"
+    },
+    "focused_calibration_tests": {
+      "run": 13,
+      "result": "OK"
+    },
+    "diff_check": "passed"
+  },
+  "ocs": {
+    "repository": "https://github.com/InspirationRobotics/rx26_ocs",
+    "published_main_commit": "08ec1a29de6d78c8ed1edc3f7c83549ba4bc9889",
+    "state": "Already published by the OCS task; fresh origin/main equals local HEAD, working tree clean",
+    "prior_validation": "13/13 isolated official-server E2E checks; OCS regression suite611 tests with1 skip, recorded in OCS evidence"
+  },
+  "limitations": [
+    "No new physical VN calibration or power-cycle flash-retention test",
+    "Archived deployment equivalence is not a fresh live vehicle check",
+    "Older deferred RFD experimental checkouts not included"
+  ]
+}

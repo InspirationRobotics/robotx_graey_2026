@@ -141,12 +141,24 @@ class RecordingService:
                     status=self.request_service(8096,'/status')
                     if status.get('recording_session_v1') is not True:raise RuntimeError('Camera service needs the GRAEY session-recording update')
                     if status.get('recording'):raise RuntimeError('Camera recording already owned elsewhere; not changed')
-                    if not status.get('camUp'):raise RuntimeError('Start cameras on Sensors before recording')
+                    if not status.get('camUp'):
+                        self.request_service(8096,'/camera/start',b'')
+                        deadline=time.monotonic()+20
+                        while not self.request_service(8096,'/status').get('camUp'):
+                            if time.monotonic()>=deadline:raise RuntimeError('Camera startup timed out; inspect Sensors status')
+                            time.sleep(.25)
                     result=self.request_service(8096,'/record/start?name='+self.session['owner_token']+'&session='+name,b'')
                     if not result.get('recording'):raise RuntimeError(result.get('msg','Camera recorder did not start'))
                     self.camera_owned=True
                     self.session['sources'][kind]=dict(recording=True,acquired=True,path='camera/'+self.session['owner_token']+'.mjpg')
                 else:
+                    status=self.request_service(8096,'/status')
+                    if not status.get('webUp'):
+                        self.request_service(8096,'/start?tool=map',b'')
+                        deadline=time.monotonic()+20
+                        while not self.request_service(8096,'/status').get('webUp'):
+                            if time.monotonic()>=deadline:raise RuntimeError('Sonar startup timed out; inspect Sensors status')
+                            time.sleep(.25)
                     state=self.request_service(8095,'/state')
                     if state.get('recording_session_v1') is not True:raise RuntimeError('Sonar service needs the GRAEY session-recording update')
                     if not state.get('map'):raise RuntimeError('Start the sonar map tool on Sensors before recording')

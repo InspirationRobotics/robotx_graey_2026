@@ -1,0 +1,479 @@
+{
+  "job": {
+    "phase": "idle",
+    "message": "Read instructions before starting",
+    "busy": false
+  },
+  "controller": {
+    "published_monotonic": 2822.791301056,
+    "session": "0a23bf63621b43c4b2b74cd1eff04b3d",
+    "revision": 8,
+    "source": "RF",
+    "inhibit": "RF_LOST",
+    "armed": false,
+    "mode": "MANUAL",
+    "vehicle_fresh": true,
+    "rf_alive": false,
+    "tether_alive": false,
+    "ping_age": null,
+    "ping_detail": "No ICMP reply",
+    "tether_ip": "192.168.2.1",
+    "tether_interface": "enP8p1s0",
+    "sa_active": false,
+    "esc_commanded_on": false,
+    "autonomous": false,
+    "mission_claimed": false,
+    "pilot_arm_switch_pwm": 1495,
+    "pilot_mode_switch_pwm": 1495,
+    "pilot_retry_remaining_s": 0.0,
+    "can_select_rf": false,
+    "can_select_tether": false,
+    "can_recover_tether": false,
+    "online": true
+  },
+  "navigation": {
+    "streams": {
+      "vn_heading": {
+        "data": {
+          "degrees": 192.0019989013672
+        },
+        "age": 0.002529727999899478,
+        "fresh": true
+      },
+      "vn_imu": {
+        "data": {
+          "angular_velocity": [
+            0.000322,
+            -3.2E-05,
+            0.001653
+          ],
+          "linear_acceleration": [
+            0.018,
+            0.027,
+            -0.002
+          ],
+          "orientation": [
+            -0.0012672762337796325,
+            -0.00472237986906824,
+            0.9945073458756457,
+            -0.10455253291383408
+          ],
+          "frame": "vn100"
+        },
+        "age": 0.0019056639998780156,
+        "fresh": true
+      },
+      "supervisor": {
+        "data": {
+          "state": "DEGRADED",
+          "reason": "Sensor fusion degraded",
+          "mode": "Observation",
+          "read_only": true,
+          "navigation_ready": true,
+          "estimator_health": {
+            "state": "DEGRADED",
+            "usable": true,
+            "all_sensors_lost": false,
+            "sensors": {
+              "gps": false,
+              "dvl": false,
+              "vn": true
+            },
+            "ages_s": {
+              "gps": null,
+              "dvl": null,
+              "vn": 0.004966464000062842
+            },
+            "innovations": {
+              "vn": 4.338866711881198E-06
+            },
+            "position_sigma_m": 21.461125205856057,
+            "yaw_sigma_deg": 0.9101221383968051,
+            "gps_position_fused": false
+          },
+          "configuration_verified": true,
+          "depth_m": null,
+          "surfaced": null,
+          "gps_qualified_input": false,
+          "gps_quality_reason": "GPS ineligible",
+          "gps_admission": {
+            "qualified": false,
+            "reason": "GPS ineligible",
+            "qualifying_s": 0.0,
+            "required_dwell_s": 0.0,
+            "last_rejection": "GPS ineligible",
+            "cube_fix_age_upper_s": 2836.9642044316383,
+            "timing_basis": "Cube last-fix time; not receiver epoch",
+            "receiver_delay_bound_s": null,
+            "fault": "",
+            "fix": null,
+            "applied_recently": false,
+            "stationary_validated_recently": false
+          },
+          "north_alignment": {
+            "aligned": false,
+            "offset_deg": null,
+            "reason": "Manual heading correction available; automatic alignment disabled",
+            "samples": 0,
+            "method": "GPS coordinate track / relative DVL displacement",
+            "reference": null,
+            "candidate_ready": false,
+            "active": false,
+            "persistence": "bridge session only"
+          },
+          "coordinate_frame": "fixed_local",
+          "local_navigation_ready": true,
+          "map_transform": {
+            "ready": false,
+            "origin": null,
+            "local_to_ne_deg": null,
+            "translation_ne": [
+              0.0,
+              0.0
+            ],
+            "revision": 0,
+            "axes": "x=north, y=east",
+            "units": "metres"
+          },
+          "dvl_continuity": {
+            "recovering": false,
+            "state": "PREDICTING",
+            "prediction_active": true,
+            "requires_position_revalidation": false
+          },
+          "run_id": null,
+          "reference": null,
+          "reference_current": false,
+          "published_monotonic": 2822.844280192
+        },
+        "age": 0.10467676799999026,
+        "fresh": true
+      },
+      "attitude": {
+        "data": {
+          "rpy": [
+            -3.4143445448581433,
+            -5.9919729871431535,
+            10.179170938947989
+          ]
+        },
+        "age": 0.00469900799998868,
+        "fresh": true
+      },
+      "qgc_global": {
+        "data": {
+          "lat": 0.0,
+          "lon": 0.0,
+          "velocity": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "valid": false,
+          "heading_deg": 10.17
+        },
+        "age": 0.004634079999959795,
+        "fresh": true
+      },
+      "gps": {
+        "data": {
+          "lat": 0.0,
+          "lon": 0.0,
+          "alt": -17.0,
+          "valid": false,
+          "ned": null,
+          "fix": 1,
+          "satellites": 0,
+          "hdop": 99.99,
+          "accuracy": 4294967.295,
+          "vertical_accuracy": 4294967.295,
+          "receiver_time_us": 0
+        },
+        "age": 0.004502463999870088,
+        "fresh": true
+      },
+      "ekf": {
+        "data": {
+          "flags": 167,
+          "velocity_variance": 0.0,
+          "horizontal_variance": 0.0025753318332135677,
+          "vertical_variance": 0.0020163848530501127
+        },
+        "age": 0.1075707519999014,
+        "fresh": true
+      },
+      "vn_calibration": {
+        "data": {
+          "phase": "idle",
+          "reason": "Keep VN mounted. Calibration requires rotation through all six faces.",
+          "faces": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "remaining_s": 0.0,
+          "log": null,
+          "saved": false,
+          "heading_mode": "relative",
+          "accepted": false
+        },
+        "age": 0.3401421120001942,
+        "fresh": true
+      },
+      "heartbeat": {
+        "data": {
+          "armed": false,
+          "mode_id": 19
+        },
+        "age": 0.30791296000006696,
+        "fresh": true
+      },
+      "bridge": {
+        "data": {
+          "healthy": true,
+          "navigation_valid": true,
+          "local_navigation_ready": true,
+          "manual_north": false,
+          "heading_reset": null,
+          "yaw_offset_deg": 0.0,
+          "alignment_run_id": null,
+          "alignment_collecting": false,
+          "alignment_track_position": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "estimator_health": {
+            "state": "DEGRADED",
+            "usable": true,
+            "all_sensors_lost": false,
+            "sensors": {
+              "gps": false,
+              "dvl": false,
+              "vn": true
+            },
+            "ages_s": {
+              "gps": null,
+              "dvl": null,
+              "vn": 0.0017925760002981406
+            },
+            "innovations": {
+              "vn": 2.1262569062621468E-08
+            },
+            "position_sigma_m": 21.609583883181934,
+            "yaw_sigma_deg": 0.9728330492587773,
+            "gps_position_fused": false
+          },
+          "initialized": true,
+          "fault": "",
+          "coordinate_frame": "fixed_local",
+          "map_transform": {
+            "ready": false,
+            "origin": null,
+            "local_to_ne_deg": null,
+            "translation_ne": [
+              0.0,
+              0.0
+            ],
+            "revision": 0,
+            "axes": "x=north, y=east",
+            "units": "metres"
+          },
+          "cube_origin_registered": false,
+          "estimator_map_transform": {
+            "ready": false,
+            "origin": null,
+            "local_to_ne_deg": null,
+            "translation_ne": [
+              0.0,
+              0.0
+            ],
+            "revision": 0,
+            "axes": "x=north, y=east",
+            "units": "metres"
+          },
+          "estimator_position_ned": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "map_position_ne": null,
+          "map_heading_deg": 192.00048619893894,
+          "depth_m": null,
+          "surfaced": null,
+          "gps_eligible": false,
+          "gps_admission": {
+            "qualified": false,
+            "reason": "GPS ineligible",
+            "qualifying_s": 0.0,
+            "required_dwell_s": 0.0,
+            "last_rejection": "GPS ineligible",
+            "cube_fix_age_upper_s": 2837.068117797936,
+            "timing_basis": "Cube last-fix time; not receiver epoch",
+            "receiver_delay_bound_s": null,
+            "fault": "",
+            "fix": null,
+            "applied_recently": false,
+            "stationary_validated_recently": false
+          },
+          "gps_observation": {
+            "cube_fix_time_us": 0,
+            "received": 2822.89682832,
+            "lat": 0.0,
+            "lon": 0.0,
+            "alt": -17.0,
+            "fix": 1,
+            "accuracy": 4294967.295,
+            "speed_mps": 0.0,
+            "course_deg": 0.0,
+            "speed_accuracy_mps": 999.0
+          },
+          "position_ned": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "position_sigma_m": 21.609583883181934,
+          "distance_travelled_m": 0.0,
+          "heading_bias_deg": 0.0,
+          "velocity_bias_mps": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "heading_reference_validated": false,
+          "heading_continuity_lost": false,
+          "course_heading": {
+            "reason": "Waiting for admitted surface GPS and measured DVL motion",
+            "method": null,
+            "updates": 0,
+            "last_update": null,
+            "last_error_deg": null,
+            "velocity_samples": 0,
+            "maximum_step_deg": 0.5,
+            "minimum_update_interval_s": 3.0,
+            "minimum_speed_mps": 0.08,
+            "application_policy": "manual heading only; automatic heading correction disabled"
+          },
+          "north_alignment": {
+            "aligned": false,
+            "offset_deg": null,
+            "reason": "Manual heading correction available; automatic alignment disabled",
+            "samples": 0,
+            "method": "GPS coordinate track / relative DVL displacement",
+            "reference": null,
+            "candidate_ready": false,
+            "active": false,
+            "persistence": "bridge session only"
+          },
+          "stationary_hold": {
+            "active": false
+          },
+          "dvl_continuity": {
+            "recovering": false,
+            "state": "PREDICTING",
+            "prediction_active": true,
+            "requires_position_revalidation": false
+          },
+          "prepare_recovery": {},
+          "ingress_rejections": {},
+          "guided_alignment_run": null,
+          "instance": "ed68f2ec-5250-423b-b237-11ce4e091db7",
+          "fusion_policy": "bridge_odometry",
+          "land_north_reference": null,
+          "automatic_recovery": {
+            "state": "idle",
+            "reason": "Monitoring DVL continuity",
+            "count": 0,
+            "completed": false,
+            "maintenance_safe": false
+          },
+          "clock_mapping": {
+            "offset": -14.088350479999917,
+            "uncertainty": 0.03925020800007495,
+            "updated": 2822.816765376
+          },
+          "pressure_sample": {
+            "source": "SCALED_PRESSURE3",
+            "hpa": 998.5999755859375,
+            "received": 2822.896699264,
+            "cube_boot_ms": 2836959
+          },
+          "profile_mismatches": {},
+          "configuration_verified": true,
+          "enabled": false,
+          "surface_pressure_hpa": 0.0,
+          "startup_output_enabled": false,
+          "transmitting": false,
+          "published_monotonic": 2822.940504736,
+          "reset_counter": 0,
+          "inputs": {
+            "vn": true,
+            "dvl": false
+          },
+          "heading_vn": {
+            "received": 2822.93871216,
+            "yaw": 192.00048619893894,
+            "raw_yaw": 192.0,
+            "rate": 0.04027893299769687
+          },
+          "heading_dvl": {
+            "received": null,
+            "velocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "raw_velocity": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "valid": false
+          }
+        },
+        "age": 0.0027912959999412124,
+        "fresh": true
+      }
+    },
+    "origin": null,
+    "session": 0,
+    "cube_estimate": {
+      "valid": false,
+      "lat": null,
+      "lon": null,
+      "heading_deg": null,
+      "source": "Cube fixed local XY transformed to Jetson north/east map",
+      "depth_m": null,
+      "local_valid": false,
+      "map_ne": null
+    },
+    "qgc_pose": {
+      "lat": 0.0,
+      "lon": 0.0,
+      "velocity": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "valid": false,
+      "heading_deg": 10.179170938947989,
+      "age": 0.004634079999959795,
+      "source": "GLOBAL_POSITION_INT"
+    },
+    "mission_reference": null,
+    "mission_target": null,
+    "origin_revision": 0,
+    "display_reset": {
+      "state": "idle",
+      "remaining_s": 0
+    },
+    "trails": {
+      "global": [],
+      "gps": []
+    }
+  }
+}

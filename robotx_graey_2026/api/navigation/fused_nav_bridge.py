@@ -23,7 +23,7 @@ from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.pixhawk.mavlink import Link
 from .bridge_estimator import BridgeEstimator, yaw
 from .odometry_profile import PROFILE
-from .maintenance_safety import require_maintenance, navigation_start_reason
+from .maintenance_safety import require_maintenance, navigation_start_reason, calibration_reason
 from .automatic_recovery import AutomaticRecovery
 from .land_north import LandNorth
 from .track_north import TrackNorth
@@ -80,6 +80,7 @@ class FusedNavBridge(SteadyNode):
         self.create_subscription(String, '/graey/vn100/calibration', self.calibration_status, 10)
         self.create_subscription(String, '/graey/control_watchdog/status', self.control_status, 10)
         self.create_service(Trigger, '/graey/navigation/pause_odometry', self.pause_odometry)
+        self.create_service(Trigger, '/graey/navigation/resume_odometry', self.resume_odometry)
         self.create_service(SetBool, '/graey/navigation/prepare', self.prepare)
         self.create_service(SetParametersAtomically, '/graey/navigation/align_heading', self.align_heading)
         self.create_subscription(String, '/graey/waypoint/status', self.mission_alignment_status, 10)
@@ -234,8 +235,11 @@ class FusedNavBridge(SteadyNode):
                     or request.parameters[0].value.type!=3):
                 raise ValueError('Expected one double true_heading_deg')
             response.result.reason=self.est.align_known_heading(time.monotonic(),request.parameters[0].value.double_value)
-            if isinstance(self.est,ContinuousEstimator) and not self.output_permitted:
-                response.result.reason+='; navigation output paused until Start Navigation'
+            if isinstance(self.est,ContinuousEstimator):
+                self.start_checked=True
+                self.output_permitted=True
+                self.last_sent=None
+                response.result.reason+='; navigation output enabled for Cube/QGC (fresh sensor/profile checks remain)'
             self.get_logger().info('NORTH_REFERENCE '+json.dumps(self.est.north_alignment.status()))
             response.result.successful=True
         except (ValueError,OSError) as error:
@@ -245,12 +249,29 @@ class FusedNavBridge(SteadyNode):
 
     def pause_odometry(self, request, response):
         try:
-            require_maintenance()
+            require_maintenance(check=calibration_reason)
             self.output_permitted = False
             self.est.fault = 'Navigation maintenance; Prepare required before reuse'
             response.success, response.message = True, 'Odometry paused for maintenance'
         except (ValueError, OSError) as error:
             response.success, response.message = False, str(error)
+        return response
+
+    def resume_odometry(self, request, response):
+        try:
+            require_maintenance(check=calibration_reason)
+            if not self.configured(time.monotonic()):
+                raise ValueError('Cube external-navigation profile unavailable or mismatched')
+            if self.est.fault=='Navigation maintenance; Prepare required before reuse':
+                self.est.fault=''
+            self.start_checked=True
+            self.output_permitted=True
+            self.last_sent=None
+            response.success=True
+            response.message='Navigation output resumed with saved VN calibration; fresh sensor checks remain'
+        except (ValueError,OSError) as error:
+            response.success=False
+            response.message=str(error)
         return response
 
     def recover_dvl(self, request, response):
@@ -485,7 +506,7 @@ class FusedNavBridge(SteadyNode):
             self.heading_reset_revision=revision
             self.reset_counter=(self.reset_counter+1)%256
         configured = self.configured(now)
-        if self.start_checked and self.output_permitted and not self.auto_recovery.pending and status['healthy'] and (isinstance(self.est,ContinuousEstimator) or new_dvl_measurement(self.est, now, getattr(self, 'last_dvl_sent', None))) and (self.last_sent is None or now-self.last_sent >= .05):
+        if self.start_checked and self.output_permitted and configured and not self.auto_recovery.pending and status['healthy'] and (isinstance(self.est,ContinuousEstimator) or new_dvl_measurement(self.est, now, getattr(self, 'last_dvl_sent', None))) and (self.last_sent is None or now-self.last_sent >= .05):
             self.link.odometry(status['position_ned'] if isinstance(self.est,ContinuousEstimator) else self.est.position, self.est.orientation(), self.est.velocity(),
                                self.est.rates if self.est.fresh(self.est.imu_at,now) else (0.,0.,0.), reset_counter=self.reset_counter, covariance=self.est.covariance(), velocity_covariance=self.est.velocity_covariance() if isinstance(self.est,ContinuousEstimator) else None,
                                quality=40 if status.get('dvl_continuity',{}).get('prediction_active') else 80)
