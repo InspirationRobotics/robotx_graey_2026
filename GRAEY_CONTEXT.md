@@ -1735,3 +1735,14 @@ declaration/RunStart, task PUBACK, submerged retention/reconnect and run end.
 The laptop RFD client has explicit acknowledgement/no-ack tests, and the RFD
 heartbeat status now exposes the exact truthful-telemetry hold reason instead
 of silently appearing healthy. Physical RFD/Cube testing remains outstanding.
+
+## RFD mission relay publication — November 11, 2026
+
+The tested GRAEY implementation was committed and published to main as
+fac1b00473cb1e449ad80750fc6e8857d1ce11b7. The matching shared OCS UUV1 routing,
+RoboCommand adapter/tests and validation were published to rx26_ocs main as
+ede69bea7a7ed35f1c44da1809b35d37e4b8645a. Both laptop working trees, local
+main, origin/main and freshly queried online main matched after publication.
+This supersedes the earlier local/not-pushed status only. GRAEY was offline;
+no Jetson deployment, firmware/parameter change, radio configuration, physical
+RFD test, mode change, arming or propulsion occurred.
