@@ -109,6 +109,9 @@ missions execute on GRAEY's Jetson and must be editable after launch over RFD.
    ID 1; the shared fleet configuration now reserves autopilot 3 for GRAEY.
 3. Verify the current Windows RFD COM port, baud, node IDs, and bidirectional
    clean packet transport; historical COM3/115200/node 4 is not current proof.
+   The shipped shared-OCS configuration currently says COM8 and accepts a
+   `FLEET_LINK.cmd --serial COMx` override, so resolve that mismatch from Windows
+   Device Manager before starting the field test.
 4. Perform a disarmed surface rehearsal: send each mission type, compare
    revision/type/point count, deliberately resend it, and verify exactly one
    prepared mission.
