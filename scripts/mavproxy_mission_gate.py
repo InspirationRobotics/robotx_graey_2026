@@ -3,7 +3,14 @@
 import pathlib
 import shutil
 import socket
+import sys
 import types
+
+# systemd executes this file directly from scripts/, without sourcing the ROS
+# install.  Put the repository/package root on sys.path before importing the
+# shared vehicle identity so source deployments and installed deployments agree.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
 from mission_input_gate import MissionInputGate
 from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 

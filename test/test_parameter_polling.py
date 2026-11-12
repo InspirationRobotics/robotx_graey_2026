@@ -16,7 +16,8 @@ class ParameterPollingTests(unittest.TestCase):
         cls=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=='FusedNavBridge')
         method=next(n for n in cls.body if isinstance(n,ast.FunctionDef) and n.name=='request_parameters')
         module=ast.fix_missing_locations(ast.Module(body=[method],type_ignores=[]))
-        namespace=dict(PROFILE=PROFILE,COMPASS_PARAMS=COMPASS_PARAMS)
+        namespace=dict(PROFILE=PROFILE,COMPASS_PARAMS=COMPASS_PARAMS,
+                       FCU_SYSTEM=3,FCU_COMPONENT=1)
         exec(compile(module,str(path),'exec'),namespace)
         self.poll=namespace['request_parameters']
         self.node=NS(output_permitted=True,settings={},link=Mock(),sync_clock=Mock())
@@ -56,6 +57,7 @@ class ParameterPollingTests(unittest.TestCase):
         for step in range(7):self.tick(step*.2)
         self.assertTrue(set(COMPASS_PARAMS).issubset(self.received))
         self.assertTrue(all(c.args[0]=='param_request_read_send' for c in self.node.link.send.call_args_list))
+        self.assertTrue(all(c.args[1:3]==(3,1) for c in self.node.link.send.call_args_list))
         self.node.link.set_mode.assert_not_called()
         self.node.link.command.assert_not_called()
         self.node.sync_clock.assert_not_called()

@@ -5,19 +5,22 @@
 # telemetry remain on WiFi/tether.  MAVLink routing and the autopilot's fixed
 # heartbeat are not disabled by setting these generated stream groups to zero.
 # Apply only with GRAEY killed/disarmed. System 3 is the approved GRAEY Cube
-# identity; companion radio application remains system 43.
+# identity; companion radio application remains system 43.  The physical RFD
+# is on the Cube's first MAVLink telemetry instance (MAV1).  Do not change the
+# serial protocol, baud or flow-control values in this stream overlay; retain
+# the commissioned hardware settings read from the vehicle before deployment.
 # Reboot the Cube once to clear runtime message intervals.
-SYSID_THISMAV 3
-SERIAL1_PROTOCOL 2
-SERIAL1_BAUD 115
-BRD_SER1_RTSCTS 0
+MAV_SYSID 3
 # Minimal QGC display on the shared RFD: 1 Hz attitude, position and status.
 # Raw sensors, RC feedback and the other broad groups remain disabled.
-MAV2_EXTRA1 1
-MAV2_EXTRA2 0
-MAV2_EXTRA3 0
-MAV2_POSITION 1
-MAV2_RAW_SENS 0
-MAV2_RC_CHAN 0
-MAV2_EXT_STAT 1
+MAV1_ADSB 0
+MAV1_EXTRA1 1
+MAV1_EXTRA2 0
+MAV1_EXTRA3 0
+MAV1_EXT_STAT 1
+MAV1_PARAMS 0
+MAV1_POSITION 1
+MAV1_RAW_CTRL 0
+MAV1_RAW_SENS 0
+MAV1_RC_CHAN 0
 

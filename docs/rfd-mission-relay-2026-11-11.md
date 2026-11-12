@@ -105,7 +105,7 @@ missions execute on GRAEY's Jetson and must be editable after launch over RFD.
 1. Start killed/disarmed with ESC power off and verify the sole MAVProxy/gateway
    ownership before connecting radios.
 2. Verify and, only with operator authorization, apply a unique GRAEY Cube
-   `SYSID_THISMAV=3`. Historical evidence shows GRAEY and Ekko both used system
+   `MAV_SYSID=3` on the live ArduSub 4.7 Cube. Historical evidence shows GRAEY and Ekko both used system
    ID 1; the shared fleet configuration now reserves autopilot 3 for GRAEY.
 3. Verify the current Windows RFD COM port, baud, node IDs, and bidirectional
    clean packet transport; historical COM3/115200/node 4 is not current proof.

@@ -419,7 +419,7 @@ class FusedNavBridge(SteadyNode):
             self.parameter_schema=tuple(names);self.parameter_cursor=0
         first=self.parameter_cursor;last=min(first+4,len(names))
         for name in names[first:last]:
-            self.link.send('param_request_read_send',1,1,name.encode(),-1)
+            self.link.send('param_request_read_send',FCU_SYSTEM,FCU_COMPONENT,name.encode(),-1)
         self.parameter_cursor=0 if last==len(names) else last
 
     def sync_clock(self):

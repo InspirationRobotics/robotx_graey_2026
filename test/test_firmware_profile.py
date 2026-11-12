@@ -14,7 +14,7 @@ class FirmwareProfileTests(unittest.TestCase):
         tree=ast.parse(path.read_text())
         method=next(n for n in ast.walk(tree) if isinstance(n,ast.FunctionDef) and n.name=='request_parameters')
         profile={f'PARAM{i}':i for i in range(25)}
-        ns={'PROFILE':profile}
+        ns={'PROFILE':profile,'FCU_SYSTEM':3,'FCU_COMPONENT':1}
         exec(compile(ast.Module(body=[method],type_ignores=[]),str(path),'exec'),ns)
         sent=[];node=SimpleNamespace(link=SimpleNamespace(send=lambda *args:sent.append(args[3].decode())))
         for _ in range(7):
