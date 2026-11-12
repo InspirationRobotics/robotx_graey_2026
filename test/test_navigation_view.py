@@ -44,7 +44,7 @@ class NavigationTests(unittest.TestCase):
 
     def test_qgc_display_is_raw_cube_position_without_changing_navigation_permission(self):
         m=SimpleNamespace(lat=12800000,lon=1038500000,alt=1000,vx=0,vy=0,vz=0,hdg=6200,time_boot_ms=100,
-                          get_srcSystem=lambda:1,get_srcComponent=lambda:1)
+                          get_srcSystem=lambda:3,get_srcComponent=lambda:1)
         self.view.consume('GLOBAL_POSITION_INT',m)
         self.view.put('attitude',dict(rpy=[0.,0.,64.]))
         self.view.put('bridge',dict(coordinate_frame='fixed_local',instance='test',map_transform={}))
@@ -74,7 +74,7 @@ class NavigationTests(unittest.TestCase):
         self.assertEqual(sample['data']['depth_m'], .5)
 
     def message(self, kind, **fields):
-        self.view.consume(kind, SimpleNamespace(get_srcSystem=lambda: 1,
+        self.view.consume(kind, SimpleNamespace(get_srcSystem=lambda: 3,
             get_srcComponent=lambda: 1, **fields))
 
     def gps(self, fix=3, lat=330000000, timestamp=1):

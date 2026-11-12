@@ -24,7 +24,7 @@ from std_msgs.msg import String
 def main():
     udp=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);udp.bind(('127.0.0.1',0));udp.settimeout(.02)
     port=udp.getsockname()[1];done=threading.Event();heard=[]
-    parser=mavutil.mavlink.MAVLink(None);encoder=mavutil.mavlink.MAVLink(None,srcSystem=1,srcComponent=1)
+    parser=mavutil.mavlink.MAVLink(None);encoder=mavutil.mavlink.MAVLink(None,srcSystem=3,srcComponent=1)
     def fcu():
         peer=None
         while not done.is_set():

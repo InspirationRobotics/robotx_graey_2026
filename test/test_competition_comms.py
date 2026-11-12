@@ -181,7 +181,7 @@ class TestTelemetry(unittest.TestCase):
         self.assertIsNotNone(self.sender.status_at)
         self.assertNotIn('depth_m',self.sender.heartbeat_body)
 
-    def gps(self,fix=3,source=1,stamp=123,alt_ellipsoid=5900):
+    def gps(self,fix=3,source=3,stamp=123,alt_ellipsoid=5900):
         return SimpleNamespace(get_srcSystem=lambda:source,get_srcComponent=lambda:1,
             fix_type=fix,time_usec=stamp,alt_ellipsoid=alt_ellipsoid,lat=12806000,lon=1038557000,
             alt=10000,eph=100,satellites_visible=15,h_acc=500,v_acc=1000)

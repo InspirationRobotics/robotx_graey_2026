@@ -6,7 +6,7 @@ from robotx_graey_2026.api.comms.mission_radio import (
     Assembler, KIND_REQUEST, encode, inspect_chunk, revision)
 from robotx_graey_2026.api.comms import competition_codec as rx
 from robotx_graey_2026.api.comms.radio_mission_node import (
-    MissionBackend, accept_run_start, build_heartbeat, validate_mission)
+    BeaconGate, MissionBackend, accept_run_start, build_heartbeat, validate_mission)
 from robotx_graey_2026.api.gui.laptop.radio_client import RadioMissionClient
 
 
@@ -108,6 +108,20 @@ class HeartbeatTests(unittest.TestCase):
     def test_incomplete_heartbeat_is_suppressed_with_a_specific_reason(self):
         with self.assertRaisesRegex(ValueError,'alt_m'):
             build_heartbeat(self.sample(alt_m=None))
+
+    def test_private_status_is_change_driven_and_not_a_second_2hz_stream(self):
+        gate=BeaconGate();event=dict(event='radio_status',ok=True)
+        self.assertTrue(gate.due(event,0.,heartbeat_available=True))
+        self.assertFalse(gate.due(event,.5,heartbeat_available=True))
+        self.assertFalse(gate.due(event,4.99,heartbeat_available=True))
+        self.assertTrue(gate.due(event,5.,heartbeat_available=True))
+        self.assertTrue(gate.due(dict(event='radio_status',ok=False),5.1,True))
+
+    def test_private_route_presence_is_one_hz_when_heartbeat_is_withheld(self):
+        gate=BeaconGate();event=dict(event='radio_status',ok=False)
+        self.assertTrue(gate.due(event,0.,heartbeat_available=False))
+        self.assertFalse(gate.due(event,.99,heartbeat_available=False))
+        self.assertTrue(gate.due(event,1.,heartbeat_available=False))
 
 
 class LaptopClientTests(unittest.TestCase):

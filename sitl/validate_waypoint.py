@@ -10,6 +10,7 @@ import time
 import threading
 import urllib.request
 import uuid
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 
 
 def api(body=None):
@@ -117,14 +118,14 @@ def main():
                                 if manual_link is None:
                                     manual_link=mavutil.mavlink_connection('udpout:127.0.0.1:14559',source_system=255,source_component=202)
                                 manual_link.mav.heartbeat_send(6,8,0,0,0)
-                                manual_link.mav.param_set_send(1,1,b'SIM_GPS_DISABLE',1.,9)
+                                manual_link.mav.param_set_send(FCU_SYSTEM,FCU_COMPONENT,b'SIM_GPS_DISABLE',1.,9)
                                 injected_until=time.monotonic()+args.gps_dropout_seconds
                                 while time.monotonic()<injected_until:
                                     state_gap=api()['navigation']['streams']
                                     bgap=state_gap.get('bridge',{}).get('data',{})
                                     result['gps_outage_seen'] |= not (bgap.get('gps_admission') or {}).get('qualified',True)
                                     time.sleep(.1)
-                                manual_link.mav.param_set_send(1,1,b'SIM_GPS_DISABLE',0.,9)
+                                manual_link.mav.param_set_send(FCU_SYSTEM,FCU_COMPONENT,b'SIM_GPS_DISABLE',0.,9)
                                 result['gps_dropout_injected']=True
                             if args.supervisor_interruption and not result.get('permission_interruption_injected'):
                                 original=dict(s)
@@ -188,7 +189,7 @@ def main():
             injector.destroy_node();rclpy.shutdown()
         if manual_link:
             manual_link.mav.manual_control_send(1,0,0,500,0,0)
-            manual_link.mav.command_long_send(1,1,400,0,0,0,0,0,0,0,0)
+            manual_link.mav.command_long_send(FCU_SYSTEM,FCU_COMPONENT,400,0,0,0,0,0,0,0,0)
             manual_link.close()
         if proc:
             try: os.killpg(proc.pid,signal.SIGINT)

@@ -74,7 +74,7 @@ def main():
     def exercise(node):
         fixture=Node('competition_smoke_inputs')
         fcu=fixture.create_publisher(String,'/graey/fcu/rx',200)
-        encoder=mavutil.mavlink.MAVLink(None,srcSystem=1,srcComponent=1)
+        encoder=mavutil.mavlink.MAVLink(None,srcSystem=3,srcComponent=1)
         def telemetry():
             stamp=int(time.monotonic()*1e6);boot=(stamp//1000)%0xFFFFFFFF
             messages=[encoder.ekf_status_report_encode(24,.1,.1,.1,.1,.1),

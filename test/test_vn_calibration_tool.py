@@ -22,7 +22,7 @@ class CalibrationToolTests(unittest.TestCase):
         import serial
         tool = load_tool('vn_calibrate')
         owner, port, link = MagicMock(), MagicMock(), MagicMock()
-        heartbeat = SimpleNamespace(base_mode=0, get_srcSystem=lambda:1, get_srcComponent=lambda:1)
+        heartbeat = SimpleNamespace(base_mode=0, get_srcSystem=lambda:3, get_srcComponent=lambda:1)
         link.recv_match.side_effect = [heartbeat, None]
         def command(unused, body):
             if body == 'VNRRG,08':

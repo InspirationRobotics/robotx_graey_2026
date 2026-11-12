@@ -27,11 +27,12 @@ import time
 os.environ['MAVLINK20'] = '1'                       # ODOMETRY (331) is v2-only
 os.environ['MAVLINK_DIALECT'] = 'ardupilotmega'
 from pymavlink import mavutil                       # noqa: E402 - must follow the env
+from .identity import FCU_COMPONENT, FCU_SYSTEM
 
 mavutil.set_dialect('ardupilotmega')
 
-TARGET_SYS = 1                                      # the Cube
-TARGET_COMP = 1
+TARGET_SYS = FCU_SYSTEM                             # the GRAEY Cube
+TARGET_COMP = FCU_COMPONENT
 GCS_TYPE = mavutil.mavlink.MAV_TYPE_GCS             # what we claim to be
 GCS_AUTOPILOT = mavutil.mavlink.MAV_AUTOPILOT_INVALID
 
@@ -53,7 +54,7 @@ REOPEN_LOG_S = 5.0                                  # a flapping link must not f
 class Link:
     """A MAVProxy UDP connection plus the handful of things Graey sends over it."""
 
-    def __init__(self, url, component, logger=None, system=1, node=None, rx_depth=200, kinds=None):
+    def __init__(self, url, component, logger=None, system=FCU_SYSTEM, node=None, rx_depth=200, kinds=None):
         self.url, self.system, self.component = url, system, component
         self.log = logger
         self.last_reopen = self.last_reopen_log = 0.0

@@ -1,6 +1,6 @@
 # Isolated SITL profile: Graey EKF sources + simulated GPS and Lua feedback.
 # Do not load this file onto a physical Cube.
-SYSID_THISMAV 1
+SYSID_THISMAV 3
 AHRS_EKF_TYPE 3
 EK3_ENABLE 1
 EK2_ENABLE 0

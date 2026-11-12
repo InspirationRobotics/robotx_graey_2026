@@ -4,6 +4,7 @@ import math
 import threading
 import time
 from collections import deque
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 
 
 def offset(lat, lon, altitude, origin):
@@ -81,7 +82,7 @@ class NavigationView:
             self.samples[name] = {'data': clean(data), 'received': self.clock() if received is None else received}
 
     def consume(self, kind, m, received=None):
-        if m.get_srcSystem() != 1 or m.get_srcComponent() != 1:
+        if m.get_srcSystem() != FCU_SYSTEM or m.get_srcComponent() != FCU_COMPONENT:
             return
         with self.lock:
             if kind == 'GLOBAL_POSITION_INT':

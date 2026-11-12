@@ -49,6 +49,7 @@ from rclpy.node import Node
 from std_msgs.msg import Bool, String
 
 from robotx_graey_2026.api.node_util import run
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 from robotx_graey_2026.api.pixhawk.mavlink import (
     Link,
     MODE_MANUAL,
@@ -391,7 +392,7 @@ class KillSwitch(Node):
 
     def pump(self):
         def consume(kind, msg):
-            if msg.get_srcSystem() != 1 or msg.get_srcComponent() != 1:
+            if msg.get_srcSystem() != FCU_SYSTEM or msg.get_srcComponent() != FCU_COMPONENT:
                 return
 
             if kind == 'RC_CHANNELS':

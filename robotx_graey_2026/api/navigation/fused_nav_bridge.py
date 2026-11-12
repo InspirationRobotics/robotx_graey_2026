@@ -20,6 +20,7 @@ from rcl_interfaces.msg import ParameterDescriptor
 from rcl_interfaces.srv import SetParametersAtomically
 from robotx_graey_2026.api.steady_node import SteadyNode
 from robotx_graey_2026.api.node_util import run
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 from robotx_graey_2026.api.pixhawk.mavlink import Link
 from .bridge_estimator import BridgeEstimator, yaw
 from .odometry_profile import PROFILE
@@ -432,7 +433,7 @@ class FusedNavBridge(SteadyNode):
                    for k, v in dict(PROFILE, COMPASS_LEARN=0).items())
 
     def consume(self, kind, m):
-        if (m.get_srcSystem(), m.get_srcComponent()) != (1, 1):
+        if (m.get_srcSystem(), m.get_srcComponent()) != (FCU_SYSTEM, FCU_COMPONENT):
             return
         now = time.monotonic()
         if kind == 'HEARTBEAT' and not self.start_checked:

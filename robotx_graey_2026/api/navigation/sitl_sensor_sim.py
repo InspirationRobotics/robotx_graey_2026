@@ -16,6 +16,7 @@ from sensor_msgs.msg import Imu
 from std_msgs.msg import Bool, Float32, String
 
 from robotx_graey_2026.api.node_util import run
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 from robotx_graey_2026.api.pixhawk.mavlink import Link, mavutil
 from .bridge_estimator import yaw_rotate
 
@@ -126,7 +127,7 @@ class SitlSensorSim(Node):
             self.depth_pub.publish(Float32(data=local['position'][2]))
 
     def consume(self, kind, msg):
-        if msg.get_srcSystem() != 1 or msg.get_srcComponent() != 1:
+        if msg.get_srcSystem() != FCU_SYSTEM or msg.get_srcComponent() != FCU_COMPONENT:
             return
         if kind=='HEARTBEAT':
             self.latest['heartbeat']=dict(received=time.monotonic(),

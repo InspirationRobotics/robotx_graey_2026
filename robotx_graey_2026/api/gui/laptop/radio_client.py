@@ -34,9 +34,15 @@ class RadioMissionClient:
                 if msg is None:continue
                 if ((msg.get_srcSystem(),msg.get_srcComponent()) !=
                         (COMPANION_SYSTEM,COMPANION_COMPONENT)
-                        or int(getattr(msg,'payload_type',-1)) != PAYLOAD_TYPE
                         or getattr(msg,'target_system',0) not in (0,LAPTOP_SYSTEM)
                         or getattr(msg,'target_component',0) not in (0,LAPTOP_COMPONENT)):
+                    continue
+                # Standard RXL heartbeat traffic proves the companion route.  The
+                # vehicle need not duplicate a private JSON status frame at 2 Hz.
+                with self.condition:
+                    self.last_seen=self.clock()
+                    self.condition.notify_all()
+                if int(getattr(msg,'payload_type',-1)) != PAYLOAD_TYPE:
                     continue
                 payload=bytes(msg.payload)[:int(msg.payload_length)]
                 try:complete=self.assembler.add(payload)
@@ -46,7 +52,6 @@ class RadioMissionClient:
                 kind,request_id,value=complete
                 if kind!=KIND_RESPONSE:continue
                 with self.condition:
-                    self.last_seen=self.clock()
                     if value.get('event')=='radio_status':self.last_status=value
                     else:self.responses[request_id]=value
                     self.condition.notify_all()

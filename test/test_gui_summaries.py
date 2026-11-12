@@ -21,7 +21,7 @@ def gui_names(*names):
     tree = ast.parse(GUI.read_text())
     keep = [n for n in tree.body if (isinstance(n, ast.ClassDef) and n.name in names)
             or (isinstance(n, ast.Assign) and any(getattr(t, 'id', None) in names for t in n.targets))]
-    ns = {}
+    ns = {'FCU_SYSTEM': 3, 'FCU_COMPONENT': 1}
     exec(compile(ast.Module(body=keep, type_ignores=[]), str(GUI), 'exec'), ns)
     return ns
 

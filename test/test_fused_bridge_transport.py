@@ -162,6 +162,7 @@ class TransportTests(unittest.TestCase):
         tree.body = [n for n in tree.body if isinstance(n, ast.ClassDef)]
         self.clock = NS(now=10.)
         ns = dict(recover_ingress=recover_ingress, ContinuousEstimator=ContinuousEstimator, SteadyNode=object, math=math, json=json, String=NS, PROFILE=PROFILE,
+                  FCU_SYSTEM=3, FCU_COMPONENT=1,
                   yaw=yaw, time=NS(monotonic=lambda: self.clock.now, monotonic_ns=lambda: int(self.clock.now*1e9)),
                   statistics=statistics, BridgeEstimator=BridgeEstimator,RelativeEstimator=RelativeEstimator,TrackNorth=TrackNorth, require_maintenance=Mock(), navigation_start_reason=Mock(), calibration_reason=Mock(), AutomaticRecovery=AutomaticRecovery)
         exec(compile(tree, str(path), 'exec'), ns)
@@ -186,7 +187,7 @@ class TransportTests(unittest.TestCase):
         self.b.est.gps.clock.uncertainty = 0.
         self.b.est.gps.clock.updated = 10.
 
-    def pressure(self, stamp, system=1):
+    def pressure(self, stamp, system=3):
         m = NS(time_boot_ms=stamp, press_abs=1000.49,
                get_srcSystem=lambda: system, get_srcComponent=lambda: 1)
         self.b.consume('SCALED_PRESSURE3', m)
@@ -210,7 +211,7 @@ class TransportTests(unittest.TestCase):
 
     def test_air_barometers_cannot_replace_water_pressure_or_qualify_submerged_gps(self):
         self.b.settings['surface_pressure_hpa']=992.7
-        m=NS(time_boot_ms=10000,press_abs=979.,get_srcSystem=lambda:1,get_srcComponent=lambda:1)
+        m=NS(time_boot_ms=10000,press_abs=979.,get_srcSystem=lambda:3,get_srcComponent=lambda:1)
         for kind in ('SCALED_PRESSURE','SCALED_PRESSURE2'):
             self.b.consume(kind,m)
         self.assertIsNone(self.b.est.depth_at)
@@ -222,7 +223,7 @@ class TransportTests(unittest.TestCase):
 
     def test_explicit_pressure_source_is_used_without_fallback(self):
         self.b.settings['pressure_message']='SCALED_PRESSURE2'
-        m=NS(time_boot_ms=10000,press_abs=1049.03325,get_srcSystem=lambda:1,get_srcComponent=lambda:1)
+        m=NS(time_boot_ms=10000,press_abs=1049.03325,get_srcSystem=lambda:3,get_srcComponent=lambda:1)
         self.b.consume('SCALED_PRESSURE3',m)
         self.assertIsNone(self.b.est.depth_at)
         self.b.consume('SCALED_PRESSURE2',m)
@@ -233,7 +234,7 @@ class TransportTests(unittest.TestCase):
             self.clock.now += .1
             stamp = round(self.clock.now*1000)
             m = NS(time_boot_ms=stamp, press_abs=pressure,
-                   get_srcSystem=lambda: 1, get_srcComponent=lambda: 1)
+                   get_srcSystem=lambda: 3, get_srcComponent=lambda: 1)
             self.b.consume('SCALED_PRESSURE3', m)
             self.b.tick()
             status = json.loads(self.b.pub.publish.call_args.args[0].data)
@@ -262,11 +263,11 @@ class TransportTests(unittest.TestCase):
         self.b.est.status = lambda now: dict(healthy=not self.b.est.fault)
         self.b.tick()
         self.b.link.odometry.assert_not_called()
-        self.b.consume('HEARTBEAT', NS(base_mode=128, get_srcSystem=lambda: 1, get_srcComponent=lambda: 1))
+        self.b.consume('HEARTBEAT', NS(base_mode=128, get_srcSystem=lambda: 3, get_srcComponent=lambda: 1))
         self.assertIn('started while armed', self.b.est.fault)
         self.b.tick()
         self.b.link.odometry.assert_not_called()
-        self.b.consume('HEARTBEAT', NS(base_mode=0, get_srcSystem=lambda: 1, get_srcComponent=lambda: 1))
+        self.b.consume('HEARTBEAT', NS(base_mode=0, get_srcSystem=lambda: 3, get_srcComponent=lambda: 1))
         self.assertTrue(self.b.est.fault)  # Must restart; no automatic recovery.
 
     def test_prepare_requires_confirmed_surface_and_restarts_alignment_with_reset_counter(self):

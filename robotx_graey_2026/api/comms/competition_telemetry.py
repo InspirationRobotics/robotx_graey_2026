@@ -2,6 +2,7 @@
 import math
 
 from ..gui.navigation_view import NavigationView
+from ..pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 from . import competition_codec as rx
 
 
@@ -19,7 +20,8 @@ class CompetitionTelemetry:
         self.view.consume(kind, message)
         if self.view.session != session:
             self.hae = self.hae_at = self.gps_stamp = None
-        if kind == 'GPS_RAW_INT' and message.get_srcSystem() == 1 and message.get_srcComponent() == 1:
+        if (kind == 'GPS_RAW_INT' and message.get_srcSystem() == FCU_SYSTEM
+                and message.get_srcComponent() == FCU_COMPONENT):
             # The MAVLink 2 extension defaults to 0 when omitted: do not invent HAE.
             alt = getattr(message, 'alt_ellipsoid', 0)
             stamp = message.time_usec

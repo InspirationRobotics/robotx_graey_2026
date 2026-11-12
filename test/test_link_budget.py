@@ -11,7 +11,7 @@ class ReceiveBudgetTests(unittest.TestCase):
         path=Path(__file__).parents[1]/'robotx_graey_2026/api/pixhawk/mavlink.py'
         tree=ast.parse(path.read_text())
         tree.body=[n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=='Link']
-        ns=dict(time=SimpleNamespace(monotonic=lambda:0.))
+        ns=dict(time=SimpleNamespace(monotonic=lambda:0.),FCU_SYSTEM=3)
         exec(compile(tree,str(path),'exec'),ns)
         link=ns['Link'].__new__(ns['Link'])
         link.mav=SimpleNamespace(recv_match=Mock(return_value=SimpleNamespace(get_type=lambda:'HEARTBEAT')))

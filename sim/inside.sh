@@ -24,8 +24,8 @@ sleep 3
 
 # Graey's MAVProxy layout (scripts/start_mavproxy.sh), plus 14557/14558 for the
 # simulator's own helpers and QGroundControl on this computer.
-# QGC only when asked (QGC=1): the simulated sub is system 1, like the real Graey,
-# and QGC can't tell two system 1s apart when both are connected.
+# QGC only when asked (QGC=1): the simulated sub uses GRAEY system 3, so do not
+# connect it to the same QGC as the physical system-3 vehicle.
 QGC_OUT=""
 [ "${QGC:-0}" = "1" ] && QGC_OUT="--out=udp:host.docker.internal:14550"
 mavproxy.py --master=tcp:127.0.0.1:5760 --daemon --non-interactive --state-basedir=$LOGS \

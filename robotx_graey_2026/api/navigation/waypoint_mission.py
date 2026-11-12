@@ -18,6 +18,7 @@ from robotx_graey_2026.api.navigation.pipeline_recording import PipelineRecordin
 from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
 from robotx_graey_2026.api.navigation.surface_measurement import SurfaceMeasurement
 from robotx_graey_2026.api.navigation.surface_control import surface_velocity,SurfaceLeg,gentle_horizontal,StabilizeSurfaceControl
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL, MODE_POSHOLD, MODE_STABILIZE
 from robotx_graey_2026.api.comms.run_gate import RunGate
 
@@ -178,7 +179,7 @@ class WaypointMission(Node):
 
     def pump(self):
         def receive(kind, m):
-            if m.get_srcSystem() != 1 or m.get_srcComponent() != 1:
+            if m.get_srcSystem() != FCU_SYSTEM or m.get_srcComponent() != FCU_COMPONENT:
                 return
             if kind=='PARAM_VALUE' and m.param_id.rstrip('\x00') in self.SHALLOW_LIMITS:
                 self.nav_limits[m.param_id.rstrip('\x00')]=(time.monotonic(),m.param_value)

@@ -4,6 +4,7 @@ from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pymavlink import mavutil
 from robotx_graey_2026.api.navigation.waypoint_logic import ne_to_geo, geo_to_ne
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 
 ROOT=Path(__file__).resolve().parents[1]
 STATE={'truth':None,'plan':None,'error':None,'origin':None}
@@ -74,7 +75,7 @@ def truth_loop(stop):
             now=time.monotonic()
             if now-last>2:
                 link.mav.heartbeat_send(6,8,0,0,0)
-                link.mav.command_long_send(1,1,511,0,mavutil.mavlink.MAVLINK_MSG_ID_SIM_STATE,100000,0,0,0,0,0)
+                link.mav.command_long_send(FCU_SYSTEM,FCU_COMPONENT,511,0,mavutil.mavlink.MAVLINK_MSG_ID_SIM_STATE,100000,0,0,0,0,0)
                 last=now
             m=link.recv_match(type='SIM_STATE',blocking=True,timeout=.2)
             if m is None:continue

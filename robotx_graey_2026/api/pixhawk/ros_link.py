@@ -4,6 +4,7 @@ import json
 import threading
 import time
 from types import SimpleNamespace
+from .identity import FCU_COMPONENT, FCU_SYSTEM
 
 
 class RosTransport:
@@ -34,7 +35,8 @@ class RosTransport:
             if not 0<=time.monotonic()-stamp<.25:return
             frame=self.decoder.parse_char(bytes.fromhex(data['frame']))
             if frame is None:return
-            if frame.get_type()=='HEARTBEAT' and frame.get_srcSystem()==1 and frame.get_srcComponent()==1:
+            if (frame.get_type()=='HEARTBEAT' and frame.get_srcSystem()==FCU_SYSTEM
+                    and frame.get_srcComponent()==FCU_COMPONENT):
                 self.mav.flightmode=mavutil.mode_string_v10(frame)
             self.frames.append((stamp,frame))
         except (ValueError,TypeError,KeyError,mavutil.mavlink.MAVError):return

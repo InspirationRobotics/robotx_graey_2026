@@ -50,7 +50,8 @@ PARAM_FILE="$RUN_DIR/continuous.parm"
   python3 - "$PARAM_FILE" <<'PY'
 import sys
 from robotx_graey_2026.api.navigation.odometry_profile import PROFILE, SHALLOW_LIMITS
-p=dict(PROFILE, SYSID_THISMAV=1, SIM_FLOAT_EXCEPT=0, EK2_ENABLE=0, SCR_ENABLE=0, SIM_GPS_DISABLE=0, LOG_DISARMED=1,
+from robotx_graey_2026.api.pixhawk.identity import FCU_SYSTEM
+p=dict(PROFILE, SYSID_THISMAV=FCU_SYSTEM, SIM_FLOAT_EXCEPT=0, EK2_ENABLE=0, SCR_ENABLE=0, SIM_GPS_DISABLE=0, LOG_DISARMED=1,
        SIM_BARO_RND=0, SIM_BARO_DRIFT=0,
        **SHALLOW_LIMITS)
 open(sys.argv[1],'w').write('\n'.join(f'{k} {v}' for k,v in p.items()))
@@ -73,7 +74,7 @@ trap cleanup EXIT INT TERM
 
 (
   cd "$RUN_DIR"
-  "$SITL_BIN" -w "${CLOCK_ARGS[@]}" --model vectored --sysid 1 --home "${HOME_LAT:-32.9236125},${HOME_LON:--117.0385235},0,0" \
+  "$SITL_BIN" -w "${CLOCK_ARGS[@]}" --model vectored --sysid 3 --home "${HOME_LAT:-32.9236125},${HOME_LON:--117.0385235},0,0" \
     --defaults "$PARAM_FILE" --serial0 tcp:5850
 ) >"$LOG_DIR/ardusub.log" 2>&1 &
 echo $! > "$RUN_DIR/sitl.pid"
@@ -96,7 +97,8 @@ MAVPROXY_OUTPUTS=(
   --out=udpin:127.0.0.1:14559
 )
 # Do not feed the live QGC instance by default: SITL and the physical Cube
-# both use MAVLink system ID 1, which makes QGC alternate one vehicle marker.
+# SITL uses GRAEY system ID 3; do not feed it to the same QGC as the physical
+# vehicle because identical vehicle identities would still merge.
 # Set QGC_HOST explicitly only when using a separate, SITL-only QGC instance.
 if [[ -n "$QGC_HOST" ]]; then
   MAVPROXY_OUTPUTS+=(--out=udpout:"$QGC_HOST":14550)

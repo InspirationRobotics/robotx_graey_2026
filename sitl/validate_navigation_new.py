@@ -9,6 +9,7 @@ import subprocess
 import time
 import urllib.request
 import uuid
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 
 
 def api(body=None,path="/api/waypoint"):
@@ -88,19 +89,19 @@ def main():
                                     result['dvl_error_rejected']=True
                                 if args.total_loss or args.sensor_errors:
                                     if elapsed>(12 if args.sensor_errors else 2) and gps_off_at is None:
-                                        simlink.mav.param_set_send(1,1,b'SIM_GPS1_ENABLE',0.,9)
-                                        simlink.mav.param_set_send(1,1,b'SIM_GPS_DISABLE',1.,9)
+                                        simlink.mav.param_set_send(FCU_SYSTEM,FCU_COMPONENT,b'SIM_GPS1_ENABLE',0.,9)
+                                        simlink.mav.param_set_send(FCU_SYSTEM,FCU_COMPONENT,b'SIM_GPS_DISABLE',1.,9)
                                         gps_off_at=time.monotonic()
                                     if gps_off_at and not (b.get('estimator_health') or {}).get('sensors',{}).get('gps'):
                                         result['gps_loss_observed']=True
                                     if gps_off_at and not gps_restored and time.monotonic()-gps_off_at>5:
-                                        simlink.mav.param_set_send(1,1,b'SIM_GPS1_ENABLE',1.,9)
-                                        simlink.mav.param_set_send(1,1,b'SIM_GPS_DISABLE',0.,9)
+                                        simlink.mav.param_set_send(FCU_SYSTEM,FCU_COMPONENT,b'SIM_GPS1_ENABLE',1.,9)
+                                        simlink.mav.param_set_send(FCU_SYSTEM,FCU_COMPONENT,b'SIM_GPS_DISABLE',0.,9)
                                         gps_restored=True
                                     if args.total_loss and gps_restored and elapsed>14 and not total_started:
                                         faults.publish(String(data=json.dumps(dict(vn=20.,dvl=20.))))
-                                        simlink.mav.param_set_send(1,1,b'SIM_GPS1_ENABLE',0.,9)
-                                        simlink.mav.param_set_send(1,1,b'SIM_GPS_DISABLE',1.,9)
+                                        simlink.mav.param_set_send(FCU_SYSTEM,FCU_COMPONENT,b'SIM_GPS1_ENABLE',0.,9)
+                                        simlink.mav.param_set_send(FCU_SYSTEM,FCU_COMPONENT,b'SIM_GPS_DISABLE',1.,9)
                                         total_started=True
                                 else:
                                     for name,start in [('dvl',2),('vn',12)]:

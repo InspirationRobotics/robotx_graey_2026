@@ -38,6 +38,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 from robotx_graey_2026.api.pixhawk.mavlink import Link  # noqa: E402 - sets up pymavlink
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM  # noqa: E402
 
 SE_CHANNEL = 9              # SE, momentary (mission_base.py's rc_start_channel)
 RC_HIGH = 1700              # pressed above this (mission_base.py's rc_high)
@@ -116,8 +117,9 @@ class Fcu:
         end = time.monotonic() + timeout
         while True:
             got = []
-            self.link.drain(lambda kind, m: got.append(m) if kind in types and m.get_srcSystem() == 1
-                            and m.get_srcComponent() == 1 else None)
+            self.link.drain(lambda kind, m: got.append(m) if kind in types
+                            and m.get_srcSystem() == FCU_SYSTEM
+                            and m.get_srcComponent() == FCU_COMPONENT else None)
             if got:
                 return got[0]
             if time.monotonic() >= end:

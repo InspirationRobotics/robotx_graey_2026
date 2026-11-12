@@ -18,9 +18,8 @@ from .competition_telemetry import CompetitionTelemetry
 from .mission_radio import (Assembler, KIND_REQUEST, KIND_RESPONSE, PAYLOAD_TYPE,
                             encode, revision)
 from ..gui.navigation_view import NAVIGATION_VIEW_KINDS
+from ..pixhawk.identity import COMPANION_COMPONENT, COMPANION_SYSTEM
 
-COMPANION_SYSTEM = 43
-COMPANION_COMPONENT = 201
 OCS_SYSTEM = 250
 OCS_COMPONENT = 190
 LAPTOP_SYSTEM = 254
@@ -180,6 +179,21 @@ class HeartbeatCapture:
     def update_status(self, **value): self.value = value
 
 
+class BeaconGate:
+    """Change-driven private status; standard RXL heartbeat carries normal liveness."""
+    def __init__(self):
+        self.wire = None
+        self.sent_at = -math.inf
+
+    def due(self, event, now, heartbeat_available):
+        wire = json.dumps(event, sort_keys=True, separators=(',', ':'))
+        period = 5.0 if heartbeat_available else 1.0
+        if wire == self.wire and now-self.sent_at < period:
+            return False
+        self.wire, self.sent_at = wire, now
+        return True
+
+
 def build_heartbeat(value):
     """Build one truthful UUV RXL heartbeat or explain why it cannot be sent."""
     if not isinstance(value, dict):
@@ -231,6 +245,7 @@ def main(args=None):
             self.heartbeat_reason = 'waiting for measured competition telemetry'
             self.last_run = None
             self.beacon_id = 0xfffffffe
+            self.beacon = BeaconGate()
             self.create_timer(.02, self._pump)
             self.create_timer(.5, self._heartbeat)
             self.create_timer(1., self._publish)
@@ -323,8 +338,12 @@ def main(args=None):
             event = dict(event='radio_status', ok=self.error is None,
                          mission=self.backend.status(), error=self.error,
                          heartbeat_reason=self.heartbeat_reason)
-            for chunk in encode(event, self.beacon_id, KIND_RESPONSE):
-                self._send_tunnel(0, 0, PAYLOAD_TYPE, chunk)
+            # The standard RXL heartbeat is the normal 2 Hz liveness source, as it
+            # is for Crusader's OCS path.  Private application status is sent on
+            # change and as a slow keepalive, not duplicated continuously.
+            if self.beacon.due(event, now, self.heartbeat_reason is None):
+                for chunk in encode(event, self.beacon_id, KIND_RESPONSE):
+                    self._send_tunnel(0, 0, PAYLOAD_TYPE, chunk)
 
         def _publish(self):
             self.status_pub.publish(String(data=json.dumps(dict(

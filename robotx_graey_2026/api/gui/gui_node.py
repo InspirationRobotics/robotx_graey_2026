@@ -50,6 +50,7 @@ from robotx_graey_2026.api.gui.calibration_jobs import CalibrationJobs, ServiceQ
 
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.process_ownership import executable_pids
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 from robotx_graey_2026.api.pixhawk.mavlink import Link, mavutil
 
 
@@ -206,7 +207,7 @@ RAW_RX_DEPTH = 50
 
 
 class SummaryFrame:
-    """A gateway summary, read like the pymavlink message it came from (the Cube: system 1, component 1)."""
+    """A gateway summary, read like the pymavlink message it came from (the configured GRAEY Cube)."""
     def __init__(self, kind, fields):
         self.__dict__.update(fields)
         self._kind = kind
@@ -215,10 +216,10 @@ class SummaryFrame:
         return self._kind
 
     def get_srcSystem(self):
-        return 1
+        return FCU_SYSTEM
 
     def get_srcComponent(self):
-        return 1
+        return FCU_COMPONENT
 
 
 waypoint_process = None

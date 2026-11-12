@@ -17,6 +17,7 @@ import time
 from types import SimpleNamespace as NS
 
 from robotx_graey_2026.api.navigation.odometry_profile import PROFILE
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 COMPASS_PARAMS=tuple(PROFILE)+('COMPASS_LEARN',)
 from robotx_graey_2026.api.pixhawk.mavlink import Link
 
@@ -29,7 +30,7 @@ def main():
     binary=Path(os.environ.get('SITL_BIN',str(root.parent/'output/gps-sitl-2026-10-02/ardusub')))
     shutil.copy2(binary,stage/'ardusub');(stage/'ardusub').chmod(0o700)
     probe=socket.socket();probe.bind(('127.0.0.1',6170));probe.close()
-    defaults=dict(PROFILE,COMPASS_ENABLE=1,COMPASS_USE=0,COMPASS_LEARN=0,EK2_ENABLE=0)
+    defaults=dict(PROFILE,SYSID_THISMAV=FCU_SYSTEM,COMPASS_ENABLE=1,COMPASS_USE=0,COMPASS_LEARN=0,EK2_ENABLE=0)
     (stage/'defaults.parm').write_text('\n'.join(f'{k} {v}' for k,v in defaults.items()))
     path=root/'robotx_graey_2026/api/navigation/fused_nav_bridge.py'
     tree=ast.parse(path.read_text());cls=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=='FusedNavBridge')
@@ -58,7 +59,7 @@ def main():
                 if now>=poll:
                     namespace['request'](node);poll=now+1.
                 m=link.mav.recv_match(blocking=True,timeout=.02)
-                if m is not None and (m.get_srcSystem(),m.get_srcComponent())==(1,1):
+                if m is not None and (m.get_srcSystem(),m.get_srcComponent())==(FCU_SYSTEM,FCU_COMPONENT):
                     if m.get_type()=='HEARTBEAT' and m.base_mode&128:raise RuntimeError('Simulator unexpectedly armed')
                     if m.get_type()=='PARAM_VALUE':
                         key=m.param_id.rstrip('\x00')

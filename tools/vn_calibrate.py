@@ -12,6 +12,7 @@ import time
 
 from robotx_graey_2026.api.process_ownership import ProcessOwnership
 from robotx_graey_2026.api.navigation.vn_protocol import transact, relative_heading
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 
 
 def gravity_face(ypr):
@@ -39,7 +40,8 @@ def main():
         try:
             link.mav.heartbeat_send(6, 8, 0, 0, 0)
             heartbeat = link.recv_match(type='HEARTBEAT', blocking=True, timeout=5)
-            if not heartbeat or (heartbeat.get_srcSystem(), heartbeat.get_srcComponent()) != (1, 1) or heartbeat.base_mode & 128:
+            if (not heartbeat or (heartbeat.get_srcSystem(), heartbeat.get_srcComponent())
+                    != (FCU_SYSTEM, FCU_COMPONENT) or heartbeat.base_mode & 128):
                 raise RuntimeError('Fresh disarmed Cube heartbeat required')
             last_disarmed = time.monotonic()
             path = Path(args.output)
@@ -70,7 +72,9 @@ def main():
                             h = link.recv_match(blocking=False)
                             if h is None:
                                 break
-                            if h.get_type() == 'HEARTBEAT' and (h.get_srcSystem(), h.get_srcComponent()) == (1, 1):
+                            if (h.get_type() == 'HEARTBEAT' and
+                                    (h.get_srcSystem(), h.get_srcComponent()) ==
+                                    (FCU_SYSTEM, FCU_COMPONENT)):
                                 if h.base_mode & 128:
                                     raise RuntimeError('Cube armed; calibration stopped')
                                 last_disarmed = time.monotonic()

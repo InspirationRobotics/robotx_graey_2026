@@ -14,6 +14,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from pymavlink import mavutil
 from robotx_graey_2026.api.gui.navigation_view import NavigationView
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 
 
 def audit(path):
@@ -45,7 +46,7 @@ def audit(path):
                 odom_last = now
             if kind == 'COMMAND_LONG' and msg.command == 42007:
                 source_commands += 1
-            if msg.get_srcSystem() != 1 or msg.get_srcComponent() != 1:
+            if msg.get_srcSystem() != FCU_SYSTEM or msg.get_srcComponent() != FCU_COMPONENT:
                 continue
             if kind == 'PARAM_VALUE' and str(msg.param_id).startswith(('EK3_', 'GPS_', 'VISO_')):
                 params[str(msg.param_id)].add(msg.param_value)

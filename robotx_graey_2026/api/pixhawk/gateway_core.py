@@ -1,5 +1,6 @@
 """Central FCU admission rules. No ROS or I/O; ArduSub-specific command ownership."""
 import math
+from .identity import FCU_COMPONENT, FCU_SYSTEM
 
 # 47 MISSION_ACK and 51 MISSION_REQUEST_INT (Ruth, Nov 10): with 43 they read the QGC plan stored on the Cube
 # (tools/survey_run.py). Uploading still cannot pass: 44 MISSION_COUNT and 73 MISSION_ITEM_INT are not admitted.
@@ -43,7 +44,8 @@ class GatewayPolicy:
                     and destination_ok and ptype in RADIO_PAYLOAD_TYPES
                     and type(length) is int and 0<length<=128)
             return allowed, None if allowed else 'invalid companion radio tunnel'
-        if getattr(message,'target_system',1) not in (0,1) or getattr(message,'target_component',1) not in (0,1):
+        if (getattr(message,'target_system',FCU_SYSTEM) not in (0,FCU_SYSTEM)
+                or getattr(message,'target_component',FCU_COMPONENT) not in (0,FCU_COMPONENT)):
             return False,'FCU target must be the configured Cube'
         mid=message.get_msgId()
         if mid==0:return False,'gateway owns component heartbeat'

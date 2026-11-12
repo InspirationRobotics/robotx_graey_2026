@@ -5,7 +5,7 @@
 #   WATER_DEPTH=12 sim/run.sh  harbor depth
 #
 # Then (with QGC=1): QGroundControl connects by itself (UDP 14550) - leave QGC=0
-# whenever the real Graey is connected, both are MAVLink system 1; GUI at http://localhost:8090;
+# whenever the real Graey is connected, both are MAVLink system 3; GUI at http://localhost:8090;
 # sonar map (simulated Ping360 and pipeline) at http://localhost:8095/map.
 # PIPE_N / PIPE_E / PIPE_HDG move the simulated pipeline (metres from home, degrees).
 # SIM_WORLD=pool: Ruth's ~0.9 m pool (use WATER_DEPTH=0.9), walls POOL_L x POOL_W m with

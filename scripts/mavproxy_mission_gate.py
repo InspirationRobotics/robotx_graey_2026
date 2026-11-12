@@ -5,6 +5,7 @@ import shutil
 import socket
 import types
 from mission_input_gate import MissionInputGate
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 
 def install_continuous_broadcast():
     """Keep subnet outputs broadcasting even after a QGC client replies."""
@@ -32,7 +33,12 @@ def hook_source(source):
     needle='            output.write(m.get_msgbuf())'
     if source.count(needle)!=1:
         raise SystemExit('Unsupported MAVProxy ingress: refusing unfiltered startup')
-    source=source.replace(needle,'            if not _graey_input_gate.allow(m):\n                continue\n            if _graey_input_gate.takeover_requested:\n                output.mav.set_mode_send(1, 1, 19)\n                _graey_input_gate.takeover_requested=False\n'+needle)
+    takeover=('            if not _graey_input_gate.allow(m):\n'
+              '                continue\n'
+              '            if _graey_input_gate.takeover_requested:\n'
+              f'                output.mav.set_mode_send({FCU_SYSTEM}, {FCU_COMPONENT}, 19)\n'
+              '                _graey_input_gate.takeover_requested=False\n')
+    source=source.replace(needle,takeover+needle)
     return source
 
 

@@ -2,6 +2,7 @@
 import json
 import time
 from .gateway_core import GatewayPolicy
+from .identity import FCU_COMPONENT, FCU_SYSTEM
 
 
 def main():
@@ -55,7 +56,8 @@ def main():
             self.rx.publish(String(data=json.dumps(data)))
             self.received+=1
             name={'GLOBAL_POSITION_INT':'pose','ATTITUDE':'attitude','HEARTBEAT':'status','RC_CHANNELS':'rc_channels'}.get(kind)
-            if name and message.get_srcSystem()==1 and message.get_srcComponent()==1:
+            if (name and message.get_srcSystem()==FCU_SYSTEM
+                    and message.get_srcComponent()==FCU_COMPONENT):
                 self.semantic[name].publish(String(data=json.dumps(dict(received_monotonic=now,fields=message.to_dict()),allow_nan=True)))
 
         def tx(self,msg):

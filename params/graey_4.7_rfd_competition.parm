@@ -1,0 +1,23 @@
+# GRAEY competition RFD profile, ArduSub 4.7 parameter names.
+#
+# Crusader parity: the shared radio carries bounded companion application
+# TUNNEL traffic, not a second copy of full autopilot telemetry.  QGC and FCU
+# telemetry remain on WiFi/tether.  MAVLink routing and the autopilot's fixed
+# heartbeat are not disabled by setting these generated stream groups to zero.
+# Apply only with GRAEY killed/disarmed. System 3 is the approved GRAEY Cube
+# identity; companion radio application remains system 43.
+# Reboot the Cube once to clear runtime message intervals.
+SYSID_THISMAV 3
+SERIAL1_PROTOCOL 2
+SERIAL1_BAUD 115
+BRD_SER1_RTSCTS 0
+# Minimal QGC display on the shared RFD: 1 Hz attitude, position and status.
+# Raw sensors, RC feedback and the other broad groups remain disabled.
+MAV2_EXTRA1 1
+MAV2_EXTRA2 0
+MAV2_EXTRA3 0
+MAV2_POSITION 1
+MAV2_RAW_SENS 0
+MAV2_RC_CHAN 0
+MAV2_EXT_STAT 1
+
