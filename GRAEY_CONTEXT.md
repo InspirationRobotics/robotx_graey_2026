@@ -1746,3 +1746,12 @@ main, origin/main and freshly queried online main matched after publication.
 This supersedes the earlier local/not-pushed status only. GRAEY was offline;
 no Jetson deployment, firmware/parameter change, radio configuration, physical
 RFD test, mode change, arming or propulsion occurred.
+
+Laptop-operability follow-up: GRAEY main7d5f54c made `GRAEY_GUI.cmd` verify its
+RFD pymavlink dependency and use the shared OCS environment/fallback. Shared
+rx26_ocs mainc70eb76 pinned pymavlink2.4.50 and pyserial3.5 and changed
+`FLEET_LINK.cmd` to use the repository `.venv`, removing the unconfigured global
+Python dependency. An isolated fleet_link startup with radio/WiFi inputs disabled
+successfully exposed QGC14570, GRAEY GUI14572 and UUV1 companion43/autopilot3 on
+the local status endpoint. This verifies laptop process/config initialization,
+not the physical COM port or RFD path.
