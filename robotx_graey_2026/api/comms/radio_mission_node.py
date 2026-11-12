@@ -46,14 +46,16 @@ def validate_mission(value):
     if not isinstance(value, dict):
         raise ValueError('mission must be an object')
     kind = value.get('kind')
-    if kind not in ('waypoints', 'pipeline', 'simple_sequence', 'survey'):
+    if kind not in ('waypoints', 'pipeline', 'simple_sequence', 'survey',
+                    'dive_here', 'pool_dive', 'surface_route',
+                    'dock_pipeline_dock'):
         raise ValueError('unknown GRAEY mission kind')
     if type(value.get('competition', False)) is not bool:
         raise ValueError('competition must be a boolean')
     points = value.get('points', [])
-    if kind == 'simple_sequence':
+    if kind in ('simple_sequence','dive_here','pool_dive'):
         if points not in (None, []):
-            raise ValueError('5-2-5 does not accept geographic points')
+            raise ValueError(kind+' does not accept geographic points')
         points = []
     else:
         if not isinstance(points, list) or not 1 <= len(points) <= 256:
@@ -62,6 +64,8 @@ def validate_mission(value):
             raise ValueError(kind+' requires at least a start and end point')
         if kind == 'pipeline' and len(points) != 2:
             raise ValueError('pipeline requires exactly a start and end point')
+        if kind in ('surface_route','dock_pipeline_dock') and len(points)>15:
+            raise ValueError(kind+' accepts at most 15 points')
         clean = []
         for item in points:
             if not isinstance(item, dict):
@@ -74,7 +78,24 @@ def validate_mission(value):
                 raise ValueError('invalid mission coordinates')
             clean.append(dict(item, lat=float(lat), lon=float(lon)))
         points = clean
-    return dict(value, kind=kind, competition=value.get('competition', False), points=points)
+    clean=dict(value,kind=kind,competition=value.get('competition',False),points=points)
+    dive=value.get('dive',{})
+    if kind in ('dive_here','pool_dive','dock_pipeline_dock'):
+        if not isinstance(dive,dict) or set(dive)-{'depth_m','altitude_m','max_depth_m'}:
+            raise ValueError('invalid dive settings')
+        numeric={}
+        for key,item in dive.items():
+            if isinstance(item,bool) or not isinstance(item,(int,float)) or not math.isfinite(item) or item<=0:
+                raise ValueError('invalid '+key)
+            numeric[key]=float(item)
+        if kind=='pool_dive':
+            if set(numeric)!={'depth_m'}:raise ValueError('pool dive requires depth_m only')
+        else:
+            numeric.setdefault('altitude_m',3.5)
+            if 'depth_m' in numeric:raise ValueError(kind+' uses DVL altitude and max depth, not depth_m')
+            if 'max_depth_m' not in numeric:raise ValueError(kind+' requires max_depth_m')
+        clean['dive']=numeric
+    return clean
 
 
 class MissionBackend:
@@ -86,9 +107,12 @@ class MissionBackend:
         self.selected = None
         self.active = None
 
-    def _post(self, body):
-        req = urllib.request.Request(f'http://127.0.0.1:{self.gui_port}/api/waypoint',
-            data=json.dumps(body).encode(), headers={'Content-Type': 'application/json'}, method='POST')
+    def _request(self, path, body=None):
+        if path not in ('/api/waypoint','/api/calibration','/api/recording'):
+            raise ValueError('unsupported local GRAEY operation')
+        req = urllib.request.Request(f'http://127.0.0.1:{self.gui_port}'+path,
+            data=None if body is None else json.dumps(body).encode(),
+            headers={'Content-Type': 'application/json'}, method='GET' if body is None else 'POST')
         try:
             with self.opener(req, timeout=8) as reply:
                 result = json.loads(reply.read().decode())
@@ -101,6 +125,17 @@ class MissionBackend:
         if not isinstance(result, dict) or result.get('ok') is False:
             raise ValueError((result or {}).get('msg', 'GRAEY mission API refused request'))
         return result
+
+    def _post(self, body):return self._request('/api/waypoint',body)
+
+    def _radio_mission(self, mission):
+        kind=mission['kind'];dive=mission.get('dive',{});points=mission.get('points',[])
+        if kind=='dive_here':return dict(kind='dive',operator_kind=kind,dive=dive)
+        if kind=='pool_dive':return dict(kind='dive',operator_kind=kind,dive=dive)
+        if kind=='surface_route':return dict(kind='route',operator_kind=kind,points=[[p['lat'],p['lon']] for p in points])
+        if kind=='dock_pipeline_dock':
+            return dict(kind='full',operator_kind=kind,dive=dive,points=[[p['lat'],p['lon']] for p in points])
+        raise ValueError('not a Chris-derived radio mission')
 
     def store(self, mission):
         mission = validate_mission(mission)
@@ -118,6 +153,9 @@ class MissionBackend:
         m = self.selected['mission']
         if m['kind'] == 'simple_sequence':
             result = self._post(dict(action='simple_start', competition=m['competition']))
+        elif m['kind'] in ('dive_here','pool_dive','surface_route','dock_pipeline_dock'):
+            result=self._post(dict(action='radio_mission_start',mission=self._radio_mission(m),
+                                   competition=m['competition']))
         elif m['kind'] == 'survey':
             result = self._post(dict(action='survey_start', points=m['points'], dry=False,
                                      competition=m['competition']))
@@ -142,17 +180,31 @@ class MissionBackend:
         return dict(result, run_id=active['run_id'], state='STOP_REQUESTED')
 
     def note_waypoint(self, status):
+        if (self.active is None and isinstance(status,dict)
+                and status.get('competition') is True
+                and isinstance(status.get('run_id'),str) and status['run_id']
+                and status.get('stage') not in ('COMPLETE','ABORTED')):
+            plan=status.get('plan') if isinstance(status.get('plan'),dict) else {}
+            self.active=dict(revision=None,run_id=status['run_id'],
+                kind=plan.get('operator_kind') or plan.get('kind') or 'waypoints',
+                competition=True,prepared_at=self.clock(),source='ip',state=status.get('stage'))
         active=self.active
         if (active and active['kind']!='survey' and isinstance(status,dict)
-                and status.get('run_id')==active['run_id'] and status.get('stage') in ('COMPLETE','ABORTED')):
-            self.active=None
+                and status.get('run_id')==active['run_id']):
+            active['state']=status.get('stage',active.get('state'))
+            if status.get('stage') in ('COMPLETE','ABORTED'):self.active=None
 
     def note_survey(self, status):
+        if (self.active is None and isinstance(status,dict)
+                and status.get('competition') is True and status.get('running') is True
+                and isinstance(status.get('run_id'),str) and status['run_id']):
+            self.active=dict(revision=None,run_id=status['run_id'],kind='survey',
+                competition=True,prepared_at=self.clock(),source='ip',state='PREPARING')
         active=self.active
         if (active and active['kind']=='survey' and isinstance(status,dict)
-                and status.get('run_id')==active['run_id'] and status.get('running') is False
-                and status.get('result') is not None):
-            self.active=None
+                and status.get('run_id')==active['run_id']):
+            active['state']='RUNNING' if status.get('running') else status.get('result')
+            if status.get('running') is False and status.get('result') is not None:self.active=None
 
     def status(self):
         return dict(selected=None if self.selected is None else {
@@ -171,6 +223,23 @@ class MissionBackend:
             return self.abort(request.get('run_id'))
         if op == 'status':
             return self.status()
+        if op == 'navigation_prepare':
+            return self._request('/api/calibration',dict(action='prepare',confirmed=True,
+                surface_confirmed=request.get('surface_confirmed') is True,alignment_mode='gps'))
+        if op == 'record':
+            command=request.get('command')
+            if not isinstance(command,dict):raise ValueError('record command required')
+            return self._request('/api/recording',command)
+        if op == 'recording_status':
+            status=self._request('/api/recording')
+            # Keep normal RFD status bounded. Topic discovery is an IP/tether setup
+            # operation; start/stop and the active-session result remain available.
+            status.pop('topics',None)
+            return status
+        if op == 'abort_run':
+            run_id=request.get('run_id');kind=request.get('kind')
+            if not isinstance(run_id,str) or not run_id:raise ValueError('run_id required')
+            return self._post(dict(action='survey_stop' if kind=='survey' else 'abort',run_id=run_id))
         raise ValueError('unknown radio mission operation')
 
 
@@ -337,7 +406,7 @@ def main(args=None):
             # competition telemetry is incomplete. It never fabricates a heartbeat.
             event = dict(event='radio_status', ok=self.error is None,
                          mission=self.backend.status(), error=self.error,
-                         heartbeat_reason=self.heartbeat_reason)
+                         heartbeat_reason=self.heartbeat_reason,last_run=self.last_run)
             # The standard RXL heartbeat is the normal 2 Hz liveness source, as it
             # is for Crusader's OCS path.  Private application status is sent on
             # change and as a slow keepalive, not duplicated continuously.

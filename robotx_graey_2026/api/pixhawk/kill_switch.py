@@ -76,9 +76,10 @@ REQUEST_TOPIC = '/graey/control_watchdog/request'
 REPLY_TOPIC = '/graey/control_watchdog/reply'
 STATUS_TOPIC = '/graey/control_watchdog/status'
 
-RF_RESETTABLE = {'STARTUP', 'SOURCE_CHANGED', 'RF_LOST', 'FC_LOST'}
+RF_RESETTABLE = {'STARTUP', 'SOURCE_CHANGED', 'RF_LOST', 'FC_LOST', 'MISSION_DONE'}
 TETHER_RESETTABLE = {
-    'STARTUP', 'SOURCE_CHANGED', 'TETHER_LOST', 'FC_LOST', 'SA_KILL'
+    'STARTUP', 'SOURCE_CHANGED', 'TETHER_LOST', 'FC_LOST', 'SA_KILL',
+    'MISSION_DONE'
 }
 
 
@@ -622,6 +623,17 @@ class KillSwitch(Node):
                     'Vehicle remains disarmed. Use a new arm action.'
                 )
                 self.get_logger().warn(message)
+
+        elif request.get('action') == 'kill':
+            # Mission completion may only make propulsion safer.  It cannot arm,
+            # restore ESC power, or clear an earlier inhibit.
+            self.latch('MISSION_DONE')
+            self.stop_outputs(force_manual=True)
+            ok = True
+            message = (
+                'Mission finished: ESC power inhibited. '
+                'Use the normal selected-source recovery procedure before reuse.'
+            )
 
         response = json.dumps({
             'id': request_id,

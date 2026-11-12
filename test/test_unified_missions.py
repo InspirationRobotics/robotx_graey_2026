@@ -17,7 +17,9 @@ class TestMissionLibrary(unittest.TestCase):
         self.points=[dict(kind='waypoint',lat=1.28,lon=103.85)]
     def test_round_trip_all_three_mission_choices(self):
         for kind in ('waypoints','pipeline','simple_sequence'):
-            points=self.points if kind=='waypoints' else [dict(kind='pipeline_start',lat=1.28,lon=103.85),dict(kind='pipeline_end',lat=1.281,lon=103.85)]
+            points=(self.points if kind=='waypoints' else
+                    [dict(kind='pipeline_start',lat=1.28,lon=103.85),dict(kind='pipeline_end',lat=1.281,lon=103.85)]
+                    if kind=='pipeline' else [])
             self.store.save(kind,dict(kind=kind,competition=True,points=points))
             self.assertEqual(self.store.get(kind)['kind'],kind)
         self.assertEqual(len(self.store.list()),3)

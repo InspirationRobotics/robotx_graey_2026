@@ -4,15 +4,18 @@ import json
 import math
 import os
 import time
+import uuid
 from pathlib import Path
 
 from robotx_graey_2026.api.steady_node import SteadyNode as Node
-from std_msgs.msg import Bool, String
+from std_msgs.msg import Bool, Float32, String
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.gui.navigation_view import NavigationView
 from robotx_graey_2026.api.navigation.waypoint_logic import WaypointRun
 from robotx_graey_2026.api.navigation.guided_surface_mission import GuidedSurfaceRun
 from robotx_graey_2026.api.navigation.simple_sequence import SimpleSequenceRun
+from robotx_graey_2026.api.navigation.dive_spin import DiveSpinRun
+from robotx_graey_2026.api.navigation.radio_route import RadioRouteRun
 from robotx_graey_2026.api.navigation.competition_route import CompetitionRouteRun
 from robotx_graey_2026.api.navigation.pipeline_recording import PipelineRecording
 from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
@@ -50,7 +53,11 @@ class WaypointMission(Node):
         self.run_gate=RunGate(plan.get('competition',False))
         self.competition_hold=None
         if plan.get('mode','surface')!='surface':raise ValueError('Only surface missions are supported')
-        self.logic = (SimpleSequenceRun if plan.get('kind') == 'simple_sequence' else CompetitionRouteRun if 'points' in plan else GuidedSurfaceRun)(plan,cfg['run_id'],time.monotonic())
+        self.logic = (DiveSpinRun if plan.get('kind') == 'dive_spin' else
+                      RadioRouteRun if plan.get('kind') == 'radio_route' else
+                      SimpleSequenceRun if plan.get('kind') == 'simple_sequence' else
+                      CompetitionRouteRun if 'points' in plan else
+                      GuidedSurfaceRun)(plan,cfg['run_id'],time.monotonic())
         self.result_file = cfg['result_file']
         self.recorder = (PipelineRecording(Path(self.result_file).parent if self.result_file else Path.home()/'robotx_ws/logs', cfg['run_id'])
                          if isinstance(self.logic, CompetitionRouteRun) and not self.sim and plan.get('recording_mode','automatic')=='automatic' else None)
@@ -60,6 +67,7 @@ class WaypointMission(Node):
         self.bridge = {}
         self.bridge_time = -math.inf
         self.supervisor_time = self.safety_time = -math.inf
+        self.altitude, self.altitude_time = None, -math.inf
         self.aborted, self.written = False, False
         self.sequence, self.stamps = 0, {}
         self.nav_limits = {}
@@ -79,10 +87,13 @@ class WaypointMission(Node):
         self.task_pub=self.create_publisher(String,'/graey/comms/current_task',10)
         self.intent_pub = self.create_publisher(String, '/graey/navigation/intent', 10)
         self.auto_pub = self.create_publisher(Bool, '/graey/autonomy_active', 10)
+        self.kill_pub = self.create_publisher(String, '/graey/control_watchdog/request', 10)
+        self.kill_sent = -math.inf
         self.create_subscription(String, '/graey/navigation/status', self.on_status, 10)
         self.create_subscription(String, '/graey/navigation/bridge_status', self.on_bridge, 10)
         self.create_subscription(String, '/graey/control_watchdog/status', self.on_safety, 10)
         self.create_subscription(String, '/graey/waypoint/abort', self.on_abort, 10)
+        self.create_subscription(Float32, '/graey/dvl/altitude', self.on_altitude, 10)
         self.create_subscription(String,'/graey/comms/status',self.on_competition_status,10)
         self.create_timer(.02, self.pump)
         self.create_timer(.1, self.tick)
@@ -177,6 +188,26 @@ class WaypointMission(Node):
         if msg.data == self.logic.run_id:
             self.aborted = True
 
+    def on_altitude(self, msg):
+        self.altitude, self.altitude_time = msg.data, time.monotonic()
+
+    def request_kill(self, now):
+        """Ask the existing watchdog to inhibit propulsion after a terminal mission.
+
+        This request can only remove ESC permission.  The watchdog still validates
+        its current session/revision and owns the resulting MISSION_DONE inhibit.
+        """
+        control = self.safety
+        if (control.get('inhibit') or not 0 <= now-self.safety_time < 2
+                or now-self.kill_sent < .5):
+            return
+        self.kill_sent = now
+        self.kill_pub.publish(String(data=json.dumps(dict(
+            id=uuid.uuid4().hex, action='kill', session=control.get('session'),
+            revision=control.get('revision'), deadline=now+3.))))
+        self.get_logger().warning('MISSION_KILL_REQUEST '+json.dumps(dict(
+            run_id=self.logic.run_id, stage=self.logic.stage, reason=self.logic.reason)))
+
     def pump(self):
         def receive(kind, m):
             if m.get_srcSystem() != FCU_SYSTEM or m.get_srcComponent() != FCU_COMPONENT:
@@ -267,6 +298,10 @@ class WaypointMission(Node):
             local=ned, speed=math.hypot(*velocity[:2]) if velocity and all(v is not None for v in velocity) else math.inf,
             yaw=math.radians(att['rpy'][2]) if att and att['rpy'][2] is not None else None,
             depth=depth, origin=(origin['lat'], origin['lon'], origin['alt']) if origin else None,
+            altitude=(getattr(self,'altitude',None) if
+                      0 <= now-getattr(self,'altitude_time',-math.inf) < 1.
+                      and getattr(self,'altitude',None) is not None
+                      and self.altitude > 0 else None),
             global_healthy=glob.get('valid'),
             **{'global': geographic})
 
@@ -382,6 +417,7 @@ class WaypointMission(Node):
             elif action in ('arm', 'disarm'):
                 self.link.command(400, 1 if action == 'arm' else 0)
         if self.logic.stage in self.logic.terminal:self.release_surface_controls()
+        if getattr(self.logic,'kill_requested',False) and not self.sim:self.request_kill(now)
         if self.logic.stage=='ABORTED' and self.logic.abort_context is None:
             self.logic.abort_context=dict(telemetry_fresh=bool(o['fresh']),
                 navigation_hold_safe=o.get('navigation_hold_safe'),

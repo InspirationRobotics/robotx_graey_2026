@@ -47,6 +47,7 @@ mission_store = MissionStore(Path(os.environ.get('GRAEY_MISSION_DIR',str(Path.ho
 from robotx_graey_2026.api.gui.waypoint_api import WaypointAPI
 from robotx_graey_2026.api.gui.survey_launch import SurveyLauncher
 from robotx_graey_2026.api.gui.calibration_jobs import CalibrationJobs, ServiceQueue
+from robotx_graey_2026.api.navigation.radio_route import mission_plan as radio_mission_plan
 
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.process_ownership import executable_pids
@@ -307,11 +308,20 @@ def waypoint_request(body):
             raise ValueError('Current mission run ID required')
         waypoint_aborts.put(body['run_id'])
         return dict(ok=True, msg='Abort requested; verify MANUAL mode and take control')
-    if action not in ('start', 'simple_start'):
+    if action not in ('start', 'simple_start', 'radio_mission_start'):
         raise ValueError('Unknown waypoint action')
     cap = waypoint_capabilities()
     if action == 'simple_start':
         item = {'plan': {'kind': 'simple_sequence', 'mode': 'surface'}}
+    elif action == 'radio_mission_start':
+        item = {'plan': radio_mission_plan(body.get('mission'))}
+        if item['plan']['kind'] == 'radio_route' and not cap['enabled']:
+            raise ValueError('Live waypoint commissioning is not enabled (Start navigation on Sensors)')
+        if not cap['simulation']:
+            c = control_bridge.snapshot()
+            if not (c.get('online') and c.get('vehicle_fresh') and not c.get('inhibit')
+                    and not c.get('sa_active') and c.get('esc_commanded_on')):
+                raise ValueError('Control watchdog/ESC permission unavailable')
     else:
         if calibration_jobs is not None and calibration_jobs.snapshot().get('busy'):
             raise ValueError('Finish or cancel navigation preparation before starting a mission')
@@ -896,6 +906,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/missions':
                 action=body.get('action')
                 if action=='save':result=mission_store.save(body.get('name'),body.get('mission'))
+                elif action=='load':result=mission_store.load(body.get('mission'))
                 elif action=='delete':mission_store.delete(body.get('name'));result=None
                 else:raise ValueError('Unknown mission-library action')
                 self.reply_json(200,dict(ok=True,mission=result,missions=mission_store.list()))
@@ -1021,7 +1032,10 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == '/api/missions':
             try:
                 name=query.get('name',[None])[0]
-                self.reply_json(200,dict(ok=True,mission=mission_store.get(name)) if name else dict(ok=True,missions=mission_store.list()))
+                selected=query.get('selected',['0'])[0]=='1'
+                self.reply_json(200,dict(ok=True,selected=mission_store.selected()) if selected else
+                    dict(ok=True,mission=mission_store.get(name)) if name else
+                    dict(ok=True,missions=mission_store.list()))
             except (ValueError,OSError) as exc:self.reply_json(404,dict(ok=False,msg=str(exc)))
             return
         if u.path.startswith('/api/run/'):

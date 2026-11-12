@@ -72,6 +72,33 @@ class BackendTests(unittest.TestCase):
         self.backend.note_waypoint(dict(run_id='run-1',stage='COMPLETE'))
         self.assertIsNone(self.backend.active)
 
+    def test_ip_prepared_competition_mission_is_claimed_for_rfd_runstart(self):
+        self.backend.note_waypoint(dict(run_id='ip-run',stage='WAIT_RUN_START',competition=True,
+            plan=dict(kind='radio_route',operator_kind='surface_route')))
+        self.assertEqual(self.backend.active['source'],'ip')
+        self.assertEqual(self.backend.active['kind'],'surface_route')
+        event,ack=accept_run_start(250,190,43,rx.pack_run_start(run_id=12),4,
+                                   self.backend.active,1.)
+        self.assertEqual(event['run_id'],12)
+        self.assertIsNotNone(ack)
+
+    def test_noncompetition_ip_mission_is_not_claimed(self):
+        self.backend.note_waypoint(dict(run_id='local',stage='GUIDED',competition=False,
+                                        plan=dict(kind='radio_route')))
+        self.assertIsNone(self.backend.active)
+
+    def test_ip_survey_is_claimed_and_terminal_result_releases_it(self):
+        status=dict(run_id='survey-ip',running=True,competition=True)
+        self.backend.note_survey(status)
+        self.assertEqual(self.backend.active['kind'],'survey')
+        self.backend.note_survey(dict(status,running=False,result='DONE'))
+        self.assertIsNone(self.backend.active)
+
+    def test_recording_status_drops_topic_catalogue_for_rfd(self):
+        self.backend._request=lambda path,body=None:dict(session={'active':True},topics=[{'name':'/large'}])
+        self.assertEqual(self.backend.handle(dict(op='recording_status')),
+                         dict(session={'active':True}))
+
 
 class RunStartTests(unittest.TestCase):
     def test_early_start_is_not_consumed(self):
@@ -125,6 +152,29 @@ class HeartbeatTests(unittest.TestCase):
 
 
 class LaptopClientTests(unittest.TestCase):
+    class Tunnel:
+        def __init__(self,ptype,payload,system=43,component=201):
+            self.payload_type=ptype;self.payload_length=len(payload);self.payload=payload
+            self.target_system=0;self.target_component=0
+            self.system,self.component=system,component
+        def get_srcSystem(self):return self.system
+        def get_srcComponent(self):return self.component
+
+    def test_decoded_standard_uuv_heartbeat_establishes_link_and_telemetry(self):
+        now=[10.]
+        client=RadioMissionClient(start=False,clock=lambda:now[0]);self.addCleanup(client.close)
+        payload=rx.pack_heartbeat(vehicle=rx.NODE_UUV,robot_state=rx.STATE_AUTO,
+            flight_phase=0,pos_valid=True,att_valid=True,alt_valid=True,
+            lat=1.28,lon=103.85,spd_mps=.2,hdg_deg=90,roll_deg=0,pitch_deg=0,alt_m=2,task=3)
+        self.assertTrue(client.consume(self.Tunnel(rx.payload_type(rx.HEARTBEAT),payload)))
+        self.assertTrue(client.status()['connected'])
+        self.assertEqual(client.status()['heartbeat']['robot_state'],rx.STATE_AUTO)
+
+    def test_foreign_tunnel_does_not_claim_rfd_connection(self):
+        client=RadioMissionClient(start=False);self.addCleanup(client.close)
+        self.assertFalse(client.consume(self.Tunnel(0x9999,b'x')))
+        self.assertFalse(client.status()['connected'])
+
     def test_request_crosses_the_tunnel_and_waits_for_matching_ack(self):
         client=RadioMissionClient(start=False)
         self.addCleanup(client.close)

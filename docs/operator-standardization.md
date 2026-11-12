@@ -4,6 +4,8 @@
 
 **Current upstream update:** See [current fleet adaptation](current-fleet-adaptation-2026-11-09.md) for the laptop GCS bridge, automatic OCS discovery, native run snapshots, tier controls and current-main compatibility patch. That guide supersedes the earlier SD-only startup/snapshot instructions below.
 
+**Current mission/transport update:** See [unified GRAEY mission and transport policy](unified-transport-missions-2026-11-12.md) for Auto WiFi-first/RFD-fallback selection, explicit overrides, separate Load/Prepare, IP-prepared RFD RunStart admission, unified recording controls and the added bounded dive/route mission types.
+
 This local implementation follows the SD-card Crusader/Ekko operator conventions and Crusader's FCU gateway structure. MAVProxy remains the sole Cube serial owner. One ROS `telemetry_gateway` owns its UDP connection; production navigation, controller, LED, GUI and reporting consumers use ROS topics through the existing `Link` API.
 
 ## Operator interface
