@@ -18,7 +18,7 @@ from robotx_graey_2026.api.navigation.pipeline_recording import PipelineRecordin
 from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
 from robotx_graey_2026.api.navigation.surface_measurement import SurfaceMeasurement
 from robotx_graey_2026.api.navigation.surface_control import surface_velocity,SurfaceLeg,gentle_horizontal,StabilizeSurfaceControl
-from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL, MODE_STABILIZE
+from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL, MODE_POSHOLD, MODE_STABILIZE
 from robotx_graey_2026.api.comms.run_gate import RunGate
 
 
@@ -283,17 +283,25 @@ class WaypointMission(Node):
                 and self.logic.stage not in self.logic.terminal else 'TASK_NONE'))
         if gate is not None and gate.competition:
             if gate.revoked:self.logic.abort(now,'Competition run ended or changed')
-            ready=bool(o.get('fresh') and o.get('armed') and o.get('mode')==MODE_GUIDED and not o.get('failure'))
+            # Competition readiness is an actual Cube POSHOLD, not a commanded
+            # GUIDED target masquerading as a hold.  mission_claimed remains true,
+            # so CompetitionTelemetry reports STATE_AUTO to RoboCommand.
+            ready=bool(o.get('fresh') and o.get('armed') and o.get('mode')==MODE_POSHOLD
+                       and o.get('navigation_hold_safe') is True and not o.get('failure'))
             if not gate.admit(now,ready) and self.logic.stage not in self.logic.terminal:
                 if self.logic.stage not in ('WAIT_SURFACE','GUIDED','ARM'):
                     self.logic.abort(now,'Competition admission lost')
-                elif o.get('armed'):
-                    if not ready:self.logic.abort(now,'Competition hold readiness lost')
+                elif o.get('armed') and o.get('mode') in (MODE_GUIDED,MODE_POSHOLD):
+                    if not o.get('fresh') or o.get('failure') or o.get('navigation_hold_safe') is not True:
+                        self.logic.abort(now,'Competition hold readiness lost')
                     else:
-                        if self.competition_hold is None:self.competition_hold=tuple(o['local'])
-                        self.send_guided_waypoint(self.competition_hold)
+                        switching=o.get('mode')!=MODE_POSHOLD
+                        if switching:self.link.set_mode(MODE_POSHOLD)
                         status=self.logic.snapshot()
-                        status.update(stage='WAIT_RUN_START',reason='Autonomous hold; waiting for verified RoboCommand RunStart',competition=True,competition_ready=True,competition_run_id=None)
+                        status.update(stage='WAIT_RUN_START',reason=('Entering POSHOLD before RunStart'
+                            if switching else 'POSHOLD; waiting for verified RoboCommand RunStart'),
+                            competition=True,competition_ready=not switching,competition_run_id=None,
+                            control_mode='POSHOLD')
                         self.auto_pub.publish(Bool(data=True))
                         self.pub.publish(String(data=json.dumps(status,allow_nan=False)))
                         return

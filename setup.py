@@ -32,6 +32,7 @@ setup(
             'graey_gcs = robotx_graey_2026.api.gui.gcs_transport:laptop_main',
             'telemetry_gateway = robotx_graey_2026.api.pixhawk.telemetry_gateway:main',
             'competition_link_node = robotx_graey_2026.api.comms.competition_link_node:main',
+            'radio_mission_node = robotx_graey_2026.api.comms.radio_mission_node:main',
             'mesh_link = robotx_graey_2026.api.comms.mesh_link:main',
             'sub_link_node = robotx_graey_2026.api.comms.sub_link_node:main',
             'led_node = robotx_graey_2026.api.led.led_node:main',

@@ -1707,3 +1707,31 @@ After the user supplied SSH access, freshly inspected GRAEY source and installed
 ## Stationary calibration policy fix — November 10, 2026
 User requested removal of calibration blockers and explicitly authorized deployment and publication. Measured-heading Apply now uses the backend's fresh MANUAL/STABILIZE, no-autonomy/no-mission rule instead of the frontend's rotation gate. VN rotation uses a shared calibration_reason requiring fresh disarmed state, ESC off and no mission/autonomy, without requiring SA engaged, RF/tether recovery, GPS, DVL or OCS readiness. Applied consistently to GUI jobs, VN start/ongoing checks and navigation pause/resume. Hardware-service availability, rotation confirmation, concurrent-job exclusion, valid heading, readback/flash acknowledgement and propulsion checks remain; 10m motion alignment readiness unchanged.
 473 tests run OK with5 skips (initial sandbox-only socket failures resolved with permitted loopback); synthetic actual-UI execution verified SA-released/RF_LOST/no-position permits stationary calibration and measured-heading entry, while propulsion/motion checks remain. Authorized deployment updated5 source/installed files with SHA256 verification and backup /home/graey/robotx_ws/releases/calibration-policy-20261110. Initial non-root installed write failed after first source file; resumed with sudo using preserved original backups. Only VN, navigation bridge and GUI restarted; MAVProxy/gateway/watchdog unchanged. Bridge had no registered north and output disabled before restart; both preserved, as was runtime pressure reference. Live GUI returns updated controls; final controller disarmed MANUAL/ESCoff/no mission/SA released/RF_LOST. No calibration, heading Apply, motion, arming or mission performed; physical VN calibration not newly tested. Evidence docs/validation/calibration-policy-2026-11-10.json.
+
+## RFD mission relay local implementation — November 11, 2026
+
+The approved first design is now implemented locally: the laptop sends a
+checksummed/retry-safe application mission through shared fleet_link/RFD, the
+Cube relays MAVLink, and the Jetson stores and executes the existing Waypoints,
+Pipeline Survey, Survey Ruth or5-2-5 implementation. Competition preparation
+uses actual Cube POSHOLD with no GUIDED target while the claimed mission reports
+STATE_AUTO to RoboCommand. A verified matching RunStart is acknowledged and
+releases the mission into GUIDED; the admitted latch survives later WiFi/RFD
+loss. Early RunStart is not acknowledged so OCS retries it. QGC AUTO remains a
+separate mission path.
+
+MAVProxy/telemetry_gateway ownership is unchanged. Added companion43/201,
+laptop254/191, OCS250/190 routing and team-ocs UUV1 configuration. Team OCS
+reserves GRAEY Cube sysid3 to avoid the historically observed Ekko/GRAEY sysid1
+collision, but this is not applied or hardware-verified. GRAEY500-test suite
+passes with5 skips; OCS focused integration205 tests pass. No commit, push,
+deployment, radio configuration or physical test performed. See
+docs/rfd-mission-relay-2026-11-11.md for provenance and acceptance steps.
+
+Final local validation supersedes those intermediate counts: GRAEY504 tests
+pass with5 skips; shared OCS1,145 tests pass with1 skip; the official pinned
+RoboCommand server workflow passes13/13, including UUV1 nominal2Hz heartbeat,
+declaration/RunStart, task PUBACK, submerged retention/reconnect and run end.
+The laptop RFD client has explicit acknowledgement/no-ack tests, and the RFD
+heartbeat status now exposes the exact truthful-telemetry hold reason instead
+of silently appearing healthy. Physical RFD/Cube testing remains outstanding.

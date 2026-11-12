@@ -60,10 +60,11 @@ class LauncherTests(unittest.TestCase):
     def test_start_runs_survey_run_in_gui_mode_from_the_source_tree(self):
         reply = self.launcher.start(POINTS, dry=True)
         argv, kw = self.calls[0]
-        self.assertTrue(argv[2].endswith('tools/survey_run.py'))
+        self.assertTrue(argv[2].replace('\\','/').endswith('tools/survey_run.py'))
         self.assertEqual(json.loads(argv[argv.index('--points')+1]), validate_points(POINTS))
         self.assertEqual(argv[argv.index('--run-id')+1], reply['run_id'])
         self.assertIn('--dry', argv)
+        self.assertNotIn('--competition',argv)
         self.assertTrue(kw['env']['PYTHONPATH'].startswith(kw['cwd']))
         self.assertTrue(self.launcher.running() and self.launcher.owns(reply['run_id']))
         self.assertFalse(self.launcher.owns('other'))
@@ -75,7 +76,7 @@ class LauncherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'run ID'):
             self.launcher.stop('wrong')
         self.launcher.stop(run_id)
-        self.assertEqual(self.proc.signals, [signal.SIGUSR1])
+        self.assertEqual(self.proc.signals, [getattr(signal,'SIGUSR1',signal.SIGTERM)])
         Path(self.launcher.launch['log']).write_text('a\nSURVEY STOPPED\n')
         self.proc.code = 2
         snap = self.launcher.snapshot()
@@ -127,13 +128,14 @@ class GuiSurveyActionTests(unittest.TestCase):
         self.survey.start.assert_not_called()
         self.control['sa_active'] = False
         self.request(dict(action='survey_start', points=POINTS))
-        self.survey.start.assert_called_once_with(POINTS, False)
+        self.survey.start.assert_called_once_with(POINTS, False, False)
 
-    def test_dry_survey_skips_motion_checks_but_not_competition(self):
+    def test_dry_survey_skips_motion_checks_and_preserves_competition_flag(self):
         self.request(dict(action='survey_start', points=POINTS, dry=True))
-        self.survey.start.assert_called_once_with(POINTS, True)
-        with self.assertRaisesRegex(ValueError, 'RunStart'):
-            self.request(dict(action='survey_start', points=POINTS, dry=True, competition=True))
+        self.survey.start.assert_called_once_with(POINTS, True, False)
+        self.survey.start.reset_mock()
+        self.request(dict(action='survey_start', points=POINTS, dry=True, competition=True))
+        self.survey.start.assert_called_once_with(POINTS, True, True)
 
     def test_survey_refused_while_another_mission_runs(self):
         self.ns['waypoint_process'] = NS(poll=lambda: None)

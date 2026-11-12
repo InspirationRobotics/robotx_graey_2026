@@ -60,9 +60,11 @@ class SurveyLauncher:
     def owns(self, run_id):
         return bool(run_id) and self.running() and run_id == self.launch['run_id']
 
-    def start(self, points, dry=False):
+    def start(self, points, dry=False, competition=False):
         if type(dry) is not bool:
             raise ValueError('dry must be a boolean')
+        if type(competition) is not bool:
+            raise ValueError('competition must be a boolean')
         points = validate_points(points)
         if self.running():
             raise ValueError('A survey run is already running')
@@ -71,19 +73,20 @@ class SurveyLauncher:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         log_path = self.log_dir/('survey-'+run_id+'.log')
         argv = [sys.executable, '-u', str(folder/SCRIPT), '--points', json.dumps(points), '--run-id', run_id,
-                '--logdir', str(self.log_dir)] + (['--dry'] if dry else [])
+                '--logdir', str(self.log_dir)] + (['--dry'] if dry else []) + (['--competition'] if competition else [])
         env = dict(os.environ, PYTHONPATH=str(folder)+(':'+os.environ['PYTHONPATH'] if os.environ.get('PYTHONPATH') else ''))
         with log_path.open('w') as log:
             # The GUI's own process group, like the waypoint mission: an isolated SITL shutdown reaps it too.
             self.process = self.popen(argv, cwd=str(folder), env=env, stdout=log, stderr=subprocess.STDOUT)
-        self.launch = dict(run_id=run_id, started=self.clock(), log=str(log_path), dry=dry, points=points,
+        self.launch = dict(run_id=run_id, started=self.clock(), log=str(log_path), dry=dry,
+                           competition=competition, points=points,
                            stop_requested=False)
         return dict(ok=True, run_id=run_id)
 
     def stop(self, run_id):
         if not self.owns(run_id):
             raise ValueError('Current survey run ID required')
-        self.process.send_signal(signal.SIGUSR1)
+        self.process.send_signal(getattr(signal,'SIGUSR1',signal.SIGTERM))
         self.launch['stop_requested'] = True
         return dict(ok=True, msg='Stop requested: an aborted leg stops at the surface, a transit surfaces. '
                                  'Verify on the vehicle and take control if needed.')
@@ -101,5 +104,5 @@ class SurveyLauncher:
             tail = []
         result = {None: None, 0: 'DONE', 1: 'FAILED', 2: 'STOPPED'}.get(code, 'EXITED %s' % code)
         return dict(running=code is None, run_id=self.launch['run_id'], result=result, exit_code=code,
-                    dry=self.launch['dry'], points=self.launch['points'], stop_requested=self.launch['stop_requested'],
+                    dry=self.launch['dry'], competition=self.launch['competition'], points=self.launch['points'], stop_requested=self.launch['stop_requested'],
                     age_s=round(self.clock()-self.launch['started'], 1), log=tail)

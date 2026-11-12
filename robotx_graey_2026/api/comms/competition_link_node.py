@@ -35,6 +35,7 @@ def main(args=None):
             self.fcu = Link('ros://graey/fcu',191,self.get_logger(),node=self,
                             kinds=NAVIGATION_VIEW_KINDS)
             self.error = None
+            self.radio_run = None
             self.tiers_request = None
             self.publisher = self.create_publisher(String,'/graey/comms/status',10)
             self.create_subscription(String,'/graey/navigation/bridge_status',
@@ -45,6 +46,7 @@ def main(args=None):
             self.create_subscription(String,'/graey/comms/current_task',self._task,10)
             self.create_subscription(String,'/graey/comms/pipeline_survey',self._survey,10)
             self.create_subscription(String,'/graey/comms/resource_request',self._resource,10)
+            self.create_subscription(String,'/graey/comms/radio_run',self._radio_run,10)
             self.create_timer(.05,self._tick)
             self.create_timer(.5,self._publish)
 
@@ -89,6 +91,20 @@ def main(args=None):
                 self.sender.resource(data['observation_id'],data['resource_color'],data['delivery_circle_color'])
             self._guard(record)
 
+        def _radio_run(self,msg):
+            def receive():
+                data=json.loads(msg.data);now=time.monotonic()
+                stamp=data.get('received_monotonic')
+                run=data.get('run_id')
+                if (type(stamp) not in (int,float) or not 0<=now-stamp<2
+                        or type(run) is not int or not 0<=run<=0xffff
+                        or data.get('remote_state')!='RUNNING'
+                        or data.get('run_confirmed') is not True
+                        or data.get('source')!='rfd'):
+                    raise ValueError('invalid or stale RFD RunStart')
+                self.radio_run=data
+            self._guard(receive)
+
         def _consume(self,kind,msg):
             self.telemetry.consume(kind,msg)
 
@@ -101,9 +117,14 @@ def main(args=None):
             self._guard(tick)
 
         def _publish(self):
-            data = self.sender.status(time.monotonic())
+            now=time.monotonic()
+            data = self.sender.status(now)
+            if self.radio_run is not None and 0<=now-self.radio_run['received_monotonic']<2:
+                run=self.radio_run['run_id']
+                data.update(run_id=run,remote_run_id=run,remote_state='RUNNING',run_confirmed=True,
+                            run_transport='rfd')
             data.update(wifi=self.wifi.status(),tiers_request=self.tiers_request,telemetry_hold_reason=self.telemetry.reason,last_error=self.error,
-                        published_monotonic=time.monotonic())
+                        published_monotonic=now)
             self.publisher.publish(String(data=json.dumps(data,allow_nan=False)))
 
         def destroy_node(self):

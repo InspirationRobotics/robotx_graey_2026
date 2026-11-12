@@ -16,6 +16,10 @@ competition_link_node:
     ocs_port: 37564
     team_id: "ASTA"
     outbox_path: "/root/robotx_ws/logs/competition-outbox.sqlite3"
+radio_mission_node:
+  ros__parameters:
+    gui_port: 8090
+    mission_dir: "/root/robotx_ws/missions/radio"
 
 dvl_node:
   ros__parameters:

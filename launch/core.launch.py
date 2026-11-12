@@ -50,6 +50,9 @@ def generate_launch_description():
         Node(package=PKG, executable='competition_link_node',name='competition_link_node',
              condition=IfCondition(LaunchConfiguration('communications_enabled')),
              parameters=[config,{'ocs_host':LaunchConfiguration('ocs_host')}],output='screen',**RESPAWN),
+        Node(package=PKG, executable='radio_mission_node',name='radio_mission_node',
+             condition=IfCondition(LaunchConfiguration('communications_enabled')),
+             parameters=[config],output='screen',**RESPAWN),
         Node(package=PKG, executable='led_node', name='led_node', parameters=[config],output='screen', **RESPAWN),
         Node(package=PKG, executable='pixhawk_led_node', name='pixhawk_led_node', parameters=[config],output='screen', **RESPAWN),
         # Belongs in the CORE stack, not the mission: SA must kill whether or not a

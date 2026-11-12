@@ -13,6 +13,7 @@ import gcs_app as common
 from robotx_graey_2026.api.gui.gcs_transport import local_asset,ocs_request
 
 factory=common.make_handler
+radio_client=None
 
 
 def make_handler(link,hub,allowed_hosts,missions=None):
@@ -43,7 +44,13 @@ def make_handler(link,hub,allowed_hosts,missions=None):
                 if not 0<=n<=65536:raise ValueError('Request too large')
                 self.connection.settimeout(5)
                 body=self.rfile.read(n) if method=='POST' else b''
-                if path.startswith('/api/run/'):
+                if path=='/api/radio/mission':
+                    if radio_client is None:raise ValueError('RFD mission client is unavailable')
+                    if method=='GET':status,kind,data=200,'application/json',json.dumps(dict(ok=True,**radio_client.status())).encode()
+                    else:
+                        result=radio_client.request(json.loads(body.decode('utf-8')))
+                        status,kind,data=200,'application/json',json.dumps(result).encode()
+                elif path.startswith('/api/run/'):
                     status,kind,data=ocs_request(int(os.environ.get('GRAEY_OCS_PORT','8099')),path,method,body)
                 else:
                     header,data=link.request('http',dict(method=method,path=self.path,body=body.decode('utf-8'),content_type=self.headers.get('Content-Type','application/json')))
@@ -66,6 +73,7 @@ def make_handler(link,hub,allowed_hosts,missions=None):
 
 
 def main(argv=None):
+    global radio_client
     common.make_handler=make_handler
     os.environ.setdefault('CRSD_BOAT',os.environ.get('GRAEY_HOST','graey.local'))
     common.DEFAULT_BOAT=os.environ['CRSD_BOAT']
@@ -75,13 +83,19 @@ def main(argv=None):
     parser.add_argument('--graey',default=common.DEFAULT_BOAT,help='GRAEY host/IP, or comma-separated hosts (default: %(default)s)')
     parser.add_argument('--graey-port',type=int,default=14559,help='GRAEY GCS bridge TCP port (default: %(default)s)')
     parser.add_argument('--port',type=int,default=8152,help='Laptop page port (default: %(default)s)')
+    parser.add_argument('--radio-port',type=int,default=14572,
+                        help='fleet_link GRAEY mission output port (default: %(default)s)')
     parser.add_argument('--no-browser',action='store_true')
     # Hidden compatibility aliases for previously documented commands.
     parser.add_argument('--boat',dest='graey',default=argparse.SUPPRESS,help=argparse.SUPPRESS)
     parser.add_argument('--boat-port',dest='graey_port',type=int,default=argparse.SUPPRESS,help=argparse.SUPPRESS)
     args=parser.parse_args(sys.argv[1:] if argv is None else argv)
-    common.main(['--boat',args.graey,'--boat-port',str(args.graey_port),'--port',str(args.port),
-                 *(['--no-browser'] if args.no_browser else [])])
+    from robotx_graey_2026.api.gui.laptop.radio_client import RadioMissionClient
+    radio_client=RadioMissionClient(args.radio_port)
+    try:
+        common.main(['--boat',args.graey,'--boat-port',str(args.graey_port),'--port',str(args.port),
+                     *(['--no-browser'] if args.no_browser else [])])
+    finally:radio_client.close()
 
 
 if __name__=='__main__':main()

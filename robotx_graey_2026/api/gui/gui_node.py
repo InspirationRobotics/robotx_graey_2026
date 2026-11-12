@@ -280,8 +280,8 @@ def waypoint_request(body):
         # Ruth's survey run: the same checks as a live route start (dry: nothing moves, so no motion checks)
         if calibration_jobs is not None and calibration_jobs.snapshot().get('busy'):
             raise ValueError('Finish or cancel navigation preparation before starting a mission')
-        if body.get('competition'):
-            raise ValueError('The survey run does not wait for Competition RunStart; untick Competition')
+        if type(body.get('competition',False)) is not bool:
+            raise ValueError('competition must be a boolean')
         dry = body.get('dry', False)
         if type(dry) is not bool:
             raise ValueError('dry must be a boolean')
@@ -296,7 +296,7 @@ def waypoint_request(body):
                     raise ValueError('Control watchdog/ESC permission unavailable')
         if any_mission_running() or (waypoint_process is not None and waypoint_process.poll() is None):
             raise ValueError('Another mission is running')
-        return survey.start(body.get('points'), dry)
+        return survey.start(body.get('points'), dry, body.get('competition',False))
     if action == 'survey_stop' or (action == 'abort' and survey.owns(body.get('run_id'))):
         return survey.stop(body.get('run_id'))
     if action == 'abort':
@@ -1258,6 +1258,8 @@ class GuiNode(Node):
         self.create_timer(1.,self.update_parameter_graph)
         self.create_subscription(Log,'/rosout',lambda m:fleet_logs.add(m.name,m.level,m.msg,stamp=m.stamp.sec+m.stamp.nanosec*1e-9),100)
         self.tiers_pub=self.create_publisher(String,'/graey/comms/tiers_request',10)
+        self.survey_pub=self.create_publisher(String,'/graey/survey/status',10)
+        self.create_timer(.5,lambda:self.survey_pub.publish(String(data=json.dumps(survey.snapshot()))))
         self.create_timer(.1,self.flush_tiers)
         recording_service=RecordingService(os.environ.get('GRAEY_RECORD_DIR',str(Path.home()/'robotx_ws/recordings')))
         self.recording_service=recording_service

@@ -216,7 +216,7 @@ def drive_route(args, legs):
     if not p.get('ok') or 'plan_id' not in p:
         return False, f'the GUI refused the route: {p.get("msg", p)}'
     log(f'  route: {len(points)} point(s), the first {p.get("distance_m", float("nan")):.1f} m away')
-    start = {'action': 'start', 'plan_id': p['plan_id']}
+    start = {'action': 'start', 'plan_id': p['plan_id'], 'competition': args.competition}
     if RUN_ID:
         start['survey_run_id'] = RUN_ID     # gui_node lets the survey's own route start while it runs
     s = http(api, json_body=start)
@@ -380,6 +380,8 @@ def main():
     global LOG_FILE
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--dry', action='store_true')
+    ap.add_argument('--competition', action='store_true',
+                    help='hold the first surface route in POSHOLD until verified RoboCommand RunStart')
     ap.add_argument('--skip-path', action='store_true')
     ap.add_argument('--alt', type=float, default=4.0, help='m above the floor (pool_alt_m)')
     ap.add_argument('--gui', type=int, default=8090)

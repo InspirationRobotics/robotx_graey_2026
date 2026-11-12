@@ -37,6 +37,7 @@ GCS_AUTOPILOT = mavutil.mavlink.MAV_AUTOPILOT_INVALID
 
 MODE_STABILIZE = 0                                  # ArduSub custom mode numbers, mode.h:43
 MODE_GUIDED = 4
+MODE_POSHOLD = 16
 MODE_MANUAL = 19
 FRAME_LOCAL_NED = 1
 FRAME_LOCAL_FRD = 20

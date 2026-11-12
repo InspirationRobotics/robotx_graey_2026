@@ -6,6 +6,10 @@ import math
 READ_MESSAGES = {20,21,43,47,51,66,111,117,119,122,321}
 MOTION_MESSAGES = {69,70,82,84,86}
 COMPONENTS = {191,193,194,195,197,198,201}
+RADIO_COMPONENT = 201
+RADIO_SYSTEM = 43
+RADIO_DESTINATIONS = {(250,190),(254,191)}
+RADIO_PAYLOAD_TYPES = {0x9001,0x8010,0x8038}
 
 
 class GatewayPolicy:
@@ -29,6 +33,16 @@ class GatewayPolicy:
     def admit(self, message, component, now):
         if component not in COMPONENTS or message.get_srcComponent()!=component:
             return False,'unregistered component'
+        if message.get_msgId()==385:
+            target=(getattr(message,'target_system',0),getattr(message,'target_component',0))
+            length=getattr(message,'payload_length',-1)
+            ptype=getattr(message,'payload_type',-1)
+            destination_ok=(target in RADIO_DESTINATIONS or
+                            (target==(0,0) and ptype in (0x9001,0x8010)))
+            allowed=(component==RADIO_COMPONENT and message.get_srcSystem()==RADIO_SYSTEM
+                    and destination_ok and ptype in RADIO_PAYLOAD_TYPES
+                    and type(length) is int and 0<length<=128)
+            return allowed, None if allowed else 'invalid companion radio tunnel'
         if getattr(message,'target_system',1) not in (0,1) or getattr(message,'target_component',1) not in (0,1):
             return False,'FCU target must be the configured Cube'
         mid=message.get_msgId()

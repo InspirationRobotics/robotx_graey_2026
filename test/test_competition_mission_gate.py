@@ -17,27 +17,43 @@ class TestCompetitionMissionGate(unittest.TestCase):
         tree=ast.parse(source.read_text())
         cls=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=='WaypointMission')
         tick=next(n for n in cls.body if isinstance(n,ast.FunctionDef) and n.name=='tick')
-        namespace=dict(time=SimpleNamespace(monotonic=lambda:0.),json=json,MODE_GUIDED=4,
+        namespace=dict(time=SimpleNamespace(monotonic=lambda:0.),json=json,MODE_GUIDED=4,MODE_POSHOLD=16,
             String=lambda **kwargs:SimpleNamespace(**kwargs),Bool=lambda **kwargs:SimpleNamespace(**kwargs),
             GuidedSurfaceRun=type('GuidedSurfaceRun',(),{}),CompetitionRouteRun=type('CompetitionRouteRun',(),{}))
         exec(compile(ast.Module(body=[tick],type_ignores=[]),str(source),'exec'),namespace)
         node=SimpleNamespace(sequence=0,run_gate=RunGate(competition),competition_hold=None,
-            intent_pub=Mock(),pub=Mock(),auto_pub=Mock(),send_guided_waypoint=Mock(),surface_measurement_status={})
+            intent_pub=Mock(),pub=Mock(),auto_pub=Mock(),send_guided_waypoint=Mock(),
+            link=Mock(),surface_measurement_status={})
         node.logic=SimpleNamespace(stage='ARM',terminal={'ABORTED','COMPLETE'},phase='SURFACE_NAV',
             run_id='local',plan={'mode':'surface'},snapshot=lambda:dict(stage='ARM'),
             step=Mock(side_effect=ExecutionReached()),abort=Mock())
-        node.observation=lambda now:dict(fresh=True,armed=True,mode=4,failure='',local=(1.,2.,.3))
+        node.observation=lambda now:dict(fresh=True,armed=True,mode=4,failure='',
+                                        navigation_hold_safe=True,local=(1.,2.,.3))
         return node,lambda:namespace['tick'](node)
 
     def test_competition_holds_without_entering_route(self):
         node,tick=self.make_node(True)
         tick()
         node.logic.step.assert_not_called()
-        node.send_guided_waypoint.assert_called_once_with((1.,2.,.3))
-        self.assertEqual(json.loads(node.pub.publish.call_args.args[0].data)['stage'],'WAIT_RUN_START')
+        node.send_guided_waypoint.assert_not_called()
+        node.link.set_mode.assert_called_once_with(16)
+        status=json.loads(node.pub.publish.call_args.args[0].data)
+        self.assertEqual((status['stage'],status['control_mode'],status['competition_ready']),
+                         ('WAIT_RUN_START','POSHOLD',False))
+
+    def test_poshold_is_reported_ready_and_waits(self):
+        node,tick=self.make_node(True)
+        node.observation=lambda now:dict(fresh=True,armed=True,mode=16,failure='',
+                                        navigation_hold_safe=True,local=(1.,2.,.3))
+        tick()
+        status=json.loads(node.pub.publish.call_args.args[0].data)
+        self.assertTrue(status['competition_ready'])
+        node.auto_pub.publish.assert_called_once()
 
     def test_verified_start_unlocks_production_execution(self):
         node,tick=self.make_node(True)
+        node.observation=lambda now:dict(fresh=True,armed=True,mode=16,failure='',
+                                        navigation_hold_safe=True,local=(1.,2.,.3))
         node.run_gate.update(dict(run_confirmed=True,remote_state='RUNNING',run_id=70000),0.)
         with self.assertRaises(ExecutionReached):tick()
         self.assertEqual(node.run_gate.run_id,70000)
@@ -48,5 +64,7 @@ class TestCompetitionMissionGate(unittest.TestCase):
 
     def test_stale_run_does_not_unlock_route(self):
         node,tick=self.make_node(True)
+        node.observation=lambda now:dict(fresh=True,armed=True,mode=16,failure='',
+                                        navigation_hold_safe=True,local=(1.,2.,.3))
         node.run_gate.update(dict(run_confirmed=True,remote_state='RUNNING',run_id=7),-3.)
         tick();node.logic.step.assert_not_called()
