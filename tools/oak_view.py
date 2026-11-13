@@ -15,7 +15,7 @@ import depthai as dai
 
 from robotx_graey_2026.api.vision import camera
 
-MODEL = '/root/robotx_ws/src/robotx_graey_2026/models/pole_daynight_640x360_v2.pt'
+MODEL = camera.POLE_MODEL
 CONF = 0.4
 
 

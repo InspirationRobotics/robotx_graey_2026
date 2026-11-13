@@ -24,7 +24,7 @@ def main():
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    info = next((d for d in dai.Device.getAllAvailableDevices() if d.getMxId() == args.mxid), None)
+    info = camera.find_camera(args.mxid)
     if info is None:
         raise RuntimeError('DOWN camera unavailable or already owned by another process: '+args.mxid)
     with dai.Device(camera.build_pipeline(fps=15, with_depth=False), info, dai.UsbSpeed.HIGH) as dev:

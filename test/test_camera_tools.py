@@ -123,3 +123,50 @@ class CameraToolTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PoleTrackerCameraTests(unittest.TestCase):
+    """pole_tracker checks its model, then opens the FRONT OAK by MxId (not whichever answers first)."""
+
+    def loop(self, mxids, model_exists=True):
+        opened, errors = [], []
+        dai = fake_depthai(mxids)
+
+        class Device(dai.Device):
+            def __init__(self, pipeline, info=None, *rest):
+                opened.append(info.getMxId() if info else None)
+                self.speed = NS(name='SUPER')
+        Device.getAllAvailableDevices = dai.Device.getAllAvailableDevices
+        dai.Device = Device
+        stubs = {'depthai': dai, 'cv2': MagicMock(), 'ultralytics': MagicMock()}
+        with patch.dict(sys.modules, stubs):
+            for name in ('robotx_graey_2026.api.vision.camera', 'robotx_graey_2026.api.vision.pole_tracker'):
+                sys.modules.pop(name, None)
+            try:
+                tracker = importlib.import_module('robotx_graey_2026.api.vision.pole_tracker')
+                tracker.camera.intrinsics = lambda dev: (1.0, 1.0)
+                tracker.camera.build_pipeline = lambda **kw: object()
+                with tempfile.NamedTemporaryFile(suffix='.pt') as model:
+                    me = NS(model_path=model.name if model_exists else '/nonexistent/pole.pt',
+                            mxid=tracker.camera.FRONT, stop=NS(is_set=lambda: True),
+                            get_logger=lambda: NS(error=errors.append, info=lambda *_: None))
+                    tracker.PoleTracker.camera_loop(me)
+                default_model = tracker.camera.POLE_MODEL
+            finally:
+                for name in ('robotx_graey_2026.api.vision.camera', 'robotx_graey_2026.api.vision.pole_tracker'):
+                    sys.modules.pop(name, None)
+                vars(importlib.import_module('robotx_graey_2026.api.vision')).pop('camera', None)
+        return opened, errors, default_model
+
+    def test_opens_the_front_camera_even_when_down_is_listed_first(self):
+        opened, errors, model = self.loop([DOWN, FRONT])
+        self.assertEqual((opened, errors), ([FRONT], []))
+        self.assertTrue(model.endswith('models/pole_daynight_640x360_v2.pt'))
+
+    def test_reports_a_missing_front_camera_or_model_instead_of_opening_another(self):
+        opened, errors, _ = self.loop([DOWN])
+        self.assertEqual(opened, [])
+        self.assertIn('FRONT camera', errors[0])
+        opened, errors, _ = self.loop([FRONT], model_exists=False)
+        self.assertEqual(opened, [])
+        self.assertIn('pole model not found', errors[0])

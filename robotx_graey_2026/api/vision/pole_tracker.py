@@ -40,8 +40,8 @@ class PoleTracker(Node):
     def __init__(self):
         super().__init__('pole_tracker')
         p = self.declare_parameter
-        p('model', '/root/robotx_ws/src/robotx_graey_2026/models/'
-                   'pole_daynight_640x360_v2.pt')
+        p('model', camera.POLE_MODEL)
+        p('mxid', camera.FRONT)                 # the forward OAK, not whichever camera answers first
         p('target_class', 'pole')               # MUST match the model's own class name;
                                                 # a mismatch detects then silently drops
                                                 # everything. Models before 8/4 use 'red'.
@@ -55,6 +55,7 @@ class PoleTracker(Node):
 
         g = self.get_parameter
         self.model_path = g('model').value
+        self.mxid = g('mxid').value
         self.target = g('target_class').value
         self.conf = g('conf').value
         self.hits = g('hits_needed').value
@@ -104,8 +105,16 @@ class PoleTracker(Node):
         return best
 
     def camera_loop(self):
+        if not os.path.isfile(self.model_path):
+            self.get_logger().error(f'pole model not found: {self.model_path}')
+            return
+        info = camera.find_camera(self.mxid)
+        if info is None:
+            self.get_logger().error(f'{camera.camera_name(self.mxid)} camera {self.mxid} not found '
+                                    '(unplugged, or held by cam_pair / another tool)')
+            return
         model = YOLO(self.model_path)
-        with dai.Device(camera.build_pipeline()) as dev:
+        with dai.Device(camera.build_pipeline(), info) as dev:
             self.get_logger().info(f'OAK-D USB speed {dev.getUsbSpeed()}')
             fx, cx = camera.intrinsics(dev)
             qr = dev.getOutputQueue('rgb', 4, False)

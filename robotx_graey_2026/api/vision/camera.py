@@ -32,6 +32,15 @@ def camera_name(mxid):
     """'FRONT', 'DOWN', or the last four characters of an unknown camera's MxId."""
     return CAMERAS.get(mxid, mxid[-4:])
 
+
+def find_camera(mxid):
+    """The attached OAK with this MxId, or None (unplugged, or held by another process)."""
+    return next((d for d in dai.Device.getAllAvailableDevices() if d.getMxId() == mxid), None)
+
+
+# The red-pole YOLO model (Chris, Aug 2026) used by pole_tracker and tools/oak_view.py --yolo.
+POLE_MODEL = '/root/robotx_ws/src/robotx_graey_2026/models/pole_daynight_640x360_v2.pt'
+
 _frame = None
 _lock = threading.Lock()
 _streams = 0                    # open /stream connections: a browser view or the recorder
