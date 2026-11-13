@@ -31,6 +31,12 @@ class TestGatewayPolicy(unittest.TestCase):
         self.assertFalse(self.policy.admit(
             message(20,195,target_system=1,target_component=1),195,0)[0])
 
+    def test_resource_report_can_only_target_ocs(self):
+        for target,expected in [((250,190),True),((254,191),False),((0,0),False)]:
+            m=message(385,201,source_system=43,target_system=target[0],target_component=target[1],
+                      payload_type=0x8013,payload_length=3)
+            self.assertEqual(self.policy.admit(m,201,0)[0],expected)
+
     def test_navigation_owns_odometry(self):
         self.assertTrue(self.policy.admit(message(331,197),197,0)[0])
         self.assertFalse(self.policy.admit(message(331,198),198,0)[0])

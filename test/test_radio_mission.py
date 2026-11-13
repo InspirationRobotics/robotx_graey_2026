@@ -5,8 +5,11 @@ import unittest
 from robotx_graey_2026.api.comms.mission_radio import (
     Assembler, KIND_REQUEST, encode, inspect_chunk, revision)
 from robotx_graey_2026.api.comms import competition_codec as rx
+from robotx_graey_2026.api.comms.competition_telemetry import CompetitionTelemetry
 from robotx_graey_2026.api.comms.radio_mission_node import (
-    BeaconGate, MissionBackend, accept_run_start, build_heartbeat, validate_mission)
+    BeaconGate, HeartbeatCapture, MissionBackend, ResourceRadio, StartRepeat, accept_run_start,
+    build_heartbeat, validate_mission)
+from robotx_graey_2026.api.comms.run_gate import RunGate
 from robotx_graey_2026.api.gui.laptop.radio_client import RadioMissionClient
 
 
@@ -109,13 +112,102 @@ class RunStartTests(unittest.TestCase):
         active=dict(competition=True,run_id='local')
         event,ack=accept_run_start(250,190,43,rx.pack_run_start(run_id=7),9,active,1.)
         self.assertEqual((event['run_id'],event['source']),(7,'rfd'))
-        self.assertEqual(rx.unpack_ack(ack),dict(msg_id=rx.RUN_START,seq=9,src=rx.NODE_UUV))
+        self.assertEqual(rx.unpack_ack(ack),dict(msg_id=rx.RUN_START,seq=9,src=rx.NODE_OCS))
 
-    def test_different_run_revokes_but_is_not_acked(self):
-        active=dict(competition=True,robocommand_run_id=7)
+    def test_any_run_id_is_acked_once_a_mission_waits(self):
+        # 13 Nov 2026: the run ID is ignored. Every RunStart for a waiting mission is ACKed,
+        # so fleet_link stops resending it on the shared air.
+        active=dict(competition=True,run_id='se',se_mission=True,robocommand_run_id=7,state='WAIT_RUN_START',ready=True,status_at=1.9)
         event,ack=accept_run_start(250,190,43,rx.pack_run_start(run_id=8),10,active,2.)
         self.assertEqual(event['run_id'],8)
-        self.assertIsNone(ack)
+        self.assertIsNotNone(ack)
+        self.assertEqual(accept_run_start(250,190,43,rx.pack_run_start(run_id=8),10,None,2.),(None,None))
+        self.assertEqual(accept_run_start(255,190,43,rx.pack_run_start(run_id=8),10,active,2.),(None,None))
+
+
+    def test_se_ack_requires_fresh_surface_wait_and_is_scoped_to_attempt(self):
+        active=dict(competition=True,se_mission=True,run_id='local',state='ARM',ready=False,status_at=1.)
+        receive=lambda:accept_run_start(250,190,43,rx.pack_run_start(run_id=0),12,active,2.)
+        self.assertEqual(receive(),(None,None))
+        active.update(state='WAIT_RUN_START',ready=True)
+        self.assertEqual(receive(),(None,None))
+        active.update(status_at=1.9)
+        event,ack=receive()
+        self.assertEqual(event['mission_run_id'],'local')
+        self.assertEqual(rx.unpack_ack(ack)['src'],rx.NODE_OCS)
+        active.update(state='FORWARD',admitted=True)
+        self.assertEqual(receive(),(None,ack))
+        active.update(se_mission=False,robocommand_run_id=1)
+        self.assertIsNone(receive()[1])
+
+class ResourceRadioTests(unittest.TestCase):
+    REQUEST=dict(observation_id='chris-simple-dive:run-1',resource_color=4,delivery_circle_color=3)
+
+    def test_colour_report_is_rxl_resource_delivery_for_task_two(self):
+        r=ResourceRadio()
+        self.assertTrue(r.offer(self.REQUEST))
+        self.assertEqual(rx.unpack_resource_delivery(r.due(0.,True)),
+                         dict(task=3,resource_color=4,delivery_circle_color=3))
+
+    def test_repeats_are_bounded_and_wait_for_a_live_heartbeat(self):
+        r=ResourceRadio();r.offer(self.REQUEST)
+        self.assertIsNone(r.due(0.,False))                 # antenna under / no GPS yet
+        times=[t/10 for t in range(0,600) if r.due(t/10,True) is not None]
+        self.assertEqual(len(times),ResourceRadio.SENDS)
+        self.assertLessEqual(times[-1]-times[0],ResourceRadio.WINDOW_S)
+        self.assertTrue(all(b-a>=ResourceRadio.PERIOD_S-1e-9 for a,b in zip(times,times[1:])))
+
+    def test_same_observation_is_queued_once_new_one_restarts(self):
+        r=ResourceRadio()
+        self.assertTrue(r.offer(self.REQUEST))
+        r.due(0.,True)
+        self.assertFalse(r.offer(dict(self.REQUEST)))      # the mission republishes at 2 Hz
+        self.assertEqual(r.status()['sent'],1)
+        self.assertTrue(r.offer(dict(self.REQUEST,observation_id='chris-simple-dive:run-2')))
+        self.assertEqual(r.status()['sent'],0)
+        with self.assertRaises(ValueError):r.offer(dict(observation_id='x',resource_color=0,
+                                                        delivery_circle_color=1))
+
+
+class StartRepeatTests(unittest.TestCase):
+    EVENT=dict(run_id=4464,remote_run_id=4464,remote_state='RUNNING',run_confirmed=True,source='rfd',
+               received_monotonic=10.,published_monotonic=10.)
+
+    def test_repeats_fresh_while_the_same_mission_waits(self):
+        r=StartRepeat();r.accepted(self.EVENT,'se-1',10.)
+        for now in (10.5,11.,30.):
+            e=r.due(dict(run_id='se-1',state='WAIT_RUN_START'),now)
+            self.assertEqual((e['run_id'],e['received_monotonic'],e['published_monotonic']),(4464,now,now))
+
+    def test_stops_once_the_mission_moves_on_ends_or_is_another(self):
+        for active in (dict(run_id='se-1',state='FORWARD'),None,dict(run_id='se-2',state='WAIT_RUN_START')):
+            r=StartRepeat();r.accepted(self.EVENT,'se-1',10.)
+            self.assertIsNone(r.due(active,11.))
+            self.assertIsNone(r.due(dict(run_id='se-1',state='WAIT_RUN_START'),11.5))   # gone for good
+
+    def test_gives_up_after_its_limit(self):
+        r=StartRepeat();r.accepted(self.EVENT,'se-1',0.)
+        self.assertIsNone(r.due(dict(run_id='se-1',state='WAIT_RUN_START'),StartRepeat.LIMIT_S+1))
+
+
+class RunGateIgnoringRunIdTests(unittest.TestCase):
+    def sample(self,run,state='RUNNING',now=1.):
+        return dict(run_id=run,remote_run_id=run,remote_state=state,run_confirmed=state=='RUNNING',
+                    published_monotonic=now)
+
+    def test_first_runstart_admits_and_nothing_later_revokes(self):
+        gate=RunGate(True,match_run=False)
+        gate.update(self.sample(5),1.);self.assertTrue(gate.admit(1.,True))
+        for later in (self.sample(6,now=2.),self.sample(5,'ENDED',now=3.)):
+            gate.update(later,later['published_monotonic'])
+            self.assertFalse(gate.revoked)
+            self.assertTrue(gate.admit(later['published_monotonic'],True))
+
+    def test_default_gate_still_matches_runs(self):
+        gate=RunGate(True)
+        gate.update(self.sample(5),1.);gate.admit(1.,True)
+        gate.update(self.sample(6,now=2.),2.)
+        self.assertTrue(gate.revoked)
 
 
 class HeartbeatTests(unittest.TestCase):
@@ -135,6 +227,18 @@ class HeartbeatTests(unittest.TestCase):
     def test_incomplete_heartbeat_is_suppressed_with_a_specific_reason(self):
         with self.assertRaisesRegex(ValueError,'alt_m'):
             build_heartbeat(self.sample(alt_m=None))
+
+    def test_capture_survives_every_navigation_surface_state(self):
+        # Regression: the bridge reports surfaced=True/False once depth is valid.
+        # The capture must accept that exactly as the WiFi sender does.
+        for surfaced in (None,True,False):
+            telemetry=CompetitionTelemetry(time.monotonic);capture=HeartbeatCapture()
+            telemetry.put('bridge',dict(published_monotonic=time.monotonic(),
+                                        surfaced=surfaced,depth_m=.2))
+            telemetry.update(capture,time.monotonic())
+            self.assertIs(capture.surface,surfaced)
+            self.assertIsNone(capture.value)  # no Cube position yet: withheld, not crashed
+            self.assertIsNotNone(telemetry.reason)
 
     def test_private_status_is_change_driven_and_not_a_second_2hz_stream(self):
         gate=BeaconGate();event=dict(event='radio_status',ok=True)

@@ -7,6 +7,7 @@ from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import Mock
 from robotx_graey_2026.api.navigation.north_maneuver import NorthManeuver
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 
 
 class TransportTests(unittest.TestCase):
@@ -16,7 +17,7 @@ class TransportTests(unittest.TestCase):
         cls=next(n for n in tree.body if isinstance(n,ast.ClassDef));cls.bases=[]
         cls.body=[n for n in cls.body if isinstance(n,ast.FunctionDef) and n.name=='tick']
         tree.body=[cls]
-        ns=dict(json=json,math=math,time=NS(monotonic=lambda:10.),String=lambda **k:NS(**k),Bool=lambda **k:NS(**k))
+        ns=dict(TARGET_SYS=FCU_SYSTEM,json=json,math=math,time=NS(monotonic=lambda:10.),String=lambda **k:NS(**k),Bool=lambda **k:NS(**k))
         exec(compile(tree,str(path),'exec'),ns)
         self.node=ns['NorthManeuverNode']()
         self.node.logic=NorthManeuver(9.,5.);self.node.logic.last=9.95

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from robotx_graey_2026.api.navigation.dive_spin import (
-    DiveSpinRun, NOTE_OPERATOR, NOTE_PILOT, dive_target, random_resource_request)
+    DiveSpinRun, NOTE_OPERATOR, NOTE_PILOT, dive_target, fixed_resource_request)
 from robotx_graey_2026.api.navigation.radio_route import (
     RadioRouteRun, mission_plan, route_points)
 
@@ -50,11 +50,107 @@ class DiveSpinTests(unittest.TestCase):
         self.assertEqual(run.stage,'DESCEND')
         self.assertEqual(run.hold,run.forward_target)
 
-    def test_chris_resource_sequence_uses_robotx_two_color_order(self):
-        values=iter((2,0))
-        request=random_resource_request('run-7',lambda limit:next(values))
+    def test_chris_resource_sequence_is_fixed_in_robotx_two_color_order(self):
+        request=fixed_resource_request('run-7',['blue','RED'])
         self.assertEqual(request,dict(observation_id='chris-simple-dive:run-7',
             resource_color=3,delivery_circle_color=1,sequence=['BLUE','RED']))
+        self.assertEqual(fixed_resource_request('r',['ANY','GREEN'])['resource_color'],4)
+        for bad in (['RED','ANY'],['PINK','RED'],['RED'],'RED,BLUE',None):
+            with self.assertRaises(ValueError):fixed_resource_request('r',bad)
+
+    def test_chris_dive_reports_only_the_colours_in_its_plan(self):
+        plan=dict(kind='dive_spin',operator_kind='dive_here',mode='surface',map='local',
+                  dive=dict(depth_m=4.))
+        self.assertIsNone(DiveSpinRun(dict(plan,colors=[]),'none',0.).resource_request)
+        self.assertIsNotNone(DiveSpinRun(plan,'legacy-gui',0.).resource_request)
+        run=DiveSpinRun(dict(plan,colors=['GREEN','BLUE']),'set',0.)
+        self.assertEqual(run.resource_request['sequence'],['GREEN','BLUE'])
+
+    def test_no_spin_plan_goes_straight_back_up_at_depth(self):
+        run=DiveSpinRun(dict(kind='dive_spin',mode='surface',map='local',spin=False,
+                             dive=dict(depth_m=1.)), 'nospin',0.)
+        o=observation(local=(0.,0.,0.))
+        self.take_vehicle(run,o)
+        o['local']=(0.,0.,1.)
+        run.step(1.,o);run.step(2.2,o)
+        self.assertEqual(run.stage,'SURFACE')
+        self.assertEqual(run.spin_step,0)
+        self.assertEqual(run.target,run.hold)
+
+    SE=dict(kind='dive_spin',operator_kind='dive_here',mode='surface',map='local',competition=True,
+            spin=False,colors=['RED','BLUE'],hold_s=5.,report_hold_s=60.,dive=dict(depth_m=1.))
+
+    def dive_to_surface(self,plan=None):
+        """The SE plan to the moment it holds at depth; returns (run, o). Time is self.t."""
+        run=DiveSpinRun(dict(plan or self.SE),'se',0.)
+        o=observation(local=(0.,0.,0.))
+        self.take_vehicle(run,o,expected='FORWARD')
+        self.t=.5
+        o['local']=run.forward_target;self.go(run,o,5,'DESCEND')
+        o['local']=(run.hold[0],run.hold[1],1.);self.go(run,o,5,'HOLD')
+        return run,o
+
+    def go(self,run,o,seconds,until):
+        end=self.t+seconds
+        while self.t<end and run.stage!=until:
+            self.t+=.1;run.step(self.t,o)
+
+    def up(self,run,o,until='REPORT'):
+        self.go(run,o,10,'SURFACE');o['local']=run.hold;self.go(run,o,2,until)
+
+    def test_se_dive_holds_at_depth_then_surfaces(self):
+        run,o=self.dive_to_surface()
+        self.assertEqual((run.stage,run.phase),('HOLD','UNDERWATER'))
+        held=self.t
+        self.go(run,o,10,'SURFACE')
+        self.assertEqual(run.stage,'SURFACE')
+        self.assertAlmostEqual(self.t-held,5.,delta=.15)
+
+    def test_se_dive_reports_armed_at_the_surface_then_disarms(self):
+        run,o=self.dive_to_surface()
+        self.go(run,o,10,'SURFACE');o['local']=run.hold
+        actions=[];end=self.t+2
+        while self.t<end and run.stage!='REPORT':
+            self.t+=.1;actions=run.step(self.t,o)
+        self.assertEqual((run.stage,actions,run.phase),('REPORT',[('manual',None)],'SURFACE_NAV'))
+        o['mode']=19
+        self.assertEqual(run.step(self.t+.1,o),[('neutral',None)])
+        o['report_done']=True
+        self.assertEqual(run.step(self.t+.2,o),[('disarm',None)])
+        self.assertEqual(run.stage,'DISARM')
+        o['armed']=False;run.step(self.t+.3,o)
+        self.assertEqual(run.stage,'COMPLETE')
+        self.assertTrue(run.kill_requested)
+
+    def test_report_hold_gives_up_and_disarms(self):
+        run,o=self.dive_to_surface();self.up(run,o)
+        o['mode']=19;self.go(run,o,61,'DISARM')
+        self.assertEqual(run.stage,'DISARM')
+        self.assertIn('not confirmed',run.reason)
+
+    def test_report_stage_lets_a_pilot_take_over(self):
+        for change in (dict(armed=False),dict(mode=0)):
+            run,o=self.dive_to_surface();self.up(run,o)
+            o.update(change)
+            self.assertEqual(run.step(self.t+.1,o),[])
+            self.assertEqual(run.stage,'ABORTED')
+            self.assertFalse(run.kill_requested)
+
+    def test_report_stage_waits_for_manual_then_calls_guided_a_takeover(self):
+        run,o=self.dive_to_surface();self.up(run,o)
+        self.assertEqual(o['mode'],4)                      # the Cube has not switched yet
+        self.assertEqual(run.step(self.t+1.,o),[('manual',None)])
+        run.step(self.t+4.,o)
+        self.assertEqual(run.stage,'ABORTED')
+
+    def test_without_report_hold_the_dive_disarms_on_surfacing(self):
+        run,o=self.dive_to_surface(dict(self.SE,report_hold_s=0.))
+        self.up(run,o,'DISARM')
+        self.assertEqual(run.stage,'DISARM')
+
+    def test_hold_and_report_times_are_bounded(self):
+        for bad in (dict(hold_s=-1),dict(hold_s=500),dict(report_hold_s=True),dict(report_hold_s=1e9)):
+            with self.assertRaises(ValueError):DiveSpinRun(dict(self.SE,**bad),'x',0.)
 
     def test_dvl_target_is_bounded_and_near_floor_surfaces(self):
         run=DiveSpinRun(dict(kind='dive_spin',mode='surface',map='local',

@@ -10,11 +10,12 @@ from pathlib import Path
 from robotx_graey_2026.api.steady_node import SteadyNode as Node
 from std_msgs.msg import Bool, Float32, String
 from robotx_graey_2026.api.node_util import run
-from robotx_graey_2026.api.gui.navigation_view import NavigationView
+from robotx_graey_2026.api.gui.navigation_view import NavigationView, NAVIGATION_VIEW_KINDS
 from robotx_graey_2026.api.navigation.waypoint_logic import WaypointRun
 from robotx_graey_2026.api.navigation.guided_surface_mission import GuidedSurfaceRun
 from robotx_graey_2026.api.navigation.simple_sequence import SimpleSequenceRun
 from robotx_graey_2026.api.navigation.dive_spin import DiveSpinRun
+from robotx_graey_2026.api.navigation.rc_start import RcStartEdge
 from robotx_graey_2026.api.navigation.radio_route import RadioRouteRun
 from robotx_graey_2026.api.navigation.competition_route import CompetitionRouteRun
 from robotx_graey_2026.api.navigation.pipeline_recording import PipelineRecording
@@ -22,7 +23,7 @@ from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
 from robotx_graey_2026.api.navigation.surface_measurement import SurfaceMeasurement
 from robotx_graey_2026.api.navigation.surface_control import surface_velocity,SurfaceLeg,gentle_horizontal,StabilizeSurfaceControl
 from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
-from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL, MODE_POSHOLD, MODE_STABILIZE
+from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_GUIDED, MODE_MANUAL, MODE_POSHOLD, MODE_STABILIZE, TARGET_SYS, TARGET_COMP
 from robotx_graey_2026.api.comms.run_gate import RunGate
 
 
@@ -35,36 +36,51 @@ class WaypointMission(Node):
         from .odometry_profile import SHALLOW_LIMITS
         self.SHALLOW_LIMITS=SHALLOW_LIMITS.copy()
         for key, value in dict(plan_json='', run_id='', commissioned=False, simulation=False,
-                              mavlink='udpout:127.0.0.1:14553', result_file='').items():
+                              mavlink='udpout:127.0.0.1:14553', result_file='',
+                              rc_start=False, rc_start_channel=9, rc_high=1700).items():
             self.declare_parameter(key, value)
         cfg = {key: self.get_parameter(key).value for key in
-               ('plan_json', 'run_id', 'commissioned', 'simulation', 'mavlink', 'result_file')}
+               ('plan_json', 'run_id', 'commissioned', 'simulation', 'mavlink', 'result_file',
+                'rc_start', 'rc_start_channel', 'rc_high')}
         self.sim = cfg['simulation']
+        self.rc_start_mode=cfg['rc_start'] is True
         if self.sim and not (os.environ.get('GRAEY_RUNTIME_SCOPE') == 'sitl'
                             and os.environ.get('ROS_LOCALHOST_ONLY') == '1'
                             and os.environ.get('ROS_DOMAIN_ID') == '73'
                             and cfg['mavlink'] == 'udpout:127.0.0.1:14553'):
             raise ValueError('Simulation requires isolated localhost SITL domain and endpoint')
-        if not cfg['run_id'] or (not self.sim and not cfg['commissioned']):
+        if not cfg['run_id'] and not self.rc_start_mode:
+            raise ValueError('Mission run ID required')
+        if not self.sim and not cfg['commissioned']:
             raise ValueError('Mission run ID and commissioned live configuration required')
+        run_id=cfg['run_id'] or uuid.uuid4().hex
         plan=json.loads(cfg['plan_json'])
+        if self.rc_start_mode and not (plan.get('kind') == 'dive_spin'
+                                      and plan.get('operator_kind') == 'dive_here'
+                                      and plan.get('competition',False) is True):
+            raise ValueError('RC start is reserved for competition Chris Simple Dive')
         if type(plan.get('competition',False)) is not bool:
             raise ValueError('competition must be boolean')
-        self.run_gate=RunGate(plan.get('competition',False))
+        # The SE dive ignores RoboCommand's run ID (13 Nov 2026): any verified RunStart starts it.
+        self.run_gate=RunGate(plan.get('competition',False),match_run=not self.rc_start_mode)
+        self.se_wait_since=None
         self.competition_hold=None
         if plan.get('mode','surface')!='surface':raise ValueError('Only surface missions are supported')
         self.logic = (DiveSpinRun if plan.get('kind') == 'dive_spin' else
                       RadioRouteRun if plan.get('kind') == 'radio_route' else
                       SimpleSequenceRun if plan.get('kind') == 'simple_sequence' else
                       CompetitionRouteRun if 'points' in plan else
-                      GuidedSurfaceRun)(plan,cfg['run_id'],time.monotonic())
+                      GuidedSurfaceRun)(plan,run_id,time.monotonic())
+        self.rc_trigger=(RcStartEdge(cfg['rc_start_channel'],cfg['rc_high'])
+                         if self.rc_start_mode else None)
+        self.rc_started=not self.rc_start_mode
         self.result_file = cfg['result_file']
-        self.recorder = (PipelineRecording(Path(self.result_file).parent if self.result_file else Path.home()/'robotx_ws/logs', cfg['run_id'])
+        self.recorder = (PipelineRecording(Path(self.result_file).parent if self.result_file else Path.home()/'robotx_ws/logs', run_id)
                          if isinstance(self.logic, CompetitionRouteRun) and not self.sim and plan.get('recording_mode','automatic')=='automatic' else None)
         self.link = Link(cfg['mavlink'], 198, self.get_logger(),
             system=255 if isinstance(self.logic,GuidedSurfaceRun) else 1,
             node=None if self.sim else self,
-            kinds=set(NAVIGATION_VIEW_KINDS)|{'PARAM_VALUE','STATUSTEXT'})
+            kinds=set(NAVIGATION_VIEW_KINDS)|{'PARAM_VALUE','STATUSTEXT'}|({'RC_CHANNELS'} if self.rc_start_mode else set()))
         self.view = NavigationView()
         self.supervisor, self.safety = {}, {}
         self.bridge = {}
@@ -100,6 +116,7 @@ class WaypointMission(Node):
         self.create_subscription(String, '/graey/waypoint/abort', self.on_abort, 10)
         self.create_subscription(Float32, '/graey/dvl/altitude', self.on_altitude, 10)
         self.create_subscription(String,'/graey/comms/status',self.on_competition_status,10)
+        self.create_subscription(String,'/graey/comms/radio_mission_status',self.on_radio_status,10)
         self.create_timer(.02, self.pump)
         self.create_timer(.1, self.tick)
         self.create_timer(1., self.link.heartbeat)
@@ -107,14 +124,46 @@ class WaypointMission(Node):
         self.request()
 
     def on_competition_status(self,msg):
-        try:self.run_gate.update(json.loads(msg.data),time.monotonic())
+        try:
+            data=json.loads(msg.data)
+            if not isinstance(data,dict):return
+            self.competition_status=data
+            now=time.monotonic()
+            if not self.rc_start_mode:
+                self.run_gate.update(data,now)
+            elif self.rc_started and self.se_wait_since is not None and data.get('run_confirmed') is True:
+                stamp=data.get('run_started_monotonic')
+                if (type(stamp) in (int,float) and self.se_wait_since<=stamp<=now
+                        and (data.get('run_transport')!='rfd' or data.get('mission_run_id')==self.logic.run_id)):
+                    self.run_gate.update(data,now)
         except (ValueError,TypeError):pass
 
+    def on_radio_status(self,msg):
+        try:
+            data=json.loads(msg.data)
+            if isinstance(data,dict):self.radio_status,self.radio_status_at=data,time.monotonic()
+        except (ValueError,TypeError):pass
+
+    def report_done(self, now):
+        """Has the colour report gone out? Over RFD: every repeat sent. Over WiFi: broker PUBACK."""
+        resource=getattr(self.logic,'resource_request',None)
+        if resource is None:return False
+        oid=resource['observation_id']
+        radio=getattr(self,'radio_status',None) or {}
+        sent=radio.get('resource_report') or {}
+        if (0<=now-getattr(self,'radio_status_at',-math.inf)<2 and sent.get('observation_id')==oid
+                and isinstance(sent.get('sent'),int) and sent['sent']>=sent.get('of',1)):
+            return True
+        comms=getattr(self,'competition_status',None) or {}
+        return any(isinstance(r,dict) and r.get('observation_id')==oid and r.get('verdict')=='acknowledged'
+                   for r in comms.get('reports') or [])
+
     def request(self):
-        for mid in (24, 30, 32, 33, 49, 193):
+        for mid in ((24, 30, 32, 33, 49, 65, 193) if self.rc_start_mode
+                    else (24, 30, 32, 33, 49, 193)):
             self.link.command(511, mid, 100000)
         for name in self.SHALLOW_LIMITS:
-            self.link.send('param_request_read_send',1,1,name.encode(),-1)
+            self.link.send('param_request_read_send',TARGET_SYS,TARGET_COMP,name.encode(),-1)
 
     def limits_ready(self, now):
         for name,maximum in self.SHALLOW_LIMITS.items():
@@ -133,7 +182,7 @@ class WaypointMission(Node):
     def release_surface_controls(self):
         if self.pilot_override_active:
             # Release only the first eight pilot channels, not RF kill/arm inputs.
-            self.link.send('rc_channels_override_send',1,1,*([0]*8))
+            self.link.send('rc_channels_override_send',TARGET_SYS,TARGET_COMP,*([0]*8))
             self.pilot_override_active=False
 
     def send_surface(self, now, velocity, heading, o, stopping=False):
@@ -144,25 +193,31 @@ class WaypointMission(Node):
         if not o.get('fresh') and not o.get('navigation_hold_safe'):
             self.release_surface_controls();return
         command=self.stabilize_control.step(now,velocity,o['velocity_ned'],o['yaw'],heading,stopping)
-        self.link.send('manual_control_send',1,*command,0)
+        self.link.send('manual_control_send',TARGET_SYS,*command,0)
         self.pilot_override_active=True
         self.last_manual_control=command
 
+    def send_neutral(self):
+        """Centred sticks for the Cube (MANUAL_CONTROL to its own system id): no motion, and the
+        pilot-input failsafe stays fed while no RC reaches the vehicle."""
+        self.link.send('manual_control_send',TARGET_SYS,0,0,500,0,0)
+        self.pilot_override_active=True
+
     def send_guided_waypoint(self, target):
         """Give Cube a local NED waypoint; its GUIDED controller uses the EKF."""
-        self.link.send('manual_control_send',1,0,0,500,0,0)
+        self.link.send('manual_control_send',TARGET_SYS,0,0,500,0,0)
         self.pilot_override_active=True
         self.sent_target=tuple(target)
         # Position only: original GUIDED transit command.
-        self.link.send('set_position_target_local_ned_send',0,1,1,1,3576,
+        self.link.send('set_position_target_local_ned_send',0,TARGET_SYS,TARGET_COMP,1,3576,
             *target[:3],0.,0.,0.,0.,0.,0.,0.,0.)
 
     def send_guided_orientation(self,target):
-        self.link.send('manual_control_send',1,0,0,500,0,0)
+        self.link.send('manual_control_send',TARGET_SYS,0,0,500,0,0)
         self.pilot_override_active=True
         self.sent_target=tuple(target)
         # Position + absolute local yaw; Cube performs the turn while holding XYZ.
-        self.link.send('set_position_target_local_ned_send',0,1,1,1,2552,
+        self.link.send('set_position_target_local_ned_send',0,TARGET_SYS,TARGET_COMP,1,2552,
             *target[:3],0.,0.,0.,0.,0.,0.,target[3],0.)
 
     def on_status(self, msg):
@@ -220,7 +275,7 @@ class WaypointMission(Node):
         robust; CompetitionSender deduplicates the stable observation ID.
         """
         resource=getattr(self.logic,'resource_request',None)
-        if resource is None or self.logic.stage != 'COMPLETE':
+        if resource is None or self.logic.stage not in ('REPORT','DISARM','COMPLETE'):
             return None
         report=dict(resource)
         if gate is not None and gate.competition and gate.run_id is not None:
@@ -244,6 +299,15 @@ class WaypointMission(Node):
                 item=dict(at=time.monotonic(),severity=int(m.severity),text=str(m.text))
                 self.fc_status_text=(self.fc_status_text+[item])[-10:]
                 self.get_logger().warning('FC_STATUS_TEXT '+json.dumps(item))
+            if kind=='RC_CHANNELS' and self.rc_trigger is not None:
+                if self.rc_trigger.update(m):
+                    started=time.monotonic()
+                    self.rc_started=True
+                    self.logic.enter('WAIT_SURFACE',started,
+                                     'SE start received; taking onboard mission control')
+                    self.get_logger().warning('RC_SIMPLE_DIVE_START '+json.dumps(dict(
+                        run_id=self.logic.run_id,channel=self.rc_trigger.channel,
+                        pwm=self.rc_trigger.pwm)))
             if kind in ('LOCAL_POSITION_NED', 'ATTITUDE', 'GLOBAL_POSITION_INT'):
                 previous = self.stamps.get(kind, -1)
                 if m.time_boot_ms+1000 < previous:
@@ -334,23 +398,48 @@ class WaypointMission(Node):
     def tick(self):
         now = time.monotonic()
         self.sequence += 1
+        if self.rc_start_mode and not self.rc_started:
+            status=self.logic.snapshot()
+            status.update(stage='WAIT_RC',reason=('Waiting for SE: move SE low, then high to start'
+                if not self.rc_trigger.seen_low else 'SE low seen; move SE high to start'),
+                rc_start=self.rc_trigger.snapshot(),competition=False,competition_run_id=None,
+                control_mode='PILOT',telemetry_fresh=False)
+            self.task_pub.publish(String(data='TASK_NONE'))
+            self.auto_pub.publish(Bool(data=False))
+            self.pub.publish(String(data=json.dumps(status,allow_nan=False)))
+            return
         # Surface missions keep SURFACE intent throughout; no GPS source switch.
         if self.logic.stage not in self.logic.terminal:
             self.intent_pub.publish(String(data=json.dumps(dict(run_id=self.logic.run_id,
                 phase=self.logic.phase, sequence=self.sequence, target_gps=self.logic.plan))))
         o = self.observation(now)
+        o['report_done']=self.report_done(now)
         gate=getattr(self,'run_gate',None)
         if hasattr(self,'task_pub'):
+            # A transition into a task is RoboCommand's "attempt started" (rx_common.proto RxTask):
+            # report it only once RunStart has admitted the run, not while holding for it.
             self.task_pub.publish(String(data='TASK_INFRA_SURVEY_REPAIR' if gate is not None and gate.competition
-                and self.logic.stage not in self.logic.terminal else 'TASK_NONE'))
+                and gate.run_id is not None and self.logic.stage not in self.logic.terminal else 'TASK_NONE'))
         if gate is not None and gate.competition:
-            if gate.revoked:self.logic.abort(now,'Competition run ended or changed')
+            if (self.rc_start_mode and self.se_wait_since is not None and gate.run_id is None
+                    and o.get('fresh') and (not o.get('armed') or o.get('mode')!=MODE_POSHOLD)):
+                self.logic.abort(now,'Pilot or failsafe left the surface hold',pilot=True)
+            if o.get('abort') and self.logic.stage not in self.logic.terminal:self.logic.abort(now,'Stopped from the page')
+            elif gate.revoked:self.logic.abort(now,'Competition run ended or changed')
             # Competition readiness is an actual Cube POSHOLD, not a commanded
             # GUIDED target masquerading as a hold.  mission_claimed remains true,
             # so CompetitionTelemetry reports STATE_AUTO to RoboCommand.
             hold_ready=o.get('navigation_hold_safe') is True
             ready=bool(o.get('fresh') and o.get('armed') and o.get('mode')==MODE_POSHOLD
                        and hold_ready and not o.get('failure'))
+            if self.rc_start_mode and gate.run_id is None:
+                ready=ready and (o.get('bridge') or {}).get('surfaced') is True and not o.get('abort')
+                if not ready or self.logic.stage in self.logic.terminal:
+                    ready=False
+                    self.se_wait_since=None
+                    gate.sample={}
+                elif self.se_wait_since is None:
+                    self.se_wait_since=now
             admitted=gate.admit(now,ready)
             if not admitted and self.logic.stage not in self.logic.terminal:
                 if self.logic.stage not in ('WAIT_SURFACE','GUIDED','ARM'):
@@ -360,24 +449,32 @@ class WaypointMission(Node):
                         self.logic.abort(now,'Competition hold readiness lost')
                     else:
                         switching=o.get('mode')!=MODE_POSHOLD
+                        if self.rc_start_mode and not switching:self.logic.has_vehicle=True
                         if switching:self.link.set_mode(MODE_POSHOLD)
+                        # FS_PILOT_INPUT=2 disarms after 3 s without pilot input. Only RC fed it
+                        # during this wait: neutral sticks keep the hold alive if RC drops.
+                        self.send_neutral()
                         status=self.logic.snapshot()
                         status.update(stage='WAIT_RUN_START',reason=('Entering POSHOLD before RunStart'
-                            if switching else 'POSHOLD; waiting for verified RoboCommand RunStart'),
-                            competition=True,competition_ready=not switching,competition_run_id=None,
+                            if switching else 'POSHOLD; waiting for verified RoboCommand RunStart' if ready else 'POSHOLD; waiting for surface confirmation'),
+                            competition=True,competition_ready=ready,competition_run_id=None,
+                            se_mission=self.rc_start_mode,published_monotonic=now,
                             control_mode='POSHOLD')
                         self.auto_pub.publish(Bool(data=True))
                         self.pub.publish(String(data=json.dumps(status,allow_nan=False)))
                         return
             elif (admitted and self.logic.stage not in self.logic.terminal
+                    and (not self.rc_start_mode or self.logic.stage in ('WAIT_SURFACE','GUIDED','ARM'))
                     and o.get('mode') == MODE_POSHOLD):
                 # RunStart releases the real Cube POSHOLD into the executor's
                 # GUIDED control.  Do not let the ARM state interpret the
                 # intentional readiness mode as a pilot takeover.
+                self.send_neutral()
                 self.link.set_mode(MODE_GUIDED)
                 status=self.logic.snapshot()
                 status.update(stage='STARTING',reason='RunStart verified; entering GUIDED',
                     competition=True,competition_ready=True,competition_run_id=gate.run_id,
+                    se_mission=self.rc_start_mode,published_monotonic=now,
                     control_mode='GUIDED')
                 self.auto_pub.publish(Bool(data=True))
                 self.pub.publish(String(data=json.dumps(status,allow_nan=False)))
@@ -412,9 +509,9 @@ class WaypointMission(Node):
             elif action=='guided_alignment':
                 x,y,z,vx,vy,heading=payload
                 # Refresh ownership with neutral pilot input; GUIDED owns XYZ.
-                self.link.send('manual_control_send',1,0,0,500,0,0)
+                self.link.send('manual_control_send',TARGET_SYS,0,0,500,0,0)
                 self.pilot_override_active=True
-                self.link.send('set_position_target_local_ned_send',0,1,1,1,0b100111000000,x,y,z,vx,vy,0.,0.,0.,0.,heading,0.)
+                self.link.send('set_position_target_local_ned_send',0,TARGET_SYS,TARGET_COMP,1,0b100111000000,x,y,z,vx,vy,0.,0.,0.,0.,heading,0.)
             elif action in ('align_velocity','stop'):
                 # Alignment and braking need the same surface protection as transit.
                 # An abort with invalid depth must still be able to send a stop.
@@ -451,10 +548,12 @@ class WaypointMission(Node):
                     run_id=self.logic.run_id,action=action,stage=self.logic.stage,
                     reason=self.logic.reason,published_monotonic=now)))
                 if action=='guided' and isinstance(self.logic,GuidedSurfaceRun):
-                    self.link.send('manual_control_send',1,0,0,500,0,0)
+                    self.link.send('manual_control_send',TARGET_SYS,0,0,500,0,0)
                     self.pilot_override_active=True
                 if action=='manual':self.release_surface_controls()
                 self.link.set_mode(MODE_GUIDED if action=='guided' else MODE_STABILIZE if action=='stabilize' else MODE_MANUAL)
+            elif action == 'neutral':
+                self.send_neutral()
             elif action in ('arm', 'disarm'):
                 self.link.command(400, 1 if action == 'arm' else 0)
         if self.logic.stage in self.logic.terminal:self.release_surface_controls()
@@ -475,9 +574,9 @@ class WaypointMission(Node):
                            and isinstance(o['depth'], (int, float)) and o['depth'] > .2)
             if enabled != self.gps_enabled:
                 self.gps_enabled = enabled
-                self.link.send('param_set_send', 1, 1, b'SIM_GPS_DISABLE', float(not enabled), 9)
+                self.link.send('param_set_send', TARGET_SYS, TARGET_COMP, b'SIM_GPS_DISABLE', float(not enabled), 9)
         status = self.logic.snapshot()
-        status.update(competition=bool(gate and gate.competition),competition_run_id=gate.run_id if gate is not None else None)
+        status.update(se_mission=self.rc_start_mode,competition=bool(gate and gate.competition),competition_run_id=gate.run_id if gate is not None else None)
         resource_report=self.publish_resource_report(now,gate)
         if resource_report is not None:status['resource_request']=resource_report
         if isinstance(self.logic, CompetitionRouteRun):

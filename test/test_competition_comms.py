@@ -29,6 +29,17 @@ class TestOutbox(unittest.TestCase):
     def receipt(self,seq,verdict,kind='pipeline_survey'):
         self.sender.receive({'ocs_receipt':dict(vehicle_seq=seq,kind=kind,verdict=verdict)},0)
 
+    def test_se_wifi_start_requires_a_transition_not_a_reconnect_snapshot(self):
+        sync(self.sender,now=1)
+        self.assertIsNone(self.sender.status(1)['run_started_monotonic'])
+        sync(self.sender,now=2,state='DECLARED')
+        sync(self.sender,now=3)
+        sync(self.sender,now=5)
+        self.assertEqual(self.sender.status(5)['run_started_monotonic'],3)
+        self.sender.disconnected()
+        sync(self.sender,now=6)
+        self.assertIsNone(self.sender.status(6)['run_started_monotonic'])
+
     def test_requires_official_run(self):
         with self.assertRaises(ValueError):self.sender.survey('s',1,2,[1])
 
@@ -116,9 +127,10 @@ class TestOutbox(unittest.TestCase):
         self.assertEqual(self.sender.status(0)['pending'],0)
 
     def test_resource_has_official_task_and_colors(self):
-        sync(self.sender);self.sender.resource('r',1,4);self.sender.set_surface(True,0)
+        with self.assertRaises(ValueError):self.sender.resource('circle-any',1,4)
+        sync(self.sender);self.sender.resource('r',4,1);self.sender.set_surface(True,0)
         body = self.sender.due(0)[0]['graey_report']['report']['resource_delivery']
-        self.assertEqual(body,dict(task='TASK_INFRA_SURVEY_REPAIR',resource_color='COLOR_RED',delivery_circle_color='COLOR_ANY'))
+        self.assertEqual(body,dict(task='TASK_INFRA_SURVEY_REPAIR',resource_color='COLOR_ANY',delivery_circle_color='COLOR_RED'))
 
 class TestTelemetry(unittest.TestCase):
     def setUp(self):

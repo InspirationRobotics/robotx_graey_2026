@@ -127,7 +127,8 @@ def main(args=None):
             if self.radio_run is not None and 0<=now-self.radio_run['received_monotonic']<2:
                 run=self.radio_run['run_id']
                 data.update(run_id=run,remote_run_id=run,remote_state='RUNNING',run_confirmed=True,
-                            run_transport='rfd')
+                            run_transport='rfd',mission_run_id=self.radio_run.get('mission_run_id'),
+                            run_started_monotonic=self.radio_run.get('run_started_monotonic',self.radio_run['received_monotonic']))
             data.update(wifi=self.wifi.status(),tiers_request=self.tiers_request,telemetry_hold_reason=self.telemetry.reason,last_error=self.error,
                         published_monotonic=now)
             self.publisher.publish(String(data=json.dumps(data,allow_nan=False)))

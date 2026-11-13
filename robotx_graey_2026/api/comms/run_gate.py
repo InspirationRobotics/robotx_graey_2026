@@ -3,8 +3,13 @@ import math
 
 
 class RunGate:
-    def __init__(self, competition=False):
+    """match_run=False (the SE competition dive, 13 Nov 2026): the run ID is not compared.
+    The first fresh, confirmed RUNNING admits; nothing afterwards revokes, because a
+    different or ended run ID is no longer evidence about this mission. SA, pilot takeover,
+    Cube failsafes and the mission's own limits still end it."""
+    def __init__(self, competition=False, match_run=True):
         self.competition=competition
+        self.match_run=match_run
         self.run_id=None
         self.sample={}
         self.received=-math.inf
@@ -17,6 +22,7 @@ class RunGate:
             raise ValueError('invalid communications timestamp')
         self.sample,self.received=data,stamp
         run=data.get('remote_run_id',data.get('run_id'))
+        if not self.match_run:return
         if self.run_id is not None and 0<=now-stamp<2 and ((data.get('remote_state') in ('ENDED','DECLARED') and run==self.run_id)
                 or (data.get('run_confirmed') is True and run!=self.run_id)):
             self.revoked=True

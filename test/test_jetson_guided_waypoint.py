@@ -7,6 +7,7 @@ from unittest.mock import Mock
 from robotx_graey_2026.api.navigation.guided_surface_mission import GuidedSurfaceRun
 from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
 from robotx_graey_2026.api.navigation.waypoint_logic import ne_to_geo
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 
 
 class JetsonGuidedWaypointTests(unittest.TestCase):
@@ -35,13 +36,13 @@ class JetsonGuidedWaypointTests(unittest.TestCase):
     def test_transport_sends_position_only_to_cube_not_custom_joystick_steering(self):
         p=Path(__file__).parents[1]/'robotx_graey_2026/api/navigation/waypoint_mission.py'
         tree=ast.parse(p.read_text());tree.body=[n for n in tree.body if isinstance(n,ast.ClassDef)]
-        ns=dict(Node=object);exec(compile(tree,str(p),'exec'),ns)
+        ns=dict(Node=object,TARGET_SYS=FCU_SYSTEM,TARGET_COMP=FCU_COMPONENT);exec(compile(tree,str(p),'exec'),ns)
         cls=ns['WaypointMission'];node=cls.__new__(cls);node.link=Mock()
         node.send_guided_waypoint((6.,4.,-.1))
         calls=node.link.send.call_args_list
-        self.assertEqual(calls[0].args,('manual_control_send',1,0,0,500,0,0))
+        self.assertEqual(calls[0].args,('manual_control_send',FCU_SYSTEM,0,0,500,0,0))
         packet=calls[1].args
-        self.assertEqual(packet[:6],('set_position_target_local_ned_send',0,1,1,1,3576))
+        self.assertEqual(packet[:6],('set_position_target_local_ned_send',0,FCU_SYSTEM,FCU_COMPONENT,1,3576))
         self.assertEqual(packet[6:9],(6.,4.,-.1))
         self.assertTrue(packet[5] & 1024);self.assertTrue(packet[5] & 2048)
         self.assertFalse(packet[5] & 7)

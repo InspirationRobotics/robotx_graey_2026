@@ -12,8 +12,12 @@ Start on the radio page's Missions tab. It can be run again and again. How deep 
     GUIDED, ARM    take the vehicle; the spot, depth and heading it has now are the start
     FORWARD        Chris Simple Dive only: 1 m along the captured starting heading
     DESCEND        straight down to the target above, holding that spot and heading
-    SPIN           eight 45 degree turns, HOLD_S at each, back to the start heading
+    HOLD           plan hold_s > 0: stay at that depth, spot and heading for hold_s seconds
+    SPIN           eight 45 degree turns, HOLD_S at each, back to the start heading (plan spin)
     SURFACE        back up to SURFACED_M below the start depth, then straight to
+    REPORT         plan report_hold_s > 0 and a colour report: thrusters idle in MANUAL, still
+                   armed, so the heartbeat stays STATE_AUTO on Task 2 until the report has gone
+                   out (report_done) or report_hold_s runs out (13 Nov 2026)
     DISARM         and kill_requested: waypoint_mission asks kill_switch for the killed state
 
 radio_route.py runs the same dive at the end of a GPS route (begin() and surfaced() are the two
@@ -56,11 +60,16 @@ FLOOR_SAMPLES = 10                  # a second of DVL altitudes: the median igno
 START_LIMIT_S = 10.0                # GUIDED, ARM and DISARM each
 TELEMETRY_LIMIT_S = 3.0             # silence once it is moving
 WAIT_LIMIT_S = 15.0                 # silence before it has started: waypoint_mission's own topics take a moment
-DIVE_STAGES = {'DESCEND', 'SPIN', 'SURFACE'}
+DIVE_STAGES = {'DESCEND', 'HOLD', 'SPIN', 'SURFACE'}
 CHRIS_FORWARD_M = 1.0
+MAX_HOLD_S = 120.0                  # plan hold_s: time at depth
+MAX_REPORT_HOLD_S = 300.0           # plan report_hold_s: armed at the surface for the colour report
+REPORT_SWITCH_S = 3.0               # MANUAL must show within this after surfacing, or it is a takeover
+MODE_MANUAL = 19
 FORWARD_REACHED_M = 0.25
 FORWARD_LIMIT_S = 30.0
 RESOURCE_COLORS = {1: 'RED', 2: 'GREEN', 3: 'BLUE'}
+COLOR_CODES = {'RED': 1, 'GREEN': 2, 'BLUE': 3, 'ANY': 4}
 
 # Why a run ended early, small enough for the radio's status frame (status_codec.py carries it).
 NOTE_NONE, NOTE_OPERATOR, NOTE_PILOT, NOTE_SAFETY, NOTE_TIMEOUT, NOTE_TELEMETRY = range(6)
@@ -109,6 +118,36 @@ def random_resource_request(run_id, randbelow=None):
                 sequence=[RESOURCE_COLORS[value] for value in colors])
 
 
+def fixed_resource_request(run_id, colors):
+    """The two-colour RoboCommand ResourceDeliveryRequest for Chris Simple Dive, set in the plan.
+
+    colors = [resource tin, delivery circle], in the order the pipeline flashes them
+    (rx_reports.proto ResourceDeliveryRequest). The tin may be 'ANY' (Advanced tier: any tin);
+    the circle must be a real colour. These are not observed: the team sets them before the run.
+    A stable observation ID lets the outboxes deduplicate repeated terminal publications.
+    """
+    if not isinstance(run_id, str) or not run_id:
+        raise ValueError('Mission run ID required for the resource request')
+    if (not isinstance(colors, (list, tuple)) or len(colors) != 2
+            or not all(isinstance(c, str) for c in colors)):
+        raise ValueError('colors must be [resource, delivery_circle], e.g. ["RED", "BLUE"]')
+    resource, circle = (c.strip().upper() for c in colors)
+    if resource not in COLOR_CODES:
+        raise ValueError('resource colour must be RED, GREEN, BLUE or ANY, not %r' % resource)
+    if circle not in RESOURCE_COLORS.values():
+        raise ValueError('delivery circle colour must be RED, GREEN or BLUE, not %r' % circle)
+    return dict(observation_id=('chris-simple-dive:' + run_id)[:128],
+                resource_color=COLOR_CODES[resource], delivery_circle_color=COLOR_CODES[circle],
+                sequence=[resource, circle])
+
+
+def _seconds(value, limit, name):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) \
+            or not 0 <= value <= limit:
+        raise ValueError('%s must be 0..%g seconds, not %r' % (name, limit, value))
+    return float(value)
+
+
 def turn(a, b):
     """The signed angle from heading b to heading a, -pi to pi."""
     return (a - b + math.pi) % (2 * math.pi) - math.pi
@@ -123,12 +162,21 @@ class DiveSpinRun(GuidedSurfaceRun):
         self.plan = dict(plan, dive=dive)
         self.dive = dive
         self.forward_m = CHRIS_FORWARD_M if plan.get('operator_kind') == 'dive_here' else 0.0
-        self.resource_request = (random_resource_request(run_id)
-                                 if plan.get('operator_kind') == 'dive_here' else None)
+        # Fixed colours from the plan (core.launch.py). No colours: no colour report at all.
+        self.resource_request = (fixed_resource_request(run_id, plan['colors'])
+                                 if plan.get('operator_kind') == 'dive_here' and plan.get('colors')
+                                 else None)
+        if plan.get('operator_kind')=='dive_here' and 'colors' not in plan:
+            self.resource_request=random_resource_request(run_id)  # existing GUI plan
+        # spin: False goes straight back up once at depth (the 13 Nov competition mission).
+        self.spin = plan.get('spin', True) is not False
+        self.hold_s = _seconds(plan.get('hold_s', 0.0), MAX_HOLD_S, 'hold_s')
+        self.report_hold_s = _seconds(plan.get('report_hold_s', 0.0), MAX_REPORT_HOLD_S, 'report_hold_s')
         self.deepest = dive.get('depth_m', dive.get('max_depth_m'))     # below the start, at most
         self.limits = dict(GUIDED=START_LIMIT_S, ARM=START_LIMIT_S, DISARM=START_LIMIT_S,
                            FORWARD=FORWARD_LIMIT_S,
-                           DESCEND=15. + 15. * self.deepest, SURFACE=20. + 15. * self.deepest)
+                           DESCEND=15. + 15. * self.deepest, SURFACE=20. + 15. * self.deepest,
+                           HOLD=self.hold_s + 10., REPORT=self.report_hold_s)
         self.has_vehicle = False        # the Cube confirmed GUIDED for this run
         self.hold = None                # (north, east, down) where the dive starts: the spot it keeps
         self.floors = deque(maxlen=FLOOR_SAMPLES)   # the floor's "down", from DVL altitudes on this dive
@@ -232,11 +280,21 @@ class DiveSpinRun(GuidedSurfaceRun):
                     self.note = NOTE_NO_BOTTOM
                     self.enter('SURFACE', now, 'No bottom lock down to %.1f m: surfacing without the turn'
                                % self.deepest)
+                elif not self.spin and self.hold_s > 0:
+                    self.enter('HOLD', now, 'At depth: holding %.0f s' % self.hold_s)
+                elif not self.spin:
+                    self.target = self.hold
+                    self.enter('SURFACE', now, 'At depth: surfacing (no turn in this plan)')
                 else:
                     self.next_heading(now)
             elif late:
                 self.note = NOTE_DEPTH_NOT_REACHED
                 self.enter('SURFACE', now, 'Depth not reached in time (the floor?): surfacing without the turn')
+            return self.command(now, 'guided_orient', (*self.target, self.heading), interval=.1)
+        elif self.stage == 'HOLD':
+            if now - self.since >= self.hold_s:
+                self.target = self.hold
+                self.enter('SURFACE', now, 'Held %.0f s at depth: surfacing' % self.hold_s)
             return self.command(now, 'guided_orient', (*self.target, self.heading), interval=.1)
         elif self.stage == 'SPIN':
             wanted = self.heading + self.spin_step * 2 * math.pi / STEPS
@@ -250,9 +308,26 @@ class DiveSpinRun(GuidedSurfaceRun):
             return self.command(now, 'guided_orient', (*self.target, wanted), interval=.1)
         elif self.stage == 'SURFACE':
             self.target = self.hold
+            if late and self.report_hold_s and local[2] > self.hold[2] + SURFACED_M:
+                return self.fail(now,o,'Surface not reached before timeout',NOTE_TIMEOUT)
             if local[2] <= self.hold[2] + SURFACED_M or late:
                 return self.surfaced(now, o, local, yaw)
             return self.command(now, 'guided_orient', (*self.target, self.heading), interval=.1)
+        elif self.stage == 'REPORT':
+            # Up, thrusters idle in MANUAL, still the mission's: the heartbeat says AUTO / Task 2
+            # while the colour report goes out. A pilot who disarms or picks another mode has it.
+            mode, switching = o.get('mode'), now - self.since < REPORT_SWITCH_S
+            if o.get('armed') is False or mode not in (None, MODE_MANUAL, 4) or (mode == 4 and not switching):
+                self.note = NOTE_PILOT
+                self.abort(now, 'Pilot or failsafe took control at the surface', pilot=True)
+                return []
+            if o.get('report_done') is True or late:
+                self.enter('DISARM', now, 'Colour report sent: disarming' if o.get('report_done') is True
+                           else 'Colour report not confirmed in %.0f s: disarming anyway' % self.report_hold_s)
+                return self.command(now, 'disarm')
+            if mode == 4:
+                return self.command(now, 'manual', interval=.5)
+            return [('neutral', None)]
         elif self.stage == 'DISARM':
             if o.get('armed') and not late:
                 return self.command(now, 'disarm')
@@ -280,7 +355,10 @@ class DiveSpinRun(GuidedSurfaceRun):
         return []
 
     def surfaced(self, now, o, local, yaw):
-        """Back up from the dive: disarm, and the kill."""
+        """Back up from the dive: report first if this plan holds for it, then disarm and the kill."""
+        if self.report_hold_s > 0 and self.resource_request is not None:
+            self.enter('REPORT', now, 'Up: thrusters idle, sending the colour report')
+            return [('manual', None)]
         self.enter('DISARM', now, 'Up: disarming')
         return self.command(now, 'disarm')
 
@@ -311,6 +389,7 @@ class DiveSpinRun(GuidedSurfaceRun):
         s = super().snapshot()
         s.update(note=self.note, spin_step=self.spin_step, spin_steps=STEPS, headings_skipped=self.skipped,
                  kill_requested=self.kill_requested, dive=self.dive,
-                 forward_m=self.forward_m, forward_target=self.forward_target)
+                 forward_m=self.forward_m, forward_target=self.forward_target,
+                 hold_s=self.hold_s, report_hold_s=self.report_hold_s)
         return s
 

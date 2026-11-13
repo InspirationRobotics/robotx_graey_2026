@@ -41,6 +41,7 @@ class CompetitionSender:
         self.wall,self.team_id = wall,team_id
         self.surface = self.surface_at = self.status_at = self.heartbeat_body = None
         self.remote_run = self.remote_at = None
+        self.run_started_at = None
         self.remote_state = None
         self.course = None
         self.native_run = False
@@ -107,14 +108,17 @@ class CompetitionSender:
             segments=[rx.PIPELINE_SEGMENT[s] for s in p['segments']]))
 
     def resource(self,observation_id,resource_color,delivery_circle_color):
-        if (type(resource_color) is not int or resource_color not in (1,2,3)
-                or type(delivery_circle_color) is not int or delivery_circle_color not in (1,2,3,4)):
-            raise ValueError('resource color must be red/green/blue; circle may also be ANY')
+        # rx_reports.proto ResourceDeliveryRequest: the tin may be COLOR_ANY (Advanced tier);
+        # the delivery circle is always a real colour.
+        if (type(resource_color) is not int or resource_color not in (1,2,3,4)
+                or type(delivery_circle_color) is not int or delivery_circle_color not in (1,2,3)):
+            raise ValueError('resource color must be red/green/blue or ANY; circle must be red/green/blue')
         return self._event(observation_id,'resource_delivery',dict(task='TASK_INFRA_SURVEY_REPAIR',
             resource_color=rx.COLOR[resource_color],delivery_circle_color=rx.COLOR[delivery_circle_color]))
 
     def disconnected(self):
         self.native_run = False
+        self.run_started_at = None
         self.remote_at = None  # reconnect must learn current OCS run before sending retained reports
         self.report_envelope = False
         self.run_snapshot = {}
@@ -133,6 +137,10 @@ class CompetitionSender:
                 raise ValueError('invalid OCS run state')
             run = info.get('run_id')
             if run is not None:uint(run)
+            if info['state']!='RUNNING':self.run_started_at=None
+            elif self.remote_at is not None and self.remote_state=='DECLARED':
+                self.run_started_at=now
+            elif run!=self.remote_run:self.run_started_at=None
             self.remote_run,self.remote_state,self.remote_at = run,info.get('state'),now
             self.native_run = native is not None
             self.run_snapshot = dict(info)
@@ -187,7 +195,7 @@ class CompetitionSender:
         reports=[dict(zip(('sequence','run_id','observation_id','kind','verdict','detail'),row))
                  for row in self.db.execute('SELECT id,run,observation_id,kind,verdict,detail FROM events ORDER BY id DESC LIMIT 30')]
         return dict(run_id=self.run,remote_run_id=self.remote_run,remote_state=self.remote_state,
-            run_confirmed=bool(self.remote_at is not None and (self.native_run or 0 <= now-self.remote_at < 5) and self.remote_state=='RUNNING'),
+            run_started_monotonic=self.run_started_at,run_confirmed=bool(self.remote_at is not None and (self.native_run or 0 <= now-self.remote_at < 5) and self.remote_state=='RUNNING'),
             surface=self.surface,transmission_enabled=bool(self.status_at is not None and now-self.status_at < 1.5),
             telemetry_fresh=bool(self.status_at is not None and now-self.status_at < 1.5),pending=counts.get('pending',0),
             broker_acknowledged=counts.get('acknowledged',0),rejected=counts.get('held',0)+counts.get('dropped',0),

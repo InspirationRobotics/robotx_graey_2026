@@ -23,7 +23,8 @@ class TestCompetitionMissionGate(unittest.TestCase):
         exec(compile(ast.Module(body=[tick],type_ignores=[]),str(source),'exec'),namespace)
         node=SimpleNamespace(sequence=0,run_gate=RunGate(competition),competition_hold=None,
             intent_pub=Mock(),pub=Mock(),auto_pub=Mock(),send_guided_waypoint=Mock(),
-            link=Mock(),surface_measurement_status={})
+            link=Mock(),surface_measurement_status={},rc_start_mode=False,rc_started=True,se_wait_since=None,
+            publish_onboard_run=Mock(),send_neutral=Mock(),report_done=Mock(return_value=False))
         node.logic=SimpleNamespace(stage='ARM',terminal={'ABORTED','COMPLETE'},phase='SURFACE_NAV',
             run_id='local',plan={'mode':'surface'},snapshot=lambda:dict(stage='ARM'),
             step=Mock(side_effect=ExecutionReached()),abort=Mock())
@@ -37,6 +38,7 @@ class TestCompetitionMissionGate(unittest.TestCase):
         node.logic.step.assert_not_called()
         node.send_guided_waypoint.assert_not_called()
         node.link.set_mode.assert_called_once_with(16)
+        node.send_neutral.assert_called_once()      # FS_PILOT_INPUT stays fed while holding
         status=json.loads(node.pub.publish.call_args.args[0].data)
         self.assertEqual((status['stage'],status['control_mode'],status['competition_ready']),
                          ('WAIT_RUN_START','POSHOLD',False))
@@ -49,6 +51,7 @@ class TestCompetitionMissionGate(unittest.TestCase):
         status=json.loads(node.pub.publish.call_args.args[0].data)
         self.assertTrue(status['competition_ready'])
         node.auto_pub.publish.assert_called_once()
+        node.send_neutral.assert_called_once()
 
     def test_verified_start_unlocks_production_execution(self):
         node,tick=self.make_node(True)
@@ -62,6 +65,47 @@ class TestCompetitionMissionGate(unittest.TestCase):
                                         navigation_hold_safe=True,local=(1.,2.,.3))
         with self.assertRaises(ExecutionReached):tick()
         self.assertEqual(node.run_gate.run_id,70000)
+
+    def test_se_prepared_dive_waits_in_confirmed_surface_poshold_then_releases(self):
+        node,tick=self.make_node(True)
+        node.rc_start_mode=True
+        node.observation=lambda now:dict(fresh=True,armed=True,mode=16,failure='',
+                                        bridge=dict(surfaced=True),navigation_hold_safe=True,local=(1.,2.,.3))
+        tick()
+        status=json.loads(node.pub.publish.call_args.args[0].data)
+        self.assertEqual(status['stage'],'WAIT_RUN_START')
+        self.assertTrue(status['competition_ready'])
+        node.run_gate.update(dict(run_confirmed=True,remote_state='RUNNING',run_id=77),0.)
+        tick()
+        self.assertEqual(json.loads(node.pub.publish.call_args.args[0].data)['stage'],'STARTING')
+        node.observation=lambda now:dict(fresh=True,armed=True,mode=4,failure='',
+                                        bridge=dict(surfaced=True),navigation_hold_safe=True,local=(1.,2.,.3))
+        with self.assertRaises(ExecutionReached):tick()
+
+    def test_start_event_must_postdate_this_surface_wait(self):
+        node,tick=self.make_node(True)
+        node.rc_start_mode=True
+        node.observation=lambda now:dict(fresh=True,armed=True,mode=16,failure='',
+            bridge=dict(surfaced=True),navigation_hold_safe=True,local=(0.,0.,0.))
+        source=Path(__file__).parents[1]/'robotx_graey_2026/api/navigation/waypoint_mission.py'
+        fn=next(n for n in ast.walk(ast.parse(source.read_text())) if isinstance(n,ast.FunctionDef)
+                and n.name=='on_competition_status')
+        namespace=dict(time=SimpleNamespace(monotonic=lambda:0.),json=json)
+        exec(compile(ast.Module([fn],[]),str(source),'exec'),namespace)
+        def receive(stamp,mission='local'):
+            data=dict(run_confirmed=True,remote_state='RUNNING',run_transport='rfd',
+                run_id=0,mission_run_id=mission,run_started_monotonic=stamp,published_monotonic=0.)
+            namespace['on_competition_status'](node,SimpleNamespace(data=json.dumps(data)))
+        receive(0.)
+        tick()
+        self.assertIsNone(node.run_gate.run_id)
+        receive(-1.)
+        receive(0.,'previous-local-id')
+        tick()
+        self.assertIsNone(node.run_gate.run_id)
+        receive(0.)
+        tick()
+        self.assertEqual(node.run_gate.run_id,0)
 
     def test_local_mission_executes_without_ocs(self):
         node,tick=self.make_node(False)
@@ -110,3 +154,36 @@ class TestCompetitionMissionGate(unittest.TestCase):
         report=namespace['publish_resource_report'](node,1.,SimpleNamespace(competition=False,run_id=None))
         node.resource_pub.publish.assert_not_called()
         self.assertIn('no current RoboCommand run',report['report_state'])
+
+
+class TestReportDone(unittest.TestCase):
+    """WaypointMission.report_done: what ends the REPORT stage after surfacing."""
+    def setUp(self):
+        source=Path(__file__).parents[1]/'robotx_graey_2026/api/navigation/waypoint_mission.py'
+        cls=next(n for n in ast.parse(source.read_text()).body
+                 if isinstance(n,ast.ClassDef) and n.name=='WaypointMission')
+        fn=next(n for n in cls.body if isinstance(n,ast.FunctionDef) and n.name=='report_done')
+        namespace=dict(math=__import__('math'))
+        exec(compile(ast.Module(body=[fn],type_ignores=[]),str(source),'exec'),namespace)
+        self.done=namespace['report_done']
+        self.node=SimpleNamespace(logic=SimpleNamespace(resource_request=dict(observation_id='chris-simple-dive:se')))
+
+    def radio(self,sent,oid='chris-simple-dive:se',at=10.):
+        self.node.radio_status=dict(resource_report=dict(observation_id=oid,sent=sent,of=8))
+        self.node.radio_status_at=at
+
+    def test_done_when_every_rfd_repeat_has_gone_out(self):
+        self.radio(7);self.assertFalse(self.done(self.node,10.5))
+        self.radio(8);self.assertTrue(self.done(self.node,10.5))
+
+    def test_stale_or_other_report_is_not_done(self):
+        self.radio(8,at=5.);self.assertFalse(self.done(self.node,10.))
+        self.radio(8,oid='chris-simple-dive:old');self.assertFalse(self.done(self.node,10.5))
+
+    def test_wifi_broker_ack_also_counts(self):
+        self.node.competition_status=dict(reports=[dict(observation_id='chris-simple-dive:se',verdict='acknowledged')])
+        self.assertTrue(self.done(self.node,10.))
+
+    def test_no_colour_report_is_never_done(self):
+        self.node.logic.resource_request=None
+        self.assertFalse(self.done(self.node,10.))

@@ -136,9 +136,9 @@ class SitlMission(Node):
             return
         self.gps_enabled = enabled
         value = 0 if enabled else 1
-        self.link.send('param_set_send', 1, 1, b'SIM_GPS_DISABLE', value,
+        self.link.send('param_set_send', FCU_SYSTEM, FCU_COMPONENT, b'SIM_GPS_DISABLE', value,
                        mavutil.mavlink.MAV_PARAM_TYPE_REAL32)
-        self.link.send('param_request_read_send', 1, 1, b'SIM_GPS_DISABLE', -1)
+        self.link.send('param_request_read_send', FCU_SYSTEM, FCU_COMPONENT, b'SIM_GPS_DISABLE', -1)
         self.get_logger().info(f'SITL simulated GPS {"enabled" if enabled else "disabled"}')
 
     def gps_fix_is_stale_or_lost(self):

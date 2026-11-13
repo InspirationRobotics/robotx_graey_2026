@@ -5,7 +5,7 @@ import time
 from std_msgs.msg import String, Bool
 from robotx_graey_2026.api.steady_node import SteadyNode
 from robotx_graey_2026.api.node_util import run
-from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_MANUAL
+from robotx_graey_2026.api.pixhawk.mavlink import Link, MODE_MANUAL, TARGET_SYS
 from .north_maneuver import NorthManeuver
 
 
@@ -67,7 +67,7 @@ class NorthManeuverNode(SteadyNode):
             candidate_ready=(b.get('north_alignment') or {}).get('candidate_ready')))
         # Yield immediately on pilot mode change/kill/disarm; never fight takeover.
         if control and not was_terminal:
-            self.link.send('manual_control_send',1,x,self.logic.lateral_command,500,r,0)
+            self.link.send('manual_control_send',TARGET_SYS,x,self.logic.lateral_command,500,r,0)
         terminal=self.logic.stage in self.logic.terminal
         self.claim.publish(Bool(data=not terminal))
         self.pub.publish(String(data=json.dumps(dict(self.logic.snapshot(),published_monotonic=now,

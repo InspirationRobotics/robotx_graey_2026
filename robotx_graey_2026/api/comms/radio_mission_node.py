@@ -29,8 +29,8 @@ def accept_run_start(source_system, source_component, target_system, payload, se
     """Return (confirmed-event, ACK-payload) or (None, None).
 
     An early RunStart is deliberately not ACKed: fleet_link will retry it until a
-    prepared competition mission exists. A different run is published (so the
-    old gate revokes) but is not ACKed as if the old mission accepted it.
+    prepared mission exists. The SE dive accepts any ID only in its surface wait;
+    a lost ACK can be retransmitted once that same mission has taken the start.
     """
     if (source_system,source_component)!=(OCS_SYSTEM,OCS_COMPONENT) or target_system not in (0,COMPANION_SYSTEM):
         return None,None
@@ -39,8 +39,16 @@ def accept_run_start(source_system, source_component, target_system, payload, se
     if not active or active.get('competition') is not True:return None,None
     event=dict(run_id=data['run_id'],remote_run_id=data['run_id'],remote_state='RUNNING',
         run_confirmed=True,source='rfd',received_monotonic=now,published_monotonic=now)
-    if active.get('robocommand_run_id') not in (None,data['run_id']):return event,None
-    return event,rx.pack_ack(msg_id=rx.RUN_START,seq=sequence,src=rx.NODE_UUV)
+    if active.get('se_mission'):
+        ack=rx.pack_ack(msg_id=rx.RUN_START,seq=sequence,src=rx.NODE_OCS)
+        if active.get('admitted') is True:return None,ack
+        if not (active.get('state')=='WAIT_RUN_START' and active.get('ready') is True
+                and 0<=now-active.get('status_at',-math.inf)<1):return None,None
+        event['mission_run_id']=active['run_id']
+    elif active.get('robocommand_run_id') not in (None,data['run_id']):return event,None
+    # ACK.src is the node that SENT the acknowledged frame (codec pack_ack, catalogue 4.5): the
+    # OCS. The OCS matches only that; with NODE_UUV here it resent RunStart for 10 minutes.
+    return event,rx.pack_ack(msg_id=rx.RUN_START,seq=sequence,src=rx.NODE_OCS)
 
 
 def validate_mission(value):
@@ -193,6 +201,10 @@ class MissionBackend:
         if (active and active['kind']!='survey' and isinstance(status,dict)
                 and status.get('run_id')==active['run_id']):
             active['state']=status.get('stage',active.get('state'))
+            if status.get('se_mission') is True:
+                active.update(se_mission=True,ready=status.get('competition_ready') is True,
+                              status_at=status.get('published_monotonic',-math.inf),
+                              admitted=status.get('competition_run_id') is not None)
             if status.get('stage') in ('COMPLETE','ABORTED'):self.active=None
 
     def note_survey(self, status):
@@ -210,7 +222,8 @@ class MissionBackend:
     def status(self):
         return dict(selected=None if self.selected is None else {
             'revision': self.selected['revision'], 'kind': self.selected['mission']['kind'],
-            'point_count': len(self.selected['mission']['points'])}, active=self.active)
+            'point_count': len(self.selected['mission']['points'])},
+            active={k:v for k,v in self.active.items() if k!='status_at'} if self.active else None)
 
     def handle(self, request):
         if not isinstance(request, dict):
@@ -244,8 +257,97 @@ class MissionBackend:
         raise ValueError('unknown radio mission operation')
 
 
+class ResourceRadio:
+    """The colour report (RoboCommand ResourceDeliveryRequest) over RFD as RXL RESOURCE_DELIVERY.
+
+    The mission publishes it on /graey/comms/resource_request once it has surfaced and disarmed.
+    RXL has no ACK for it, so it is repeated: every PERIOD_S, only while a truthful heartbeat is
+    going out (the antenna is up and GPS is back), at most SENDS times and within WINDOW_S of the
+    first send. The OCS adapter drops identical repeats inside its 30 s horizon, so the window
+    stays under that and RoboCommand gets it once.
+    """
+    PERIOD_S, SENDS, WINDOW_S = 2.0, 8, 25.0
+    TASK = 3                                   # TASK_INFRA_SURVEY_REPAIR
+
+    def __init__(self):
+        self.observation = self.payload = None
+        self.sent, self.first_at, self.last_at = 0, None, -math.inf
+
+    def offer(self, data):
+        """A /graey/comms/resource_request sample. A new observation_id restarts the repeats."""
+        if not isinstance(data, dict):raise ValueError('resource request must be an object')
+        oid = data.get('observation_id')
+        if not isinstance(oid, str) or not oid:raise ValueError('resource request needs observation_id')
+        if oid == self.observation:return False
+        # Same rule as the WiFi outbox (rx_reports.proto): tin RED/GREEN/BLUE/ANY, circle a real
+        # colour. UNKNOWN (0) would be refused by the OCS after costing air time.
+        if (type(data.get('resource_color')) is not int or data['resource_color'] not in (1, 2, 3, 4)
+                or type(data.get('delivery_circle_color')) is not int
+                or data['delivery_circle_color'] not in (1, 2, 3)):
+            raise ValueError('resource tin must be 1-4 and delivery circle 1-3')
+        payload = rx.pack_resource_delivery(task=self.TASK, resource_color=data['resource_color'],
+                                            delivery_circle_color=data['delivery_circle_color'])
+        self.observation, self.payload = oid, payload
+        self.sent, self.first_at, self.last_at = 0, None, -math.inf
+        return True
+
+    def due(self, now, heartbeat_ok):
+        if self.payload is None or not heartbeat_ok or self.sent >= self.SENDS:return None
+        if self.first_at is not None and now - self.first_at > self.WINDOW_S:return None
+        if now - self.last_at < self.PERIOD_S:return None
+        self.sent += 1
+        self.last_at = now
+        if self.first_at is None:self.first_at = now
+        return self.payload
+
+    def status(self):
+        return None if self.observation is None else dict(observation_id=self.observation,
+            sent=self.sent, of=self.SENDS)
+
+
+class StartRepeat:
+    """Keeps an accepted RunStart in front of its mission until the mission has taken it.
+
+    The OCS sends RunStart once and stops when Graey ACKs it, but the mission only counts a
+    RunStart for 2 s (competition_link_node, RunGate) and only while it is ready in POSHOLD. So
+    the radio node repeats the event every tick, fresh, while the SAME mission (by its run_id)
+    is still waiting, for at most LIMIT_S. A later mission never inherits it.
+    """
+    LIMIT_S = 120.0
+    WAITING = (None, 'PREPARING', 'WAIT_RUN_START', 'STARTING')
+
+    def __init__(self):
+        self.event = self.mission = None
+        self.at = -math.inf
+
+    def accepted(self, event, mission_run_id, now):
+        self.event, self.mission, self.at = dict(event), mission_run_id, now
+
+    def due(self, active, now):
+        if self.event is None:return None
+        if (not isinstance(active, dict) or active.get('run_id') != self.mission
+                or active.get('state') not in self.WAITING or not 0 <= now - self.at <= self.LIMIT_S):
+            self.event = None
+            return None
+        return dict(self.event,run_started_monotonic=self.event['received_monotonic'],
+                    received_monotonic=now,published_monotonic=now)
+
+
 class HeartbeatCapture:
-    def __init__(self): self.value = None
+    """The sender interface CompetitionTelemetry.update() drives, minus the OCS outbox.
+
+    update() calls set_surface() whenever the navigation bridge reports a boolean
+    surfaced state, and assigns surface/status_at directly otherwise.  Without
+    set_surface() the 2 Hz heartbeat timer raised AttributeError as soon as depth
+    became valid (i.e. after Prepare, in the water), which killed this node and
+    with it the RFD heartbeat, mission replies and RunStart acknowledgement.
+    """
+    def __init__(self):
+        self.value = None
+        self.surface = self.surface_at = self.status_at = None
+    def set_surface(self, surface, now):
+        if type(surface) is not bool:raise ValueError('surface state must be boolean')
+        self.surface, self.surface_at = surface, now
     def update_status(self, **value): self.value = value
 
 
@@ -311,6 +413,9 @@ def main(args=None):
                                      lambda m:self._mission_status('waypoint',m.data), 10)
             self.create_subscription(String, '/graey/survey/status',
                                      lambda m:self._mission_status('survey',m.data), 10)
+            self.resource = ResourceRadio()
+            self.start_repeat = StartRepeat()
+            self.create_subscription(String, '/graey/comms/resource_request', self._resource, 10)
             self.error = None
             self.heartbeat_reason = 'waiting for measured competition telemetry'
             self.last_run = None
@@ -323,6 +428,13 @@ def main(args=None):
         def _status(self, name, raw):
             try:self.telemetry.put(name, json.loads(raw))
             except (ValueError, TypeError, json.JSONDecodeError) as exc:self.error = str(exc)
+
+        def _resource(self, msg):
+            try:
+                if self.resource.offer(json.loads(msg.data)):
+                    self.get_logger().warning('RFD_RESOURCE_REPORT queued '+msg.data)
+            except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+                self.error = 'resource report refused: %s' % exc
 
         def _mission_status(self, kind, raw):
             try:
@@ -368,15 +480,19 @@ def main(args=None):
             self._reply(request_id, result)
 
         def _run_start(self, msg, payload):
+            if getattr(msg,'target_component',0) not in (0,COMPANION_COMPONENT):return
             active=self.backend.active
             now = time.monotonic()
             event,ack=accept_run_start(msg.get_srcSystem(),msg.get_srcComponent(),
                 getattr(msg,'target_system',0),payload,msg.get_seq(),active,now)
-            if event is None:return
+            if event is None:
+                if ack is not None:self._send_tunnel(OCS_SYSTEM,OCS_COMPONENT,rx.payload_type(rx.ACK),ack)
+                return
             self.last_run=event
             self.run_pub.publish(String(data=json.dumps(event)))
             if ack is None:return
-            active.update(robocommand_run_id=event['run_id'],state='RUNNING_ADMITTED')
+            self.start_repeat.accepted(event, active.get('run_id'), now)
+            active.update(robocommand_run_id=event['run_id'])
             self._send_tunnel(OCS_SYSTEM, OCS_COMPONENT, rx.payload_type(rx.ACK), ack)
 
         def _consume(self, kind, msg):
@@ -395,13 +511,22 @@ def main(args=None):
 
         def _heartbeat(self):
             now = time.monotonic()
+            repeat = self.start_repeat.due(self.backend.active, now)
+            if repeat is not None:
+                self.run_pub.publish(String(data=json.dumps(repeat)))
             self.capture.value = None
-            self.telemetry.update(self.capture, now)
             try:
+                # Inside the guard: a telemetry fault withholds one heartbeat and is
+                # reported in heartbeat_reason; it must never end the radio endpoint.
+                self.telemetry.update(self.capture, now)
                 payload = build_heartbeat(self.capture.value)
                 self._send_tunnel(0, 0, rx.payload_type(rx.HEARTBEAT), payload)
                 self.heartbeat_reason = None
-            except (ValueError, TypeError, KeyError) as exc:
+                report = self.resource.due(now, self.capture.surface is True)
+                if report is not None:
+                    self._send_tunnel(OCS_SYSTEM, OCS_COMPONENT,
+                                      rx.payload_type(rx.RESOURCE_DELIVERY), report)
+            except (ValueError, TypeError, KeyError, AttributeError) as exc:
                 self.heartbeat_reason = self.telemetry.reason or str(exc)
             # A valid private status beacon establishes the companion route even while
             # competition telemetry is incomplete. It never fabricates a heartbeat.
@@ -419,6 +544,7 @@ def main(args=None):
             self.status_pub.publish(String(data=json.dumps(dict(
                 online=True, companion_system=COMPANION_SYSTEM, component=COMPANION_COMPONENT,
                 selected=self.backend.status()['selected'], active=self.backend.status()['active'],
+                resource_report=self.resource.status(),
                 last_run=self.last_run, error=self.error, heartbeat_reason=self.heartbeat_reason,
                 published_monotonic=time.monotonic()))))
 

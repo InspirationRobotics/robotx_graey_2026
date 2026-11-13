@@ -10,7 +10,8 @@ COMPONENTS = {191,193,194,195,197,198,201}
 RADIO_COMPONENT = 201
 RADIO_SYSTEM = 43
 RADIO_DESTINATIONS = {(250,190),(254,191)}
-RADIO_PAYLOAD_TYPES = {0x9001,0x8010,0x8038}
+# 0x8013 RESOURCE_DELIVERY: the colour report, to the OCS only (radio_mission_node ResourceRadio).
+RADIO_PAYLOAD_TYPES = {0x9001,0x8010,0x8013,0x8038}
 
 
 class GatewayPolicy:
@@ -42,6 +43,7 @@ class GatewayPolicy:
                             (target==(0,0) and ptype in (0x9001,0x8010)))
             allowed=(component==RADIO_COMPONENT and message.get_srcSystem()==RADIO_SYSTEM
                     and destination_ok and ptype in RADIO_PAYLOAD_TYPES
+                    and (ptype!=0x8013 or target==(250,190))
                     and type(length) is int and 0<length<=128)
             return allowed, None if allowed else 'invalid companion radio tunnel'
         if (getattr(message,'target_system',FCU_SYSTEM) not in (0,FCU_SYSTEM)

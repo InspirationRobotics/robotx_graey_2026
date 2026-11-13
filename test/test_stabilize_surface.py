@@ -1,6 +1,7 @@
 import math
 import unittest
 from robotx_graey_2026.api.navigation.surface_control import StabilizeSurfaceControl
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 
 class StabilizeSurfaceTests(unittest.TestCase):
     def test_cardinal_rotation_and_neutral_vertical(self):
@@ -34,16 +35,17 @@ class SurfaceTransportTests(unittest.TestCase):
         from robotx_graey_2026.api.navigation.guided_surface_mission import GuidedSurfaceRun
         path=Path(__file__).parents[1]/'robotx_graey_2026/api/navigation/waypoint_mission.py'
         tree=ast.parse(path.read_text());tree.body=[n for n in tree.body if isinstance(n,ast.ClassDef)]
-        ns=dict(Node=object,math=math,GuidedSurfaceRun=GuidedSurfaceRun,MODE_STABILIZE=0)
+        ns=dict(Node=object,math=math,GuidedSurfaceRun=GuidedSurfaceRun,MODE_STABILIZE=0,
+                TARGET_SYS=FCU_SYSTEM,TARGET_COMP=FCU_COMPONENT)
         exec(compile(tree,str(path),'exec'),ns)
         node=ns['WaypointMission'].__new__(ns['WaypointMission'])
         node.logic=GuidedSurfaceRun(dict(lat=33.,lon=-117.,mode='surface',map='geographic',alignment_corridor_confirmed=True),'r',0.)
         node.link=Mock();node.stabilize_control=StabilizeSurfaceControl();node.pilot_override_active=False
         o=dict(mode=0,armed=True,failure='',fresh=True,velocity_ned=(0,0,5),yaw=0.)
         node.send_surface(0.,(.1,0,-99),0.,o)
-        self.assertEqual(node.link.send.call_args.args,('manual_control_send',1,4,0,500,0,0))
+        self.assertEqual(node.link.send.call_args.args,('manual_control_send',FCU_SYSTEM,4,0,500,0,0))
         o['mode']=19
         node.send_surface(.1,(.1,0,-99),0.,o)
-        self.assertEqual(node.link.send.call_args.args,('rc_channels_override_send',1,1,*([0]*8)))
+        self.assertEqual(node.link.send.call_args.args,('rc_channels_override_send',FCU_SYSTEM,FCU_COMPONENT,*([0]*8)))
         self.assertFalse(node.pilot_override_active)
         node.link.reset_mock();node.send_surface(.2,(.1,0,0),0.,o);node.link.send.assert_not_called()

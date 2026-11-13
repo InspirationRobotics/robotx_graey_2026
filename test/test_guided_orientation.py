@@ -7,6 +7,7 @@ from robotx_graey_2026.api.navigation.guided_orientation import GuidedOrientatio
 from robotx_graey_2026.api.navigation.guided_surface_mission import GuidedSurfaceRun
 from robotx_graey_2026.api.navigation.geographic_frame import GeographicFrame
 from robotx_graey_2026.api.navigation.waypoint_logic import ne_to_geo
+from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 
 
 class OrientationTests(unittest.TestCase):
@@ -43,7 +44,7 @@ class OrientationTests(unittest.TestCase):
     def test_transport_yaw_only_during_orientation_no_speed_command(self):
         p=Path(__file__).parents[1]/'robotx_graey_2026/api/navigation/waypoint_mission.py'
         tree=ast.parse(p.read_text());tree.body=[n for n in tree.body if isinstance(n,ast.ClassDef)]
-        ns=dict(Node=object);exec(compile(tree,str(p),'exec'),ns)
+        ns=dict(Node=object,TARGET_SYS=FCU_SYSTEM,TARGET_COMP=FCU_COMPONENT);exec(compile(tree,str(p),'exec'),ns)
         node=ns['WaypointMission'].__new__(ns['WaypointMission']);node.link=Mock()
         node.send_guided_orientation((0.,0.,-.1,1.))
         self.assertEqual(node.link.send.call_args.args[5],2552)
