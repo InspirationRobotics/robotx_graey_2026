@@ -64,6 +64,12 @@ Test and pipeline missions retain their existing depth behavior. The mission
 start never depends on RFD; the normal team OCS/Wi-Fi path remains the sole
 RunStart and RoboCommand report path for this mode.
 
+When SE is accepted, GRAEY's onboard recording service starts both camera and
+sonar into the persistent Jetson recording volume before the mission waits for
+RunStart. Recording does not depend on the laptop or either transport. It stops
+on completion or abort. A recorder failure is exposed in mission status and
+logs but does not block POSHOLD, RunStart admission, or motion.
+
 The Cube remains the GUIDED/POSHOLD motion controller and MAVLink relay; the Jetson remains the mission executor. MAVProxy remains the sole Cube serial owner. The retired Chris component-199 GUI/protocol and duplicate recording owner are not revived.
 
 ## Navigation and recording

@@ -16,6 +16,7 @@ from robotx_graey_2026.api.navigation.guided_surface_mission import GuidedSurfac
 from robotx_graey_2026.api.navigation.simple_sequence import SimpleSequenceRun
 from robotx_graey_2026.api.navigation.dive_spin import DiveSpinRun
 from robotx_graey_2026.api.navigation.rc_start import RcStartEdge
+from robotx_graey_2026.api.navigation.onboard_recording import OnboardMissionRecording
 from robotx_graey_2026.api.navigation.radio_route import RadioRouteRun
 from robotx_graey_2026.api.navigation.competition_route import CompetitionRouteRun
 from robotx_graey_2026.api.navigation.pipeline_recording import PipelineRecording
@@ -74,6 +75,8 @@ class WaypointMission(Node):
         self.rc_started=not self.rc_start_mode
         self.rc_report_run_id=None
         self.rc_report_run_at=-math.inf
+        self.onboard_recorder=(OnboardMissionRecording(
+            run_id,self.get_logger().warning) if self.rc_start_mode and not self.sim else None)
         self.result_file = cfg['result_file']
         self.recorder = (PipelineRecording(Path(self.result_file).parent if self.result_file else Path.home()/'robotx_ws/logs', run_id)
                          if isinstance(self.logic, CompetitionRouteRun) and not self.sim and plan.get('recording_mode','automatic')=='automatic' else None)
@@ -147,6 +150,8 @@ class WaypointMission(Node):
         return True
 
     def destroy_node(self):
+        if getattr(self, 'onboard_recorder', None) is not None:
+            self.onboard_recorder.close()
         if getattr(self, 'recorder', None) is not None:
             self.recorder.close()
         self.release_surface_controls()
@@ -286,6 +291,7 @@ class WaypointMission(Node):
                 if self.rc_trigger.update(m):
                     started=time.monotonic()
                     self.rc_started=True
+                    if getattr(self,'onboard_recorder',None) is not None:self.onboard_recorder.start()
                     self.logic.enter('WAIT_SURFACE',started,
                                      'SE start received; taking onboard mission control')
                     self.publish_onboard_run(started,True)
@@ -389,6 +395,7 @@ class WaypointMission(Node):
                 if not self.rc_trigger.seen_low else 'SE low seen; move SE high to start'),
                 rc_start=self.rc_trigger.snapshot(),competition=False,competition_run_id=None,
                 control_mode='PILOT',telemetry_fresh=False)
+            if getattr(self,'onboard_recorder',None) is not None:status['recording']=self.onboard_recorder.snapshot()
             self.task_pub.publish(String(data='TASK_NONE'))
             self.publish_onboard_run(now,False)
             self.auto_pub.publish(Bool(data=False))
@@ -428,6 +435,7 @@ class WaypointMission(Node):
                             if switching else 'POSHOLD; waiting for verified RoboCommand RunStart'),
                             competition=True,competition_ready=not switching,competition_run_id=None,
                             control_mode='POSHOLD')
+                        if getattr(self,'onboard_recorder',None) is not None:status['recording']=self.onboard_recorder.snapshot()
                         self.auto_pub.publish(Bool(data=True))
                         self.pub.publish(String(data=json.dumps(status,allow_nan=False)))
                         return
@@ -441,6 +449,7 @@ class WaypointMission(Node):
                 status.update(stage='STARTING',reason='RunStart verified; entering GUIDED',
                     competition=True,competition_ready=True,competition_run_id=gate.run_id,
                     control_mode='GUIDED')
+                if getattr(self,'onboard_recorder',None) is not None:status['recording']=self.onboard_recorder.snapshot()
                 self.auto_pub.publish(Bool(data=True))
                 self.pub.publish(String(data=json.dumps(status,allow_nan=False)))
                 return
@@ -519,7 +528,9 @@ class WaypointMission(Node):
                 self.link.set_mode(MODE_GUIDED if action=='guided' else MODE_STABILIZE if action=='stabilize' else MODE_MANUAL)
             elif action in ('arm', 'disarm'):
                 self.link.command(400, 1 if action == 'arm' else 0)
-        if self.logic.stage in self.logic.terminal:self.release_surface_controls()
+        if self.logic.stage in self.logic.terminal:
+            self.release_surface_controls()
+            if getattr(self,'onboard_recorder',None) is not None:self.onboard_recorder.stop()
         if getattr(self.logic,'kill_requested',False) and not self.sim:self.request_kill(now)
         if self.logic.stage=='ABORTED' and self.logic.abort_context is None:
             self.logic.abort_context=dict(telemetry_fresh=bool(o['fresh']),
@@ -544,6 +555,8 @@ class WaypointMission(Node):
         if resource_report is not None:status['resource_request']=resource_report
         if isinstance(self.logic, CompetitionRouteRun):
             status['recording'] = o['recording']
+        elif getattr(self,'onboard_recorder',None) is not None:
+            status['recording'] = self.onboard_recorder.snapshot()
         paused=status['navigation_pause']['active']
         if paused!=self.last_pause:
             self.last_pause=paused
