@@ -85,9 +85,11 @@ def distance_bearing(a, b):
 # ---------------- MAVLink: the SE button and the QGC plan ----------------
 
 class Fcu:
-    """MAVLink through Beichen's telemetry_gateway (Nov 9): it owns the only MAVProxy port and passes frames
-    over the ROS topics /graey/fcu/rx and /graey/fcu/tx. We send as the mission component, 198 - the gateway
-    refuses unregistered ones. It already streams RC_CHANNELS at 10 Hz, so we ask for nothing."""
+    """MAVLink through Beichen's telemetry_gateway: it owns the only MAVProxy port, publishes each Cube
+    message kind on /graey/fcu/mav/<kind> and sends what arrives on /graey/fcu/tx. We send as the mission
+    component, 198 - the gateway refuses unregistered ones - and receive only the kinds below: RC_CHANNELS
+    for SE (already streamed at 10 Hz) and the two replies to reading the QGC plan."""
+    KINDS = ('RC_CHANNELS', 'MISSION_COUNT', 'MISSION_ITEM_INT')
 
     def __init__(self):
         import threading
@@ -99,7 +101,7 @@ class Fcu:
         rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
         self.rclpy = rclpy
         self.node = Node('survey_run')
-        self.link = Link('ros', COMPONENT, Logger(), node=self.node)
+        self.link = Link('ros', COMPONENT, Logger(), node=self.node, kinds=self.KINDS)
         self.spin = threading.Thread(target=self._spin, daemon=True)
         self.spin.start()
 
@@ -167,7 +169,7 @@ def read_plan(fcu):
     for seq in range(cnt.count):
         for _ in range(3):
             fcu.send('mission_request_int_send', 1, 1, seq, 0)
-            it = fcu.recv(('MISSION_ITEM_INT', 'MISSION_ITEM'), 2)
+            it = fcu.recv(('MISSION_ITEM_INT',), 2)
             if it is not None and it.seq == seq:
                 break
         else:
@@ -178,7 +180,7 @@ def read_plan(fcu):
     for it in items:
         if it.seq == 0 or it.command != NAV_WAYPOINT:
             continue
-        lat, lon = (it.x / 1e7, it.y / 1e7) if it.get_type() == 'MISSION_ITEM_INT' else (it.x, it.y)
+        lat, lon = it.x / 1e7, it.y / 1e7
         if abs(lat) < 1e-6 and abs(lon) < 1e-6:
             continue
         pts.append((lat, lon))

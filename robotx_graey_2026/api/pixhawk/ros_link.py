@@ -17,16 +17,19 @@ from .identity import FCU_COMPONENT, FCU_SYSTEM
 FCU_RX_KINDS = frozenset({
     'ATTITUDE', 'EKF_STATUS_REPORT', 'GLOBAL_POSITION_INT',
     'GPS_GLOBAL_ORIGIN', 'GPS_RAW_INT', 'HEARTBEAT',
-    'LOCAL_POSITION_NED', 'PARAM_VALUE', 'RC_CHANNELS',
+    'LOCAL_POSITION_NED', 'MISSION_COUNT', 'MISSION_ITEM_INT',
+    'PARAM_VALUE', 'RC_CHANNELS',
     'SCALED_PRESSURE', 'SCALED_PRESSURE2', 'SCALED_PRESSURE3',
     'STATUSTEXT', 'TIMESYNC', 'TUNNEL',
 })
 
 # Crusader's telemetry bridge keeps only the newest sample for sensor/state
 # streams.  Ordered protocol traffic must remain lossless: dropping one TUNNEL
-# chunk or PARAM_VALUE reply corrupts the transaction rather than merely
-# skipping an old display sample.
-ORDERED_RX_KINDS = frozenset({'PARAM_VALUE', 'STATUSTEXT', 'TUNNEL'})
+# chunk, PARAM_VALUE reply or mission-download item corrupts the transaction
+# rather than merely skipping an old display sample.  MISSION_COUNT and
+# MISSION_ITEM_INT answer tools/survey_run.py reading the QGC plan off the Cube.
+ORDERED_RX_KINDS = frozenset({'MISSION_COUNT', 'MISSION_ITEM_INT', 'PARAM_VALUE',
+                              'STATUSTEXT', 'TUNNEL'})
 
 
 def mav_topic(kind):
