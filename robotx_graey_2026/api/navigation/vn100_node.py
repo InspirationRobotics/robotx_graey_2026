@@ -56,6 +56,12 @@ class VN100Node(Node):
 
         self.pub_imu = self.create_publisher(Imu, '/graey/vn100/imu', 10)
         self.pub_hdg = self.create_publisher(Float32, '/graey/vn100/heading', 10)
+        # Navigation retains the full-rate typed feeds above.  The GUI only
+        # needs a bounded latest-value view, so avoid making it process both
+        # high-rate topics independently.
+        self.pub_gui = self.create_publisher(String, '/graey/vn100/gui', 1)
+        self.gui_latest = None
+        self.gui_published = -float('inf')
         self.ser = None
         self.calibration = VNCalibration()
         self.calibration_pub = self.create_publisher(String, '/graey/vn100/calibration', 10)
@@ -64,6 +70,7 @@ class VN100Node(Node):
         self.buf = b''
         self.last_hdg = None
         self.create_timer(0.01, self.tick)
+        self.create_timer(0.1, self.publish_gui)
         self.create_timer(2.0, self.report)
         self.create_timer(.5, self.calibration_tick)
 
@@ -113,6 +120,13 @@ class VN100Node(Node):
 
     def report(self):
         self.get_logger().debug(f'heading={self.last_hdg}')
+
+    def publish_gui(self):
+        latest = self.gui_latest
+        if latest is None or latest['received_monotonic'] <= self.gui_published:
+            return
+        self.pub_gui.publish(String(data=json.dumps(latest, separators=(',', ':'))))
+        self.gui_published = latest['received_monotonic']
 
     def tick(self):
         if self.ser is None:
@@ -191,6 +205,14 @@ class VN100Node(Node):
         m.linear_acceleration.x, m.linear_acceleration.y, m.linear_acceleration.z = ax, ay, az
         self.pub_imu.publish(m)
         self.pub_hdg.publish(Float32(data=float(hdg)))
+        self.gui_latest = dict(
+            received_monotonic=time.monotonic(),
+            heading=float(hdg),
+            orientation=list(q),
+            angular_velocity=[gx, gy, gz],
+            linear_acceleration=[ax, ay, az],
+            frame=m.header.frame_id,
+        )
 
 
 def main():

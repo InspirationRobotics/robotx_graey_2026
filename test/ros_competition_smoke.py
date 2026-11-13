@@ -28,6 +28,7 @@ from std_msgs.msg import String
 from robotx_graey_2026.api.comms import competition_link_node as target
 from robotx_graey_2026.api.comms.competition_wifi import WifiLink
 from robotx_graey_2026.api.pixhawk.mavlink import mavutil
+from robotx_graey_2026.api.pixhawk.ros_link import mav_topic
 
 
 def main():
@@ -73,7 +74,9 @@ def main():
 
     def exercise(node):
         fixture=Node('competition_smoke_inputs')
-        fcu=fixture.create_publisher(String,'/graey/fcu/rx',200)
+        fcu={kind:fixture.create_publisher(String,mav_topic(kind),20) for kind in (
+            'EKF_STATUS_REPORT','LOCAL_POSITION_NED','ATTITUDE','HEARTBEAT',
+            'GLOBAL_POSITION_INT','GPS_RAW_INT')}
         encoder=mavutil.mavlink.MAVLink(None,srcSystem=3,srcComponent=1)
         def telemetry():
             stamp=int(time.monotonic()*1e6);boot=(stamp//1000)%0xFFFFFFFF
@@ -85,7 +88,12 @@ def main():
                 encoder.gps_raw_int_encode(stamp,3,12806000,1038557000,10000,100,100,50,9000,15,
                     5900,500,1000,0,0,0)]
             for message in messages:
-                fcu.publish(String(data=json.dumps(dict(received_monotonic=time.monotonic(),frame=bytes(message.pack(encoder)).hex()))))
+                kind=message.get_type()
+                fcu[kind].publish(String(data=json.dumps(dict(
+                    received_monotonic=time.monotonic(),kind=kind,
+                    source_system=3,source_component=1,sequence=encoder.seq,
+                    flightmode='GUIDED' if kind=='HEARTBEAT' else None,
+                    fields=message.to_dict()),default=list)))
                 encoder.seq=(encoder.seq+1)%256
         topics=('navigation/bridge_status','control_watchdog/status','comms/current_task',
                 'comms/pipeline_survey','comms/resource_request')

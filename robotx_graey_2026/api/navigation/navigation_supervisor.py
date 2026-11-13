@@ -9,18 +9,30 @@ from robotx_graey_2026.api.node_util import run
 class NavigationSupervisor(Node):
     def __init__(self):
         super().__init__('navigation_supervisor')
-        self.bridge={};self.received=None;self.mission={}
+        self.bridge={};self.received=None;self.mission={};self.bridge_revision=0;self.gui_revision=-1
         self.pub=self.create_publisher(String,'/graey/navigation/status',10)
+        # Crusader's GCS bridge projects cached vehicle state at 2 Hz.  Keep
+        # the full-rate bridge feed for navigation consumers, while giving the
+        # display the same bounded latest-state cadence.
+        self.gui_pub=self.create_publisher(String,'/graey/navigation/gui_snapshot',1)
         self.create_subscription(String,'/graey/navigation/bridge_status',self.observe,10)
         self.create_subscription(String,'/graey/waypoint/status',self.observe_mission,10)
         self.create_timer(.1,self.tick)
+        self.create_timer(.5,self.publish_gui)
 
     def observe(self,msg):
         try:
             value=json.loads(msg.data)
             if not isinstance(value,dict):return
             self.bridge=value;self.received=time.monotonic()
+            self.bridge_revision=getattr(self,'bridge_revision',0)+1
         except (ValueError,TypeError):pass
+
+    def publish_gui(self):
+        if self.received is None or self.gui_revision == self.bridge_revision:
+            return
+        self.gui_pub.publish(String(data=json.dumps(self.bridge,allow_nan=False)))
+        self.gui_revision=self.bridge_revision
 
     def observe_mission(self,msg):
         try:

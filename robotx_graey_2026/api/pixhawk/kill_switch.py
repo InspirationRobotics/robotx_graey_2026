@@ -75,7 +75,6 @@ AUTO_MODES = {'AUTO', 'GUIDED', 'CIRCLE', 'POSHOLD', 'SURFACE', 'RTL'}
 REQUEST_TOPIC = '/graey/control_watchdog/request'
 REPLY_TOPIC = '/graey/control_watchdog/reply'
 STATUS_TOPIC = '/graey/control_watchdog/status'
-ONBOARD_RUN_TOPIC = '/graey/control_watchdog/onboard_run'
 
 RF_RESETTABLE = {'STARTUP', 'SOURCE_CHANGED', 'RF_LOST', 'FC_LOST', 'MISSION_DONE'}
 TETHER_RESETTABLE = {
@@ -273,8 +272,6 @@ class KillSwitch(Node):
         self.heartbeat_reported = None
 
         self.auto_until = 0.0
-        self.onboard_until = 0.0
-        self.onboard_run = None
         self.sa_active = False
         self.esc_commanded_on = False
         self.armed_req = None
@@ -298,9 +295,6 @@ class KillSwitch(Node):
         )
         self.create_subscription(
             Bool, '/graey/autonomy_active', self.on_auto, 10
-        )
-        self.create_subscription(
-            String, ONBOARD_RUN_TOPIC, self.on_onboard_run, 10
         )
 
         self.create_timer(1.0, self.link.heartbeat)
@@ -365,34 +359,6 @@ class KillSwitch(Node):
         # Lease interlock for selection/recovery and stale pilot retries.
         # It never grants arming or bypasses kill/connection health checks.
         return self.now() < self.auto_until
-
-    def onboard_claimed(self):
-        """A fresh SE-started onboard run survives RF loss.
-
-        This claim does not bypass SA, FC freshness, disarm, or ESC inhibits.
-        It only prevents connection loss from countermanding the deliberate
-        onboard run before/while the Cube reports an autonomous mode.
-        """
-        return self.onboard_run is not None and self.now() < self.onboard_until
-
-    def on_onboard_run(self,msg):
-        try:
-            value=json.loads(msg.data);now=self.now()
-            stamp=value.get('published_monotonic')
-            run_id=value.get('run_id')
-            if (not isinstance(value,dict) or value.get('source')!='rc_simple_dive'
-                    or not isinstance(run_id,str) or not 1 <= len(run_id) <= 80
-                    or type(stamp) not in (int,float) or not math.isfinite(stamp)
-                    or not 0 <= now-stamp < 1):
-                return
-            if value.get('active') is True:
-                self.onboard_run=run_id
-                self.onboard_until=now+1.0
-            elif value.get('active') is False and self.onboard_run == run_id:
-                self.onboard_until=0.0
-                self.onboard_run=None
-        except (AttributeError,TypeError,ValueError):
-            return
 
     def on_auto(self, msg):
         if msg.data and not self.mission_claimed():
@@ -552,7 +518,7 @@ class KillSwitch(Node):
             return 'Invalid controller selection.'
         if not self.confirmed_disarmed():
             return 'Fresh Cube telemetry must confirm disarmed.'
-        if self.mission_claimed() or self.onboard_claimed() or self.autonomous():
+        if self.mission_claimed() or self.autonomous():
             return 'Stop the mission and leave autonomous mode first.'
         if self.inhibit not in (None, 'STARTUP', 'SOURCE_CHANGED'):
             return 'Recover the existing fault before changing selection.'
@@ -573,7 +539,7 @@ class KillSwitch(Node):
             return 'There is no recoverable tether inhibit.'
         if not self.confirmed_disarmed():
             return 'Fresh Cube telemetry must confirm disarmed.'
-        if self.mission_claimed() or self.onboard_claimed() or self.autonomous():
+        if self.mission_claimed() or self.autonomous():
             return 'Stop the mission and leave autonomous mode first.'
         if not self.probe.snapshot()['alive']:
             return 'Tether ping is not healthy.'
@@ -704,8 +670,6 @@ class KillSwitch(Node):
             'esc_commanded_on': self.esc_commanded_on,
             'autonomous': self.autonomous(),
             'mission_claimed': self.mission_claimed(),
-            'onboard_run_claimed': self.onboard_claimed(),
-            'onboard_run_id': self.onboard_run if self.onboard_claimed() else None,
             'pilot_arm_switch_pwm': self.rc.get(self.arm_ch) if self.rc_fresh() else None,
             'pilot_mode_switch_pwm': self.rc.get(self.mode_ch) if self.rc_fresh() else None,
             'pilot_retry_remaining_s': max(0.,self.cmd_until-self.now()),
@@ -759,7 +723,7 @@ class KillSwitch(Node):
         autonomous = self.autonomous()
         healthy = self.selected_alive()
 
-        if not autonomous and not self.onboard_claimed() and not healthy:
+        if not autonomous and not healthy:
             # Inhibit even if currently disarmed: restoring a connection
             # must not automatically restore already-permitted ESC power.
             self.latch(
@@ -798,7 +762,7 @@ class KillSwitch(Node):
             return
 
         self.mode_req = want
-        if self.autonomous() or self.mission_claimed() or self.onboard_claimed():
+        if self.autonomous() or self.mission_claimed():
             self.get_logger().warn(
                 'Mode switch ignored while mission is active'
             )
@@ -813,7 +777,7 @@ class KillSwitch(Node):
     def do_arm(self, pwm, selected_healthy):
         want = pwm > self.high
 
-        if self.autonomous() or self.mission_claimed() or self.onboard_claimed():
+        if self.autonomous() or self.mission_claimed():
             previous=self.armed_req
             self.armed_req=want
             self.cmd_until=0.0

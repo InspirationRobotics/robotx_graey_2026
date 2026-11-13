@@ -28,48 +28,6 @@ Retained mission types are Waypoints, plotted Pipeline Survey, Ruth Survey and 5
 - Dock → Pipeline → Dock: outward surfaced route, bounded DVL dive/spin, reverse route and captured dock return.
 - Pool Dive Test: operator-entered pressure depth, eight headings, surface and disarm.
 
-### Headless SE / RoboCommand operation
-
-The production core launches one lightweight `waypoint_mission` instance for
-Chris Simple Dive. This is an adaptation of prequal's SE gesture into the
-production DiveSpin/waypoint executor; it does not run Chris's radio process,
-component IDs, GUI, or parallel transport stack.
-
-1. The process waits without claiming autonomy. SE must be observed low and
-   then high on RC channel 9, so booting with a held-high switch cannot start it.
-2. After the edge, the mission uses fresh Cube local position, velocity and
-   attitude directly. It does not require the GUI, Load/Prepare, RFD, GPS,
-   navigation-supervisor commissioning, laptop presence, or a healthy RF link.
-3. It selects GUIDED, arms and captures the current pose/heading, then enters a
-   real Cube POSHOLD. The existing competition heartbeat consequently reports
-   UUV1 as `STATE_AUTO` while it waits for the verified Wi-Fi RoboCommand
-   RunStart on `/graey/comms/status`.
-4. The exact matching RunStart switches the Cube back to GUIDED before the
-   adapted 1 m / dive / spin / surface executor advances. The explicit switch
-   avoids treating the intentional POSHOLD readiness state as pilot takeover.
-5. A fresh onboard-run lease tells the existing watchdog not to disarm solely
-   because RF disappears after SE. This exception cannot clear an existing
-   inhibit, grant arming/ESC power, bypass SA, hide FC/Cube telemetry loss, or
-   survive a dead mission process. SA/pilot takeover, Cube-control collapse,
-   bounded-stage timeout and ordinary mission completion retain their existing
-   behavior.
-6. After exit the core respawns a new waiting process. It again requires an SE
-   low-to-high edge before another run.
-
-The headless plan uses one fixed onboard target: 4.0 m below the pressure depth
-captured during initialization. It never asks the operator for a depth and does
-not require DVL bottom lock to choose the target. This fixed value applies only
-to the SE-started headless Chris Simple Dive; the separately selected Pool Dive
-Test and pipeline missions retain their existing depth behavior. The mission
-start never depends on RFD; the normal team OCS/Wi-Fi path remains the sole
-RunStart and RoboCommand report path for this mode.
-
-When SE is accepted, GRAEY's onboard recording service starts both camera and
-sonar into the persistent Jetson recording volume before the mission waits for
-RunStart. Recording does not depend on the laptop or either transport. It stops
-on completion or abort. A recorder failure is exposed in mission status and
-logs but does not block POSHOLD, RunStart admission, or motion.
-
 The Cube remains the GUIDED/POSHOLD motion controller and MAVLink relay; the Jetson remains the mission executor. MAVProxy remains the sole Cube serial owner. The retired Chris component-199 GUI/protocol and duplicate recording owner are not revived.
 
 ## Navigation and recording

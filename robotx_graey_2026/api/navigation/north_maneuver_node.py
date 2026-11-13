@@ -15,7 +15,8 @@ class NorthManeuverNode(SteadyNode):
         self.declare_parameter('max_distance_m',5.)
         self.logic = NorthManeuver(time.monotonic(),self.get_parameter('max_distance_m').value)
         # Exclusive with waypoint_mission through GUI mission inventory and lease.
-        self.link = Link('udpout:127.0.0.1:14553',198,self.get_logger(),system=255, node=self)
+        self.link = Link('udpout:127.0.0.1:14553',198,self.get_logger(),system=255,
+                         node=self,kinds=())
         self.bridge = self.control = {}
         self.bridge_at = self.control_at = -math.inf
         self.cancelled = self.active = False

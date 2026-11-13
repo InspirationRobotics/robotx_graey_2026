@@ -1,7 +1,5 @@
 """Execute real pilot callbacks with transport mocked; no vehicle commands."""
 import ast
-import json
-import math
 from pathlib import Path
 from types import SimpleNamespace as NS
 from unittest import TestCase
@@ -15,7 +13,7 @@ class PilotOwnershipTests(TestCase):
         tree.body=[n for n in tree.body if isinstance(n,(ast.ClassDef,ast.FunctionDef))]
         ns=dict(Node=object,PWM_MIN=800,PWM_MAX=2200,CMD_HOLD_S=3.,MODE_RESEND_S=1.,
                 MODE_MANUAL=19,MODE_STABILIZE=0,AUTO_MODES={'GUIDED','AUTO'},
-                mavutil=NS(mavlink=NS(MAV_CMD_COMPONENT_ARM_DISARM=400)),json=json,math=math)
+                mavutil=NS(mavlink=NS(MAV_CMD_COMPONENT_ARM_DISARM=400)))
         exec(compile(tree,str(path),'exec'),ns)
         self.s=ns['KillSwitch'].__new__(ns['KillSwitch'])
         self.now=10.
@@ -27,7 +25,6 @@ class PilotOwnershipTests(TestCase):
         s.mode='MANUAL';s.armed=True;s.arm_ch=11;s.mode_ch=7;s.high=1500
         s.rc={11:1000,7:1000};s.armed_req=False;s.mode_req=19;s.mode_t=0.
         s.auto_until=0.;s.cmd_until=13.
-        s.onboard_until=0.;s.onboard_run=None
         s.report_rf=Mock();s.refresh_sa=Mock();s.reset_rf_if_safe=Mock()
         s.rf_alive=Mock(return_value=True);s.selected_alive=Mock(return_value=True)
         s.set_esc_power=Mock()
@@ -73,21 +70,3 @@ class PilotOwnershipTests(TestCase):
         self.s.tick()
         self.assertEqual(self.s.inhibit,'RF_LOST')
         self.s.link.command.assert_called_with(400,0)
-
-    def test_se_started_onboard_run_survives_rf_loss_before_guided(self):
-        self.s.selected_alive.return_value=False
-        self.s.onboard_run='run-1';self.s.onboard_until=20.
-        self.s.tick()
-        self.assertIsNone(self.s.inhibit)
-        self.s.set_esc_power.assert_called_with(True)
-        self.s.link.command.assert_not_called()
-
-    def test_onboard_run_claim_requires_fresh_exact_source(self):
-        self.s.on_onboard_run(NS(data='{"source":"rc_simple_dive","run_id":"run-1",'
-                                      '"active":true,"published_monotonic":10.0}'))
-        self.assertTrue(self.s.onboard_claimed())
-        self.now=11.1;self.assertFalse(self.s.onboard_claimed())
-        self.s.onboard_run=None;self.s.onboard_until=0.;self.now=10.
-        self.s.on_onboard_run(NS(data='{"source":"other","run_id":"run-2",'
-                                      '"active":true,"published_monotonic":10.0}'))
-        self.assertFalse(self.s.onboard_claimed())
