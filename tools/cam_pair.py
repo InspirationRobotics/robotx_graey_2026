@@ -3,8 +3,9 @@
 
     python3 tools/cam_pair.py
 
-Only one process may hold a camera, so stop the stack first:
-    sudo systemctl stop graey-ros
+Normally started by the launcher (GUI Camera tab, or POST :8096/camera/start). Only one
+process may hold a camera: to run it by hand, stop the launcher's copy first
+(GUI Camera stop, or curl -X POST http://127.0.0.1:8096/camera/stop).
 
 Both frames are composited into ONE image rather than served as two streams,
 because camera.serve_mjpeg() holds a single global frame. hconcat is free next to
@@ -26,12 +27,9 @@ from robotx_graey_2026.api.vision import camera
 SPEED = dai.UsbSpeed.HIGH
 FPS = 15
 
-# Stable hardware ids, so left/right never swaps between runs. An unknown camera
-# still shows up, labelled with the tail of its MxId.
-NAMES = {
-    '14442C1031B3BFD200': 'FRONT',
-    '14442C10C1B6BED200': 'DOWN',
-}
+# Stable hardware ids (api/vision/camera.py), so left/right never swaps between runs.
+# An unknown camera still shows up, labelled with the tail of its MxId.
+NAMES = camera.CAMERAS
 
 
 def label(frame, text):
@@ -44,14 +42,14 @@ def label(frame, text):
 def open_all():
     devs = dai.Device.getAllAvailableDevices()
     if not devs:
-        print('no OAK devices - check cabling, and that graey-ros is stopped')
+        print('no OAK devices - check cabling, and that nothing else holds the cameras')
         return []
     devs.sort(key=lambda d: NAMES.get(d.getMxId(), 'zz' + d.getMxId()))
 
     opened = []
     for info in devs:
         mxid = info.getMxId()
-        name = NAMES.get(mxid, mxid[-4:])
+        name = camera.camera_name(mxid)
         try:
             dev = dai.Device(
                 camera.build_pipeline(fps=FPS, with_depth=False), info, SPEED)

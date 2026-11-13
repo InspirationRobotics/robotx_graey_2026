@@ -12,7 +12,7 @@ def main():
     from . import camera
     parser = argparse.ArgumentParser()
     parser.add_argument('--directory', required=True)
-    parser.add_argument('--mxid', default='14442C10C1B6BED200')
+    parser.add_argument('--mxid', default=camera.DOWN)
     args = parser.parse_args()
     folder = Path(args.directory)
     folder.mkdir(parents=True, exist_ok=True)

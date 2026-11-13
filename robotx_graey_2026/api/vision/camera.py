@@ -22,6 +22,16 @@ import numpy as np
 # the NvMap exhaustion in documentation section 4.7.
 W, H = 640, 360
 
+# Graey's two OAK-Ds by MxId (stable hardware ids), so a camera is always picked and labelled the same
+# way: tools/cam_pair.py (DOWN left, FRONT right), tools/cam_test.py, api/vision/bottom_recorder.py.
+FRONT, DOWN = '14442C1031B3BFD200', '14442C10C1B6BED200'
+CAMERAS = {FRONT: 'FRONT', DOWN: 'DOWN'}
+
+
+def camera_name(mxid):
+    """'FRONT', 'DOWN', or the last four characters of an unknown camera's MxId."""
+    return CAMERAS.get(mxid, mxid[-4:])
+
 _frame = None
 _lock = threading.Lock()
 _streams = 0                    # open /stream connections: a browser view or the recorder
