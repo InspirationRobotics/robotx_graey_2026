@@ -1755,3 +1755,7 @@ Python dependency. An isolated fleet_link startup with radio/WiFi inputs disable
 successfully exposed QGC14570, GRAEY GUI14572 and UUV1 companion43/autopilot3 on
 the local status endpoint. This verifies laptop process/config initialization,
 not the physical COM port or RFD path.
+
+## November 13, 2026 — SE shallow test mission
+
+Operator request replaces the fixed-colour 4 m / 5 s SE profile: after the existing RunStart gate, drive 1 m along the captured starting heading, descend 1 m below the start depth, hold at depth for 10 s, then surface without a spin. The executor uses the existing onboard random generator once per local mission: independently select RED, GREEN or BLUE for the resource tin and delivery circle, in that order. Surface retries reuse the same result. These are generated test values, not a reading of the flashing light. RoboNation rx_common.proto Color and rx_reports.proto ResourceDeliveryRequest define the enum and field order (specific tin for Disruptive; ANY for Advanced). Local relay replay of all nine pairs decoded to the expected UUV1 Task 2 protobuf; no changes were necessary on Crusader or OCS. This is repository configuration, not a vehicle deployment.

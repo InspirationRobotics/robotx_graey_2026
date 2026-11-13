@@ -35,17 +35,20 @@ class RcSimpleDiveLaunchTests(unittest.TestCase):
         self.assertIn("'rc_start_channel':9",source)
         self.assertIn("operator_kind='dive_here'",source)
         self.assertIn("competition=True",source)
-        self.assertIn("dive=dict(depth_m=SE_DIVE_DEPTH_M)",source)
-        self.assertIn("SE_DIVE_DEPTH_M = 4.0",source)
-        self.assertIn("spin=False",source)
-        self.assertIn("colors=SE_DIVE_COLORS",source)
-        self.assertIn("hold_s=SE_DIVE_HOLD_S",source)
-        self.assertIn("report_hold_s=SE_DIVE_REPORT_HOLD_S",source)
-        from robotx_graey_2026.api.navigation.dive_spin import fixed_resource_request
-        namespace={}
-        exec(compile(ast.Module([n for n in tree.body if isinstance(n,ast.Assign)
-            and any(getattr(t,'id','').startswith('SE_DIVE') for t in n.targets)],[]),'core','exec'),namespace)
-        fixed_resource_request('check',namespace['SE_DIVE_COLORS'])   # the shipped colours are valid
+        # Evaluate the actual JSON plan handed to the executor, without starting ROS.
+        from robotx_graey_2026.api.navigation.dive_spin import DiveSpinRun
+        from unittest.mock import patch
+        constants={n.targets[0].id:ast.literal_eval(n.value) for n in tree.body
+            if isinstance(n,ast.Assign) and n.targets[0].id.startswith('SE_DIVE')}
+        expr,=[n.args[0] for n in ast.walk(tree) if isinstance(n,ast.Call)
+               and getattr(n.func,'attr','')=='dumps']
+        plan=eval(compile(ast.Expression(expr),'core','eval'),constants)
+        with patch('secrets.randbelow',side_effect=[2,0]) as draw:
+            mission=DiveSpinRun(plan,'se-test',0.)
+        self.assertEqual((mission.forward_m,mission.dive,mission.hold_s,mission.spin),
+                         (1.,{'depth_m':1.},10.,False))
+        self.assertEqual(draw.call_count,2)
+        self.assertEqual(mission.resource_request['sequence'],['BLUE','RED'])
         self.assertNotIn("dive=dict(altitude_m=3.5,max_depth_m=5.0)",source)
         self.assertNotIn("executable='prequal_mission'",source)
         self.assertNotIn("executable='prequal_mission_cv'",source)

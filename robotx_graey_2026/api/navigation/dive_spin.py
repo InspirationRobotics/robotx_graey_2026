@@ -162,12 +162,13 @@ class DiveSpinRun(GuidedSurfaceRun):
         self.plan = dict(plan, dive=dive)
         self.dive = dive
         self.forward_m = CHRIS_FORWARD_M if plan.get('operator_kind') == 'dive_here' else 0.0
-        # Fixed colours from the plan (core.launch.py). No colours: no colour report at all.
-        self.resource_request = (fixed_resource_request(run_id, plan['colors'])
-                                 if plan.get('operator_kind') == 'dive_here' and plan.get('colors')
-                                 else None)
-        if plan.get('operator_kind')=='dive_here' and 'colors' not in plan:
-            self.resource_request=random_resource_request(run_id)  # existing GUI plan
+        self.resource_request = None
+        if self.forward_m:
+            if 'colors' not in plan:
+                # Draw once per mission. Surface reports and all RFD retries use this pair.
+                self.resource_request = random_resource_request(run_id)
+            elif plan['colors']:
+                self.resource_request = fixed_resource_request(run_id, plan['colors'])
         # spin: False goes straight back up once at depth (the 13 Nov competition mission).
         self.spin = plan.get('spin', True) is not False
         self.hold_s = _seconds(plan.get('hold_s', 0.0), MAX_HOLD_S, 'hold_s')

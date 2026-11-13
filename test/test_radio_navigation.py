@@ -78,7 +78,7 @@ class DiveSpinTests(unittest.TestCase):
         self.assertEqual(run.target,run.hold)
 
     SE=dict(kind='dive_spin',operator_kind='dive_here',mode='surface',map='local',competition=True,
-            spin=False,colors=['RED','BLUE'],hold_s=5.,report_hold_s=60.,dive=dict(depth_m=1.))
+            spin=False,hold_s=10.,report_hold_s=60.,dive=dict(depth_m=1.))
 
     def dive_to_surface(self,plan=None):
         """The SE plan to the moment it holds at depth; returns (run, o). Time is self.t."""
@@ -96,19 +96,19 @@ class DiveSpinTests(unittest.TestCase):
             self.t+=.1;run.step(self.t,o)
 
     def up(self,run,o,until='REPORT'):
-        self.go(run,o,10,'SURFACE');o['local']=run.hold;self.go(run,o,2,until)
+        self.go(run,o,12,'SURFACE');o['local']=run.hold;self.go(run,o,2,until)
 
     def test_se_dive_holds_at_depth_then_surfaces(self):
         run,o=self.dive_to_surface()
         self.assertEqual((run.stage,run.phase),('HOLD','UNDERWATER'))
         held=self.t
-        self.go(run,o,10,'SURFACE')
+        self.go(run,o,12,'SURFACE')
         self.assertEqual(run.stage,'SURFACE')
-        self.assertAlmostEqual(self.t-held,5.,delta=.15)
+        self.assertAlmostEqual(self.t-held,10.,delta=.15)
 
     def test_se_dive_reports_armed_at_the_surface_then_disarms(self):
         run,o=self.dive_to_surface()
-        self.go(run,o,10,'SURFACE');o['local']=run.hold
+        self.go(run,o,12,'SURFACE');o['local']=run.hold
         actions=[];end=self.t+2
         while self.t<end and run.stage!='REPORT':
             self.t+=.1;actions=run.step(self.t,o)
