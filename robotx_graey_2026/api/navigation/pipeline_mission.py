@@ -109,8 +109,7 @@ surface), so each stage can be tried alone. In a dry run the scan waits for the
 PILOT to turn the sub through scan_turn_deg (read from the Cube's attitude), so
 a dry run while someone drives tests the real pick.
 
-THE MAP. tools/sonar_map.py runs beside this (on Graey, on the host; in the sim,
-sim/sim_sonar_map.py) and is driven through its web page's own controls, the
+THE MAP. tools/sonar_map.py runs beside this (on Graey, on the host) and is driven through its web page's own controls, the
 same as pressing the buttons: range, sector, threshold, Reset/Start. Its frame
 is (0,0) = where the sub was at Start, +y = the heading then; the EKF's
 position and heading at that moment turn map points into NED. Crumb heights
@@ -246,8 +245,8 @@ PARTS = {
 FIXED = {'plan': 'pool', 'scan_mode': 'transit', 'camera_follow': False, 'pool_band': 'none',
          'pool_compact': False, 'survey_buoy': 'here', 'pool_max_pick_m': 0.0, 'follow_near_m': 0.45}
 
-# The simulator never left the surface with unchanged targets re-sent every 3 s
-# (sim/README.md). Here a target changes when the plan does, and is otherwise
+# The simulator never left the surface with unchanged targets re-sent every 3 s.
+# Here a target changes when the plan does, and is otherwise
 # only re-sent as insurance.
 mission_base.RESEND_S = 20.0
 SETTLE_S = 6.0          # after a scan: the last sweep lands and the outlines refresh

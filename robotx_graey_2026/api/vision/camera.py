@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""OAK-D pipeline plus the MJPEG debug view, shared by pole_tracker and oak_view.
+"""OAK-D pipeline, camera IDs and the MJPEG view, shared by tools/cam_pair.py and
+api/vision/bottom_recorder.py.
 
-Only ONE process may hold the camera at a time - the node and the tool cannot
-run together.
+Only ONE process may hold a camera at a time.
 """
 import threading
 import time
@@ -10,7 +10,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import cv2
 import depthai as dai
-import numpy as np
 
 # 16:9 ON PURPOSE, and it is worth ~5 degrees of view. The IMX378 does not support
 # THE_800_P, so depthai falls back to a 1920x1080 ISP. Preview keeps aspect ratio by
@@ -23,7 +22,7 @@ import numpy as np
 W, H = 640, 360
 
 # Graey's two OAK-Ds by MxId (stable hardware ids), so a camera is always picked and labelled the same
-# way: tools/cam_pair.py (DOWN left, FRONT right), tools/cam_test.py, api/vision/bottom_recorder.py.
+# way: tools/cam_pair.py (DOWN left, FRONT right) and api/vision/bottom_recorder.py.
 FRONT, DOWN = '14442C1031B3BFD200', '14442C10C1B6BED200'
 CAMERAS = {FRONT: 'FRONT', DOWN: 'DOWN'}
 
@@ -37,9 +36,6 @@ def find_camera(mxid):
     """The attached OAK with this MxId, or None (unplugged, or held by another process)."""
     return next((d for d in dai.Device.getAllAvailableDevices() if d.getMxId() == mxid), None)
 
-
-# The red-pole YOLO model (Chris, Aug 2026) used by pole_tracker and tools/oak_view.py --yolo.
-POLE_MODEL = '/root/robotx_ws/src/robotx_graey_2026/models/pole_daynight_640x360_v2.pt'
 
 _frame = None
 _lock = threading.Lock()
@@ -143,28 +139,3 @@ def build_pipeline(fps=10, with_depth=True):
     st.depth.link(xd.input)
     return p
 
-
-def intrinsics(dev):
-    """(fx, cx) for the colour camera at our preview size."""
-    K = np.array(dev.readCalibration().getCameraIntrinsics(
-        dai.CameraBoardSocket.CAM_A, W, H))
-    return K[0][0], K[0][2]
-
-
-def range_bearing(depth, box, fx, cx):
-    """Median depth in the middle of a box -> (forward_m, right_m), or None.
-
-    Stereo writes zero wherever it found no match, so those pixels are dropped
-    rather than averaged - averaging them pulls every range toward zero.
-    """
-    x1, y1, x2, y2 = box
-    mx, my = (x1 + x2) // 2, (y1 + y2) // 2
-    cw, ch = max(2, (x2 - x1) // 4), max(2, (y2 - y1) // 4)
-    vals = depth[max(0, my - ch):my + ch, max(0, mx - cw):mx + cw]
-    vals = vals[vals > 0]
-    if vals.size <= 20:
-        return None
-    z = float(np.median(vals)) / 1000.0
-    if not 0.2 < z < 20.0:
-        return None
-    return z, (mx - cx) * z / fx

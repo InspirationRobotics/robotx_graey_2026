@@ -9,10 +9,9 @@ sits idle until a button is pressed.
 
     GET  /status              what is running, and the end of its output
     POST /start?tool=map      tools/sonar_map.py
-    POST /start?tool=radar    tools/sonar_pole_test.py --web
     POST /stop                like Ctrl-C
 
-Both tools serve their page on port 8095, which the Sonar tab shows. A sonar
+The map serves its page on port 8095, which the Sonar tab shows. A sonar
 tool started by hand in a terminal is left alone, and nothing new is started
 while it runs - only one program can talk to the Ping360.
 
@@ -43,8 +42,6 @@ PYTHON = "/usr/bin/python3"
 SONAR = "/dev/serial/by-id/usb-FTDI_FT230X_Basic_UART_D2010VWF-if00-port0"
 TOOLS = {
     "map":   ["tools/sonar_map.py", "--device", SONAR, "--port", str(WEB_PORT), "--no-save"],
-    "radar": ["tools/sonar_pole_test.py", "--device", SONAR, "--web",
-              "--port", str(WEB_PORT), "--range", "4"],
 }
 LOG = os.path.join(REPO, "sonar_data", "sonar_tool.log")
 # the same pattern as the safety check run before starting a tool by hand

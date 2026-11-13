@@ -15,7 +15,7 @@ USB SPEED IS PINNED TO HIGH DELIBERATELY. The downward camera will not boot at
 SUPER on its current port - depthai flashes it, then waits for it to re-enumerate
 on a SuperSpeed link that never trains and gives up with X_LINK_DEVICE_NOT_FOUND.
 HIGH carries 640x360 RGB from both with room to spare (~83 Mbps each against ~300
-practical), so nothing is lost until the port is sorted out. See tools/cam_test.py.
+practical), so nothing is lost until the port is sorted out.
 """
 import time
 

@@ -10,7 +10,7 @@ from file, Graey killed and disarmed, then reboot the Cube).
 | `graey_4.7_rfd_competition.parm` | 4.7 | Cube | RFD telemetry stream rates (`MAV1_*`) and `MAV_SYSID 3` for the competition radio |
 | `graey_pool_waypoint_limits.parm` | 4.7 | Cube | Slow vertical limits for shallow pools (same as `odometry_profile.SHALLOW_LIMITS`) |
 | `navigation_sources.parm` | 4.5 and 4.7 | Cube | Candidate EKF source sets: external nav underwater, GPS at the surface |
-| `graey_4.5.7_autonomous_validated.parm` | 4.5.7 | `sim/` only | Full backup from Jul 23 2026 (976 parameters, the first autonomous runs). `sim/inside.sh` loads it into the 4.5.7 simulator with `sim/sim_overrides.parm`. Don't load it on the 4.7.2 Cube. |
+| `graey_4.5.7_autonomous_validated.parm` | 4.5.7 | reference only | Full backup from Jul 23 2026 (976 parameters, the first autonomous runs). Don't load it on the 4.7.2 Cube. |
 | `sitl_graey.parm` | 4.5.7 | `sitl/` only | SITL EKF sources + simulated GPS. Never on the real Cube. |
 
 Removed Nov 13 2026 (in git history): `graey_4.5.7_dvl_ekf.parm` and `graey_4.5.7_vn100_ekf.parm`,
