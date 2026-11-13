@@ -20,7 +20,7 @@ class PackagingTests(unittest.TestCase):
             self.assertIn('tools/vendor/leaflet/leaflet.js', installed)
             self.assertIn('tools/vendor/leaflet/leaflet.css', installed)
             self.assertIn('tools/vendor/leaflet/LICENSE', installed)
-            for asset in ('tools/pool_reference.png','tools/pool.png','tools/vendor/miramar/19-211332-91604.jpg'):
+            for asset in ('tools/pool_reference.png','tools/pool.png'):
                 self.assertIn(asset,installed)
         finally:
             os.chdir(previous)

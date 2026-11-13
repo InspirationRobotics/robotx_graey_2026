@@ -1,9 +1,0 @@
-{
-  "result": "PASS",
-  "scope": "exact Git index exported without unstaged edits",
-  "tests_run": 464,
-  "skipped": 17,
-  "skip_note": "Five Windows platform skips plus twelve optional tests requiring sibling fleet checkouts; full workspace previously passed with five skips.",
-  "copied_sources": "Staged blobs verified byte-for-byte against copied-files manifest",
-  "hardware_deployed": false
-}
