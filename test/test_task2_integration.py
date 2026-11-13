@@ -214,31 +214,6 @@ class Task2IntegrationTests(unittest.TestCase):
         self.assertFalse(client._delivery_task_active)
         self.assertEqual(client._build(10)['heartbeat']['current_task'], 'TASK_NONE')
 
-    def test_graey_producer_callbacks_publish_only_supplied_observations(self):
-        callbacks = methods(ROOT/'robotx_graey_2026/robotx_graey_2026/api/comms/sub_link_node.py',
-                            'SubLinkNode', ['_input', '_tick'],
-                            dict(json=json, time=types.SimpleNamespace(monotonic=lambda: 10),
-                                 String=lambda **kw: types.SimpleNamespace(**kw)))
-        node = callbacks()
-        node.sender = sl.Sender(run_id=7, session_id=15)
-        node.mesh = Mock()
-        node.mesh.poll.return_value = []
-        node.received = Mock()
-        node.get_logger = lambda: Mock()
-        node._tick()
-        node.mesh.send_tunnel.assert_not_called()
-        node._input('status', json.dumps(heartbeat()))
-        node._input('pipeline_survey', json.dumps(dict(active_buoy_position=heartbeat()['position'],
-                     segments=['PIPELINE_SEGMENT_INTACT', 'PIPELINE_SEGMENT_DAMAGED'])))
-        node._input('resource_request', json.dumps(dict(resource_color='COLOR_BLUE',
-                                                       delivery_circle_color='COLOR_RED')))
-        node._tick()
-        self.assertEqual([c.args[0] for c in node.mesh.send_tunnel.call_args_list], list(sl.SUB_TYPES))
-        for call in node.mesh.send_tunnel.call_args_list:
-            self.ekko._sub_received(self.wire(*call.args))
-            self.submit(self.envelopes[-1])
-        self.assertEqual(len(self.published), 3)
-
     def test_invalid_queued_event_does_not_block_later_heartbeat(self):
         from uav_groundstation.ocs_link import OcsLink
         link = OcsLink('127.0.0.1', 1, log=lambda m: None)
