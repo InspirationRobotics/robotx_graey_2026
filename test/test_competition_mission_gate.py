@@ -23,8 +23,7 @@ class TestCompetitionMissionGate(unittest.TestCase):
         exec(compile(ast.Module(body=[tick],type_ignores=[]),str(source),'exec'),namespace)
         node=SimpleNamespace(sequence=0,run_gate=RunGate(competition),competition_hold=None,
             intent_pub=Mock(),pub=Mock(),auto_pub=Mock(),send_guided_waypoint=Mock(),
-            link=Mock(),surface_measurement_status={},rc_start_mode=False,rc_started=True,
-            publish_onboard_run=Mock())
+            link=Mock(),surface_measurement_status={})
         node.logic=SimpleNamespace(stage='ARM',terminal={'ABORTED','COMPLETE'},phase='SURFACE_NAV',
             run_id='local',plan={'mode':'surface'},snapshot=lambda:dict(stage='ARM'),
             step=Mock(side_effect=ExecutionReached()),abort=Mock())
@@ -63,22 +62,6 @@ class TestCompetitionMissionGate(unittest.TestCase):
                                         navigation_hold_safe=True,local=(1.,2.,.3))
         with self.assertRaises(ExecutionReached):tick()
         self.assertEqual(node.run_gate.run_id,70000)
-
-    def test_se_prepared_dive_waits_in_poshold_then_runstart_releases_without_nav_gate(self):
-        node,tick=self.make_node(True)
-        node.rc_start_mode=True
-        node.observation=lambda now:dict(fresh=True,armed=True,mode=16,failure='',
-                                        navigation_hold_safe=False,local=(1.,2.,.3))
-        tick()
-        status=json.loads(node.pub.publish.call_args.args[0].data)
-        self.assertEqual(status['stage'],'WAIT_RUN_START')
-        self.assertTrue(status['competition_ready'])
-        node.run_gate.update(dict(run_confirmed=True,remote_state='RUNNING',run_id=77),0.)
-        tick()
-        self.assertEqual(json.loads(node.pub.publish.call_args.args[0].data)['stage'],'STARTING')
-        node.observation=lambda now:dict(fresh=True,armed=True,mode=4,failure='',
-                                        navigation_hold_safe=False,local=(1.,2.,.3))
-        with self.assertRaises(ExecutionReached):tick()
 
     def test_local_mission_executes_without_ocs(self):
         node,tick=self.make_node(False)

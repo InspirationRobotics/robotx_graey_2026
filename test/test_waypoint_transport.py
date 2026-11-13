@@ -26,11 +26,6 @@ class WaypointTransportTest(unittest.TestCase):
                      position_healthy=lambda:True)
         first=node.observation(.1)
         self.assertFalse(first['fresh']);self.assertEqual(first['failure'],'')
-        node.rc_start_mode=True
-        node.safety=dict(inhibit='RF_LOST',vehicle_fresh=False,sa_active=False,esc_commanded_on=False)
-        self.assertTrue(node.observation(.1)['fresh'])
-        self.assertEqual(node.observation(.1)['failure'],'')
-        node.rc_start_mode=False;node.safety={}
         self.assertIn('watchdog',node.observation(6.)['failure'])
         self.assertEqual(node.observation(3.)['failure'],'')
         node.supervisor_time=.1;node.safety_time=.1;node.bridge_time=.1

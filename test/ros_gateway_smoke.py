@@ -14,6 +14,12 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 os.environ.update(ROS_DOMAIN_ID='121',ROS_LOCALHOST_ONLY='1',GRAEY_RUNTIME_SCOPE='gateway-smoke')
 from robotx_graey_2026.api.pixhawk.mavlink import Link,mavutil
 from robotx_graey_2026.api.pixhawk import telemetry_gateway
+
+
+def test_gateway_does_not_shadow_rclpy_publishers_property():
+    """The real rclpy Node exposes ``publishers`` as read-only."""
+    source = Path(telemetry_gateway.__file__).read_text(encoding='utf-8')
+    assert 'self.publishers=' not in source
 import robotx_graey_2026.api.node_util as node_util
 import rclpy
 from rclpy.node import Node
@@ -42,10 +48,10 @@ def main():
         descriptors=gateway.describe_parameters(['mavlink','stream_ids','stream_hz'])
         assert [d.name for d in descriptors]==['mavlink','stream_ids','stream_hz']
         assert all(d.read_only for d in descriptors)
-        mission=Link('unused',198,system=255,node=fixture)
-        gui=Link('unused',195,node=fixture)
-        safety=Link('unused',194,node=fixture)
-        nav=Link('unused',197,node=fixture)
+        mission=Link('unused',198,system=255,node=fixture,kinds=())
+        gui=Link('unused',195,node=fixture,kinds=())
+        safety=Link('unused',194,node=fixture,kinds=())
+        nav=Link('unused',197,node=fixture,kinds=())
         pub=fixture.create_publisher(String,'/graey/control_watchdog/status',10)
         executor=SingleThreadedExecutor();executor.add_node(gateway);executor.add_node(fixture)
         received=[]
@@ -61,7 +67,7 @@ def main():
                 mission.drain(lambda kind,msg:received.append((kind,msg.get_srcSystem())))
         try:
             spin(1.)
-            assert ('HEARTBEAT',1) in received,received
+            assert ('HEARTBEAT',3) in received,received
             assert mission.mav.flightmode=='GUIDED',mission.mav.flightmode
             mission.goto_ned(1.,2.,.3,0.)
             nav.odometry((0,0,0),(1,0,0,0),(0,0,0),(0,0,0))

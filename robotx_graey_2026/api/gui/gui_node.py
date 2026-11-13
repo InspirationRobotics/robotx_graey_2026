@@ -22,12 +22,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from robotx_graey_2026.api.steady_node import SteadyNode as Node
-from std_msgs.msg import Int32, Bool, Float32, String
-from geometry_msgs.msg import TwistWithCovarianceStamped
-from sensor_msgs.msg import Imu
+from std_msgs.msg import Int32, String
 from rcl_interfaces.msg import Log
 from robotx_graey_2026.api.gui.log_buffer import LogBuffer
-from robotx_graey_2026.api.gui.navigation_view import NAVIGATION_VIEW_KINDS, NavigationView
+from robotx_graey_2026.api.gui.navigation_view import NavigationView
 from robotx_graey_2026.api.gui.communications_view import CommunicationsView
 from robotx_graey_2026.api.gui.system_info import SystemInfo
 from robotx_graey_2026.api.gui.log_reader import read_log
@@ -51,8 +49,8 @@ from robotx_graey_2026.api.navigation.radio_route import mission_plan as radio_m
 
 from robotx_graey_2026.api.node_util import run
 from robotx_graey_2026.api.process_ownership import executable_pids
-from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
 from robotx_graey_2026.api.pixhawk.mavlink import Link, mavutil
+from robotx_graey_2026.api.pixhawk.ros_link import SemanticMessage
 
 
 CAMERA = 'pole_tracker'
@@ -198,31 +196,6 @@ control_bridge = None
 navigation = NavigationView()
 waypoint_api = WaypointAPI()
 waypoint_aborts = queue.Queue()
-# Crusader's gcs_bridge never decodes raw MAVLink: it reads telemetry_bridge's decoded summaries. Here the gateway's
-# summaries (/graey/fcu/pose, attitude, status) carry these kinds; the raw stream (~235 frames/s) is left for the rest.
-SUMMARY_KINDS = {'pose': 'GLOBAL_POSITION_INT', 'attitude': 'ATTITUDE', 'status': 'HEARTBEAT'}
-# Raw frames older than 0.25 s are dropped (ros_link). At ~235 frames/s a 200-deep queue holds ~0.85 s, so once the GUI
-# fell behind, every frame it reached was too old and its autopilot data went stale for good (Graey, Nov 11: load 13
-# with the sonar map and cameras on). 50 keeps whatever is queued inside the 0.25 s window.
-RAW_RX_DEPTH = 50
-
-
-class SummaryFrame:
-    """A gateway summary, read like the pymavlink message it came from (the configured GRAEY Cube)."""
-    def __init__(self, kind, fields):
-        self.__dict__.update(fields)
-        self._kind = kind
-
-    def get_type(self):
-        return self._kind
-
-    def get_srcSystem(self):
-        return FCU_SYSTEM
-
-    def get_srcComponent(self):
-        return FCU_COMPONENT
-
-
 waypoint_process = None
 waypoint_launch = None
 survey = SurveyLauncher()   # Ruth's survey run (Missions page, Nov 11)
@@ -847,12 +820,15 @@ def mission_stop():
 
 class Handler(BaseHTTPRequestHandler):
     def reply(self, code, body, ctype):
-        self.send_response(code)
-        self.send_header('Content-Type', ctype)
-        self.send_header('Content-Length', str(len(body)))
-        self.send_header('Cache-Control', 'no-store')
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header('Content-Type', ctype)
+            self.send_header('Content-Length', str(len(body)))
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def reply_json(self, code, value):
         self.reply(
@@ -1254,15 +1230,12 @@ class GuiNode(Node):
             self.get_parameter('mavlink').value,
             195,
             self.get_logger(),
-            node=self, rx_depth=RAW_RX_DEPTH,
-            # pump() feeds raw frames to NavigationView except the summary kinds (on_fcu_summary has those).
-            kinds=tuple(k for k in NAVIGATION_VIEW_KINDS if k not in SUMMARY_KINDS.values()))
-        # The newest summary only (depth 1): a busy GUI still shows current data, with its true arrival time.
-        from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
-        newest = QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST, reliability=ReliabilityPolicy.RELIABLE)
-        for topic, kind in SUMMARY_KINDS.items():
-            self.create_subscription(String, '/graey/fcu/'+topic,
-                                     lambda msg, kind=kind: self.on_fcu_summary(kind, msg), newest)
+            # TX is retained for the emergency disarm path. Only HEARTBEAT is
+            # subscribed here; navigation arrives through the gateway's bounded
+            # latest-value snapshot instead of seven high-rate topic streams.
+            node=self, rx_depth=1, kinds=())
+        self.gui_snapshot_stamps={}
+        self.create_subscription(String,'/graey/fcu/gui_snapshot',self.on_fcu_snapshot,1)
         from robotx_graey_2026.api.gui.param_client import ParamBridge
         parameter_bridge=ParamBridge(self)
         try:
@@ -1294,8 +1267,8 @@ class GuiNode(Node):
         self.create_timer(.05,self.calibration_services.pump)
         self.create_subscription(String, '/graey/vn100/calibration',
             lambda msg: self.calibration_sample('vn_calibration',msg),10)
-        self.create_subscription(String, '/graey/navigation/bridge_status',
-            lambda msg: self.calibration_sample('bridge',msg),10)
+        self.create_subscription(String, '/graey/navigation/gui_snapshot',
+            self.on_navigation_gui,1)
         self.control_pub = self.create_publisher(
             String, CONTROL_REQUEST_TOPIC, 10
         )
@@ -1315,25 +1288,10 @@ class GuiNode(Node):
         self.create_subscription(
             Int32, '/graey/led_state', self.on_led, 10
         )
-        self.create_subscription(
-            Bool, '/graey/dvl/valid', self.on_dvl, 10
-        )
-        self.create_subscription(
-            Float32, '/graey/dvl/altitude', self.on_alt, 10
-        )
-        self.create_subscription(
-            Float32, '/graey/vn100/heading', self.on_hdg, 10
-        )
+        self.create_subscription(String, '/graey/dvl/sample', self.on_dvl_sample, 1)
+        self.create_subscription(String, '/graey/vn100/gui', self.on_vn_gui, 1)
 
         self.create_timer(1.0, self.link.heartbeat)
-        self.create_subscription(Imu,'/graey/vn100/imu',lambda m:navigation.put('vn_imu',dict(
-            angular_velocity=[m.angular_velocity.x,m.angular_velocity.y,m.angular_velocity.z],
-            linear_acceleration=[m.linear_acceleration.x,m.linear_acceleration.y,m.linear_acceleration.z],
-            orientation=[m.orientation.x,m.orientation.y,m.orientation.z,m.orientation.w],
-            frame=m.header.frame_id)),10)
-        self.create_subscription(TwistWithCovarianceStamped, '/graey/dvl/velocity',
-            lambda m: navigation.put('dvl_velocity', {'xyz': [m.twist.twist.linear.x,
-                m.twist.twist.linear.y, m.twist.twist.linear.z], 'frame': m.header.frame_id}), 10)
         self.create_subscription(String, '/graey/navigation/status', self.on_navigation_status, 10)
         self.create_subscription(String, '/graey/waypoint/status', self.on_waypoint_status, 10)
         self.waypoint_abort_pub = self.create_publisher(String, '/graey/waypoint/abort', 10)
@@ -1372,6 +1330,15 @@ class GuiNode(Node):
         except (ValueError,TypeError):
             pass
 
+    def on_navigation_gui(self, msg):
+        try:
+            value=json.loads(msg.data)
+            received=float(value['published_monotonic'])
+            if isinstance(value,dict) and 0 <= time.monotonic()-received < 2:
+                navigation.put('bridge',value,received=received)
+        except (ValueError,TypeError,KeyError):
+            pass
+
     def flush_waypoint_aborts(self):
         global north_cancel_pending
         if not north_aborts.empty():
@@ -1390,6 +1357,23 @@ class GuiNode(Node):
     def on_gateway(self,msg):
         try:gateway_view.update(json.loads(msg.data))
         except (ValueError,TypeError):pass
+
+    def on_fcu_snapshot(self,msg):
+        try:
+            data=json.loads(msg.data);now=time.monotonic()
+            published=float(data['published_monotonic'])
+            if not 0<=now-published<.5:return
+            for kind,payload in data['messages'].items():
+                stamp=float(payload['received_monotonic'])
+                if stamp<=self.gui_snapshot_stamps.get(kind,-1):continue
+                fields=dict(payload['fields']);fields.pop('mavpackettype',None)
+                frame=SemanticMessage(kind,int(payload['source_system']),
+                    int(payload['source_component']),int(payload.get('sequence',0)),fields)
+                self.gui_snapshot_stamps[kind]=stamp
+                navigation.consume(kind,frame,received=stamp)
+                if kind=='LOCAL_POSITION_NED':tel['depth']=frame.z
+        except (ValueError,TypeError,KeyError,AttributeError):
+            return
 
     def update_parameter_graph(self):
         global parameter_graph
@@ -1436,44 +1420,53 @@ class GuiNode(Node):
         except (ValueError, TypeError):
             pass
 
-    def on_dvl(self, msg):
-        navigation.put('dvl_valid', {'valid': msg.data})
-        tel['dvl_lock'], tel['dvl_t'] = msg.data, time.time()
-
-    def on_alt(self, msg):
-        navigation.put('clearance', {'meters': msg.data if msg.data >= 0 else None})
-        tel['altitude'] = msg.data
-
-    def on_hdg(self, msg):
-        navigation.put('vn_heading', {'degrees': msg.data})
-        tel['heading'], tel['hdg_t'] = msg.data, time.time()
-
-    def on_fcu_summary(self, kind, msg):
+    def on_dvl_sample(self, msg):
         try:
-            data = json.loads(msg.data)
-            received, fields = float(data['received_monotonic']), dict(data['fields'])
+            value = json.loads(msg.data)
+            received = float(value['received_monotonic'])
+            if not 0 <= time.monotonic() - received < 2:
+                return
+            velocity = [float(v) for v in value['velocity']]
+            if len(velocity) != 3:
+                return
+            valid = bool(value['valid'])
+            altitude = value.get('altitude')
+            altitude = float(altitude) if altitude is not None else None
+            navigation.put('dvl_velocity', {'xyz': velocity, 'frame': 'dvl'}, received=received)
+            navigation.put('dvl_valid', {'valid': valid}, received=received)
+            navigation.put('clearance', {'meters': altitude if altitude is not None and altitude >= 0 else None}, received=received)
+            tel['dvl_lock'], tel['dvl_t'] = valid, time.time()
+            tel['altitude'] = -1 if altitude is None else altitude
         except (ValueError, TypeError, KeyError):
             return
-        age = time.monotonic() - received
-        if not 0 <= age < 5.0:              # another clock, or very old: never shown as new
-            return
-        frame = SummaryFrame(kind, fields)
+
+    def on_vn_gui(self, msg):
         try:
-            navigation.consume(kind, frame, received=received)
-            if kind == 'HEARTBEAT':
-                tel['armed'] = bool(frame.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
-                tel['mode'] = mavutil.mode_string_v10(frame)
-                tel['mav_t'] = time.time() - age
-        except (AttributeError, TypeError, ValueError):
+            value = json.loads(msg.data)
+            received = float(value['received_monotonic'])
+            if not 0 <= time.monotonic() - received < 2:
+                return
+            heading = float(value['heading'])
+            orientation = [float(v) for v in value['orientation']]
+            angular = [float(v) for v in value['angular_velocity']]
+            acceleration = [float(v) for v in value['linear_acceleration']]
+            if len(orientation) != 4 or len(angular) != 3 or len(acceleration) != 3:
+                return
+            navigation.put('vn_imu', dict(angular_velocity=angular,
+                linear_acceleration=acceleration, orientation=orientation,
+                frame=str(value.get('frame', 'vn100'))), received=received)
+            navigation.put('vn_heading', {'degrees': heading}, received=received)
+            tel['heading'], tel['hdg_t'] = heading, time.time()
+        except (ValueError, TypeError, KeyError):
             return
 
     def pump(self):
         def consume(kind, msg):
-            if kind in SUMMARY_KINDS.values():
-                return                      # these come from the gateway's summaries (on_fcu_summary)
-            navigation.consume(kind, msg)
-            if kind == 'LOCAL_POSITION_NED':
-                tel['depth'] = msg.z
+            if kind == 'HEARTBEAT':
+                navigation.consume(kind,msg)
+                tel['armed'] = bool(msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED)
+                tel['mode'] = self.link.mav.flightmode
+                tel['mav_t'] = time.time()
 
         self.link.drain(consume)
 

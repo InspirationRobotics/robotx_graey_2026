@@ -95,7 +95,8 @@ class DVLNode(Node):
             self.pub_valid.publish(Bool(data=False))
             self.pub_sample.publish(String(data=json.dumps(dict(
                 stamp_ns=self.get_clock().now().nanoseconds,
-                velocity=[0., 0., 0.], valid=False, sensor_time=None))))
+                received_monotonic=time.monotonic(), velocity=[0., 0., 0.],
+                valid=False, altitude=None, sensor_time=None))))
             return
         if parsed is None:
             return                                  # dead-reckoning report, not velocity
@@ -115,8 +116,9 @@ class DVLNode(Node):
         # Atomic validity + velocity for consumers that integrate measurements.
         self.pub_sample.publish(String(data=json.dumps(dict(
             stamp_ns=msg.header.stamp.sec*1000000000+msg.header.stamp.nanosec,
+            received_monotonic=time.monotonic(),
             velocity=[msg.twist.twist.linear.x, msg.twist.twist.linear.y, msg.twist.twist.linear.z],
-            valid=valid,
+            valid=valid, altitude=altitude,
             sensor_time=r.get('time_of_validity', r.get('time'))))))
 
 

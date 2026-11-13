@@ -17,7 +17,8 @@ from . import competition_codec as rx
 from .competition_telemetry import CompetitionTelemetry
 from .mission_radio import (Assembler, KIND_REQUEST, KIND_RESPONSE, PAYLOAD_TYPE,
                             encode, revision)
-from ..gui.navigation_view import NAVIGATION_VIEW_KINDS
+
+COMPETITION_RX_KINDS=('GLOBAL_POSITION_INT','GPS_RAW_INT','ATTITUDE','HEARTBEAT')
 from ..pixhawk.identity import COMPANION_COMPONENT, COMPANION_SYSTEM
 
 OCS_SYSTEM = 250
@@ -297,7 +298,7 @@ def main(args=None):
             self.telemetry = CompetitionTelemetry(time.monotonic)
             self.capture = HeartbeatCapture()
             self.link = Link('ros://graey/fcu', COMPANION_COMPONENT, self.get_logger(),
-                system=COMPANION_SYSTEM, node=self, kinds=set(NAVIGATION_VIEW_KINDS)|{'TUNNEL'})
+                system=COMPANION_SYSTEM, node=self, kinds=set(COMPETITION_RX_KINDS)|{'TUNNEL'})
             self.run_pub = self.create_publisher(String, '/graey/comms/radio_run', 10)
             self.status_pub = self.create_publisher(String, '/graey/comms/radio_mission_status', 10)
             self.create_subscription(String, '/graey/navigation/bridge_status',

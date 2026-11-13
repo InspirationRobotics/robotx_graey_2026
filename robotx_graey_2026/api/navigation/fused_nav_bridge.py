@@ -92,7 +92,9 @@ class FusedNavBridge(SteadyNode):
                 self.sitl_depth, 20)
         # Service TIMESYNC faster than its 50 ms RTT acceptance bound. Keep
         # ODOMETRY/status at 20 Hz separately below.
-        self.create_timer(.01, self.tick)
+        # 50 Hz services TIMESYNC well inside its 50 ms bound and still emits
+        # the independently rate-limited odometry/status streams at 20 Hz.
+        self.create_timer(.02, self.tick)
         self.create_timer(1., self.request)
         self.create_timer(.2, self.request_parameters)
         self.create_timer(.2, self.sync_clock)

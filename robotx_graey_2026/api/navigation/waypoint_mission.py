@@ -15,8 +15,6 @@ from robotx_graey_2026.api.navigation.waypoint_logic import WaypointRun
 from robotx_graey_2026.api.navigation.guided_surface_mission import GuidedSurfaceRun
 from robotx_graey_2026.api.navigation.simple_sequence import SimpleSequenceRun
 from robotx_graey_2026.api.navigation.dive_spin import DiveSpinRun
-from robotx_graey_2026.api.navigation.rc_start import RcStartEdge
-from robotx_graey_2026.api.navigation.onboard_recording import OnboardMissionRecording
 from robotx_graey_2026.api.navigation.radio_route import RadioRouteRun
 from robotx_graey_2026.api.navigation.competition_route import CompetitionRouteRun
 from robotx_graey_2026.api.navigation.pipeline_recording import PipelineRecording
@@ -37,29 +35,19 @@ class WaypointMission(Node):
         from .odometry_profile import SHALLOW_LIMITS
         self.SHALLOW_LIMITS=SHALLOW_LIMITS.copy()
         for key, value in dict(plan_json='', run_id='', commissioned=False, simulation=False,
-                              mavlink='udpout:127.0.0.1:14553', result_file='',
-                              rc_start=False, rc_start_channel=9, rc_high=1700).items():
+                              mavlink='udpout:127.0.0.1:14553', result_file='').items():
             self.declare_parameter(key, value)
         cfg = {key: self.get_parameter(key).value for key in
-               ('plan_json', 'run_id', 'commissioned', 'simulation', 'mavlink', 'result_file',
-                'rc_start', 'rc_start_channel', 'rc_high')}
+               ('plan_json', 'run_id', 'commissioned', 'simulation', 'mavlink', 'result_file')}
         self.sim = cfg['simulation']
-        self.rc_start_mode=cfg['rc_start'] is True
         if self.sim and not (os.environ.get('GRAEY_RUNTIME_SCOPE') == 'sitl'
                             and os.environ.get('ROS_LOCALHOST_ONLY') == '1'
                             and os.environ.get('ROS_DOMAIN_ID') == '73'
                             and cfg['mavlink'] == 'udpout:127.0.0.1:14553'):
             raise ValueError('Simulation requires isolated localhost SITL domain and endpoint')
-        if not cfg['run_id'] and not self.rc_start_mode:
-            raise ValueError('Mission run ID required')
-        if not self.sim and not cfg['commissioned']:
+        if not cfg['run_id'] or (not self.sim and not cfg['commissioned']):
             raise ValueError('Mission run ID and commissioned live configuration required')
-        run_id=cfg['run_id'] or uuid.uuid4().hex
         plan=json.loads(cfg['plan_json'])
-        if self.rc_start_mode and not (plan.get('kind') == 'dive_spin'
-                                      and plan.get('operator_kind') == 'dive_here'
-                                      and plan.get('competition',False) is True):
-            raise ValueError('RC start is reserved for competition Chris Simple Dive')
         if type(plan.get('competition',False)) is not bool:
             raise ValueError('competition must be boolean')
         self.run_gate=RunGate(plan.get('competition',False))
@@ -69,18 +57,14 @@ class WaypointMission(Node):
                       RadioRouteRun if plan.get('kind') == 'radio_route' else
                       SimpleSequenceRun if plan.get('kind') == 'simple_sequence' else
                       CompetitionRouteRun if 'points' in plan else
-                      GuidedSurfaceRun)(plan,run_id,time.monotonic())
-        self.rc_trigger=(RcStartEdge(cfg['rc_start_channel'],cfg['rc_high'])
-                         if self.rc_start_mode else None)
-        self.rc_started=not self.rc_start_mode
-        self.rc_report_run_id=None
-        self.rc_report_run_at=-math.inf
-        self.onboard_recorder=(OnboardMissionRecording(
-            run_id,self.get_logger().warning) if self.rc_start_mode and not self.sim else None)
+                      GuidedSurfaceRun)(plan,cfg['run_id'],time.monotonic())
         self.result_file = cfg['result_file']
-        self.recorder = (PipelineRecording(Path(self.result_file).parent if self.result_file else Path.home()/'robotx_ws/logs', run_id)
+        self.recorder = (PipelineRecording(Path(self.result_file).parent if self.result_file else Path.home()/'robotx_ws/logs', cfg['run_id'])
                          if isinstance(self.logic, CompetitionRouteRun) and not self.sim and plan.get('recording_mode','automatic')=='automatic' else None)
-        self.link = Link(cfg['mavlink'], 198, self.get_logger(),system=255 if isinstance(self.logic,GuidedSurfaceRun) else 1, node=None if self.sim else self)
+        self.link = Link(cfg['mavlink'], 198, self.get_logger(),
+            system=255 if isinstance(self.logic,GuidedSurfaceRun) else 1,
+            node=None if self.sim else self,
+            kinds=set(NAVIGATION_VIEW_KINDS)|{'PARAM_VALUE','STATUSTEXT'})
         self.view = NavigationView()
         self.supervisor, self.safety = {}, {}
         self.bridge = {}
@@ -108,7 +92,6 @@ class WaypointMission(Node):
         self.resource_last=-math.inf
         self.intent_pub = self.create_publisher(String, '/graey/navigation/intent', 10)
         self.auto_pub = self.create_publisher(Bool, '/graey/autonomy_active', 10)
-        self.onboard_pub = self.create_publisher(String, '/graey/control_watchdog/onboard_run', 10)
         self.kill_pub = self.create_publisher(String, '/graey/control_watchdog/request', 10)
         self.kill_sent = -math.inf
         self.create_subscription(String, '/graey/navigation/status', self.on_status, 10)
@@ -124,19 +107,11 @@ class WaypointMission(Node):
         self.request()
 
     def on_competition_status(self,msg):
-        try:
-            now=time.monotonic();data=json.loads(msg.data)
-            self.run_gate.update(data,now)
-            run=data.get('remote_run_id',data.get('run_id'))
-            if (self.rc_start_mode and data.get('run_confirmed') is True
-                    and data.get('remote_state') == 'RUNNING'
-                    and type(run) is int and 0 <= run <= 0xffffffff):
-                self.rc_report_run_id,self.rc_report_run_at=run,now
+        try:self.run_gate.update(json.loads(msg.data),time.monotonic())
         except (ValueError,TypeError):pass
 
     def request(self):
-        for mid in ((24, 30, 32, 33, 49, 65, 193) if self.rc_start_mode
-                    else (24, 30, 32, 33, 49, 193)):
+        for mid in (24, 30, 32, 33, 49, 193):
             self.link.command(511, mid, 100000)
         for name in self.SHALLOW_LIMITS:
             self.link.send('param_request_read_send',1,1,name.encode(),-1)
@@ -150,8 +125,6 @@ class WaypointMission(Node):
         return True
 
     def destroy_node(self):
-        if getattr(self, 'onboard_recorder', None) is not None:
-            self.onboard_recorder.close()
         if getattr(self, 'recorder', None) is not None:
             self.recorder.close()
         self.release_surface_controls()
@@ -250,32 +223,16 @@ class WaypointMission(Node):
         if resource is None or self.logic.stage != 'COMPLETE':
             return None
         report=dict(resource)
-        rc_run=(getattr(self,'rc_report_run_id',None) if getattr(self,'rc_start_mode',False)
-                and 0 <= now-getattr(self,'rc_report_run_at',-math.inf) < 2 else None)
-        if ((gate is not None and gate.competition and gate.run_id is not None)
-                or rc_run is not None):
+        if gate is not None and gate.competition and gate.run_id is not None:
             if now-self.resource_last >= .5:
                 self.resource_pub.publish(String(data=json.dumps({
                     key:value for key,value in resource.items() if key != 'sequence'
                 },allow_nan=False)))
                 self.resource_last=now
             report['report_state']='publishing to durable RoboCommand outbox'
-            if rc_run is not None:report['competition_run_id']=rc_run
         else:
             report['report_state']='mission complete; no current RoboCommand run for report'
         return report
-
-    def publish_onboard_run(self, now, active):
-        """Lease the RC-started onboard run through RF loss.
-
-        This does not grant arm or ESC power.  It only tells the existing
-        watchdog that connection loss must not countermand a run already
-        deliberately started by SE; SA, FC loss and mission completion remain.
-        """
-        if not self.rc_start_mode:return
-        self.onboard_pub.publish(String(data=json.dumps(dict(
-            source='rc_simple_dive',run_id=self.logic.run_id,active=bool(active),
-            published_monotonic=now),allow_nan=False)))
 
     def pump(self):
         def receive(kind, m):
@@ -287,17 +244,6 @@ class WaypointMission(Node):
                 item=dict(at=time.monotonic(),severity=int(m.severity),text=str(m.text))
                 self.fc_status_text=(self.fc_status_text+[item])[-10:]
                 self.get_logger().warning('FC_STATUS_TEXT '+json.dumps(item))
-            if kind=='RC_CHANNELS' and self.rc_trigger is not None:
-                if self.rc_trigger.update(m):
-                    started=time.monotonic()
-                    self.rc_started=True
-                    if getattr(self,'onboard_recorder',None) is not None:self.onboard_recorder.start()
-                    self.logic.enter('WAIT_SURFACE',started,
-                                     'SE start received; taking onboard mission control')
-                    self.publish_onboard_run(started,True)
-                    self.get_logger().warning('RC_SIMPLE_DIVE_START '+json.dumps(dict(
-                        run_id=self.logic.run_id,channel=self.rc_trigger.channel,
-                        pwm=self.rc_trigger.pwm)))
             if kind in ('LOCAL_POSITION_NED', 'ATTITUDE', 'GLOBAL_POSITION_INT'):
                 previous = self.stamps.get(kind, -1)
                 if m.time_boot_ms+1000 < previous:
@@ -319,14 +265,13 @@ class WaypointMission(Node):
         b=getattr(self,'bridge',{})
         ned, velocity = local.get('ned'), local.get('velocity')
         depth=b.get('depth_m')
-        cube_control_fresh=bool(hb and local and att and ned and velocity
+        fresh=bool(hb and local and att and ned and velocity
             and all(isinstance(v,(int,float)) and math.isfinite(v)
-                    for v in (*ned,*velocity,*att.get('rpy',[None]))))
-        fresh=bool(cube_control_fresh and (getattr(self,'rc_start_mode',False)
-            or 0<=now-getattr(self,'bridge_time',-math.inf)<1.))
+                    for v in (*ned,*velocity,*att.get('rpy',[None])))
+            and 0<=now-getattr(self,'bridge_time',-math.inf)<1.)
         failure = ''
         limits_ready=self.limits_ready(now)
-        if not self.sim and not getattr(self,'rc_start_mode',False):
+        if not self.sim:
             c = self.safety
             if not (0 <= now-self.safety_time < 2 and c.get('vehicle_fresh')
                     and not c.get('inhibit') and not c.get('sa_active') and c.get('esc_commanded_on')):
@@ -389,19 +334,6 @@ class WaypointMission(Node):
     def tick(self):
         now = time.monotonic()
         self.sequence += 1
-        if self.rc_start_mode and not self.rc_started:
-            status=self.logic.snapshot()
-            status.update(stage='WAIT_RC',reason=('Waiting for SE: move SE low, then high to start'
-                if not self.rc_trigger.seen_low else 'SE low seen; move SE high to start'),
-                rc_start=self.rc_trigger.snapshot(),competition=False,competition_run_id=None,
-                control_mode='PILOT',telemetry_fresh=False)
-            if getattr(self,'onboard_recorder',None) is not None:status['recording']=self.onboard_recorder.snapshot()
-            self.task_pub.publish(String(data='TASK_NONE'))
-            self.publish_onboard_run(now,False)
-            self.auto_pub.publish(Bool(data=False))
-            self.pub.publish(String(data=json.dumps(status,allow_nan=False)))
-            return
-        self.publish_onboard_run(now,self.logic.stage not in self.logic.terminal)
         # Surface missions keep SURFACE intent throughout; no GPS source switch.
         if self.logic.stage not in self.logic.terminal:
             self.intent_pub.publish(String(data=json.dumps(dict(run_id=self.logic.run_id,
@@ -416,8 +348,7 @@ class WaypointMission(Node):
             # Competition readiness is an actual Cube POSHOLD, not a commanded
             # GUIDED target masquerading as a hold.  mission_claimed remains true,
             # so CompetitionTelemetry reports STATE_AUTO to RoboCommand.
-            hold_ready=(o.get('navigation_hold_safe') is True
-                        or getattr(self,'rc_start_mode',False) and o.get('fresh') is True)
+            hold_ready=o.get('navigation_hold_safe') is True
             ready=bool(o.get('fresh') and o.get('armed') and o.get('mode')==MODE_POSHOLD
                        and hold_ready and not o.get('failure'))
             admitted=gate.admit(now,ready)
@@ -435,7 +366,6 @@ class WaypointMission(Node):
                             if switching else 'POSHOLD; waiting for verified RoboCommand RunStart'),
                             competition=True,competition_ready=not switching,competition_run_id=None,
                             control_mode='POSHOLD')
-                        if getattr(self,'onboard_recorder',None) is not None:status['recording']=self.onboard_recorder.snapshot()
                         self.auto_pub.publish(Bool(data=True))
                         self.pub.publish(String(data=json.dumps(status,allow_nan=False)))
                         return
@@ -449,7 +379,6 @@ class WaypointMission(Node):
                 status.update(stage='STARTING',reason='RunStart verified; entering GUIDED',
                     competition=True,competition_ready=True,competition_run_id=gate.run_id,
                     control_mode='GUIDED')
-                if getattr(self,'onboard_recorder',None) is not None:status['recording']=self.onboard_recorder.snapshot()
                 self.auto_pub.publish(Bool(data=True))
                 self.pub.publish(String(data=json.dumps(status,allow_nan=False)))
                 return
@@ -528,9 +457,7 @@ class WaypointMission(Node):
                 self.link.set_mode(MODE_GUIDED if action=='guided' else MODE_STABILIZE if action=='stabilize' else MODE_MANUAL)
             elif action in ('arm', 'disarm'):
                 self.link.command(400, 1 if action == 'arm' else 0)
-        if self.logic.stage in self.logic.terminal:
-            self.release_surface_controls()
-            if getattr(self,'onboard_recorder',None) is not None:self.onboard_recorder.stop()
+        if self.logic.stage in self.logic.terminal:self.release_surface_controls()
         if getattr(self.logic,'kill_requested',False) and not self.sim:self.request_kill(now)
         if self.logic.stage=='ABORTED' and self.logic.abort_context is None:
             self.logic.abort_context=dict(telemetry_fresh=bool(o['fresh']),
@@ -555,8 +482,6 @@ class WaypointMission(Node):
         if resource_report is not None:status['resource_request']=resource_report
         if isinstance(self.logic, CompetitionRouteRun):
             status['recording'] = o['recording']
-        elif getattr(self,'onboard_recorder',None) is not None:
-            status['recording'] = self.onboard_recorder.snapshot()
         paused=status['navigation_pause']['active']
         if paused!=self.last_pause:
             self.last_pause=paused

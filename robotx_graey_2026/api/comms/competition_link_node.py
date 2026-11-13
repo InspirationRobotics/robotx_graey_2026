@@ -6,7 +6,8 @@ import time
 from .competition_wifi import CompetitionSender, WifiLink
 from .competition_telemetry import CompetitionTelemetry
 from ..pixhawk.mavlink import Link
-from ..gui.navigation_view import NAVIGATION_VIEW_KINDS
+
+COMPETITION_RX_KINDS=('GLOBAL_POSITION_INT','GPS_RAW_INT','ATTITUDE','HEARTBEAT')
 
 
 def main(args=None):
@@ -33,7 +34,7 @@ def main(args=None):
             self.telemetry = CompetitionTelemetry(time.monotonic)
             # CompetitionTelemetry -> NavigationView.consume reads only these.
             self.fcu = Link('ros://graey/fcu',191,self.get_logger(),node=self,
-                            kinds=NAVIGATION_VIEW_KINDS)
+                            kinds=COMPETITION_RX_KINDS)
             self.error = None
             self.radio_run = None
             self.tiers_request = None
@@ -51,12 +52,16 @@ def main(args=None):
             self.create_timer(.5,self._publish)
 
         def _guard(self, action):
+            previous = self.error
             try:
                 action()
                 self.error = None
+                if previous is not None:
+                    self.get_logger().info('Competition input recovered')
             except (ValueError,TypeError,KeyError,OverflowError,OSError,sqlite3.Error) as exc:
                 self.error = str(exc)
-                self.get_logger().error(self.error)
+                if self.error != previous:
+                    self.get_logger().error(self.error)
 
         def _status(self,name,raw):
             self._guard(lambda:self.telemetry.put(name,json.loads(raw)))
