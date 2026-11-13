@@ -23,7 +23,8 @@ class TestCompetitionMissionGate(unittest.TestCase):
         exec(compile(ast.Module(body=[tick],type_ignores=[]),str(source),'exec'),namespace)
         node=SimpleNamespace(sequence=0,run_gate=RunGate(competition),competition_hold=None,
             intent_pub=Mock(),pub=Mock(),auto_pub=Mock(),send_guided_waypoint=Mock(),
-            link=Mock(),surface_measurement_status={})
+            link=Mock(),surface_measurement_status={},rc_start_mode=False,rc_started=True,
+            publish_onboard_run=Mock())
         node.logic=SimpleNamespace(stage='ARM',terminal={'ABORTED','COMPLETE'},phase='SURFACE_NAV',
             run_id='local',plan={'mode':'surface'},snapshot=lambda:dict(stage='ARM'),
             step=Mock(side_effect=ExecutionReached()),abort=Mock())
@@ -55,8 +56,29 @@ class TestCompetitionMissionGate(unittest.TestCase):
         node.observation=lambda now:dict(fresh=True,armed=True,mode=16,failure='',
                                         navigation_hold_safe=True,local=(1.,2.,.3))
         node.run_gate.update(dict(run_confirmed=True,remote_state='RUNNING',run_id=70000),0.)
+        tick()
+        self.assertEqual(json.loads(node.pub.publish.call_args.args[0].data)['stage'],'STARTING')
+        node.link.set_mode.assert_called_with(4)
+        node.observation=lambda now:dict(fresh=True,armed=True,mode=4,failure='',
+                                        navigation_hold_safe=True,local=(1.,2.,.3))
         with self.assertRaises(ExecutionReached):tick()
         self.assertEqual(node.run_gate.run_id,70000)
+
+    def test_se_prepared_dive_waits_in_poshold_then_runstart_releases_without_nav_gate(self):
+        node,tick=self.make_node(True)
+        node.rc_start_mode=True
+        node.observation=lambda now:dict(fresh=True,armed=True,mode=16,failure='',
+                                        navigation_hold_safe=False,local=(1.,2.,.3))
+        tick()
+        status=json.loads(node.pub.publish.call_args.args[0].data)
+        self.assertEqual(status['stage'],'WAIT_RUN_START')
+        self.assertTrue(status['competition_ready'])
+        node.run_gate.update(dict(run_confirmed=True,remote_state='RUNNING',run_id=77),0.)
+        tick()
+        self.assertEqual(json.loads(node.pub.publish.call_args.args[0].data)['stage'],'STARTING')
+        node.observation=lambda now:dict(fresh=True,armed=True,mode=4,failure='',
+                                        navigation_hold_safe=False,local=(1.,2.,.3))
+        with self.assertRaises(ExecutionReached):tick()
 
     def test_local_mission_executes_without_ocs(self):
         node,tick=self.make_node(False)
@@ -68,3 +90,40 @@ class TestCompetitionMissionGate(unittest.TestCase):
                                         navigation_hold_safe=True,local=(1.,2.,.3))
         node.run_gate.update(dict(run_confirmed=True,remote_state='RUNNING',run_id=7),-3.)
         tick();node.logic.step.assert_not_called()
+
+    def test_chris_report_is_completion_only_and_repeated_idempotently(self):
+        source=Path(__file__).parents[1]/'robotx_graey_2026/api/navigation/waypoint_mission.py'
+        tree=ast.parse(source.read_text())
+        cls=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=='WaypointMission')
+        method=next(n for n in cls.body if isinstance(n,ast.FunctionDef)
+                    and n.name=='publish_resource_report')
+        namespace=dict(json=json,String=lambda **kwargs:SimpleNamespace(**kwargs))
+        exec(compile(ast.Module(body=[method],type_ignores=[]),str(source),'exec'),namespace)
+        node=SimpleNamespace(resource_last=float('-inf'),resource_pub=Mock(),logic=SimpleNamespace(
+            stage='SURFACE',resource_request=dict(observation_id='chris-simple-dive:run',
+                resource_color=3,delivery_circle_color=1,sequence=['BLUE','RED'])))
+        gate=SimpleNamespace(competition=True,run_id=42)
+        publish=lambda now:namespace['publish_resource_report'](node,now,gate)
+        self.assertIsNone(publish(1.));node.resource_pub.publish.assert_not_called()
+        node.logic.stage='COMPLETE';status=publish(2.)
+        self.assertEqual(status['sequence'],['BLUE','RED'])
+        payload=json.loads(node.resource_pub.publish.call_args.args[0].data)
+        self.assertEqual(payload,dict(observation_id='chris-simple-dive:run',
+            resource_color=3,delivery_circle_color=1))
+        publish(2.2);self.assertEqual(node.resource_pub.publish.call_count,1)
+        publish(2.5);self.assertEqual(node.resource_pub.publish.call_count,2)
+
+    def test_chris_practice_result_is_not_sent_to_robocommand(self):
+        source=Path(__file__).parents[1]/'robotx_graey_2026/api/navigation/waypoint_mission.py'
+        tree=ast.parse(source.read_text())
+        cls=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=='WaypointMission')
+        method=next(n for n in cls.body if isinstance(n,ast.FunctionDef)
+                    and n.name=='publish_resource_report')
+        namespace=dict(json=json,String=lambda **kwargs:SimpleNamespace(**kwargs))
+        exec(compile(ast.Module(body=[method],type_ignores=[]),str(source),'exec'),namespace)
+        node=SimpleNamespace(resource_last=float('-inf'),resource_pub=Mock(),logic=SimpleNamespace(
+            stage='COMPLETE',resource_request=dict(observation_id='practice',resource_color=1,
+                delivery_circle_color=2,sequence=['RED','GREEN'])))
+        report=namespace['publish_resource_report'](node,1.,SimpleNamespace(competition=False,run_id=None))
+        node.resource_pub.publish.assert_not_called()
+        self.assertIn('no current RoboCommand run',report['report_state'])

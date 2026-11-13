@@ -1,4 +1,4 @@
-"""Dive, turn a full circle, come back up, disarm, and ask for the kill.
+"""Move forward, dive, turn a full circle, come back up, disarm, and ask for the kill.
 
 Chris, 12 Nov 2026, for camera and sonar data over the pipeline: drive Graey there by hand, press
 Start on the radio page's Missions tab. It can be run again and again. How deep it goes is one of:
@@ -10,6 +10,7 @@ Start on the radio page's Missions tab. It can be run again and again. How deep 
 
     WAIT_SURFACE   until the Cube's telemetry and the kill switch's permission are both seen
     GUIDED, ARM    take the vehicle; the spot, depth and heading it has now are the start
+    FORWARD        Chris Simple Dive only: 1 m along the captured starting heading
     DESCEND        straight down to the target above, holding that spot and heading
     SPIN           eight 45 degree turns, HOLD_S at each, back to the start heading
     SURFACE        back up to SURFACED_M below the start depth, then straight to
@@ -37,6 +38,7 @@ depth controller winds up (demo_mission.py tells that story), so SURFACED_M belo
 counts as up and the very next thing is the disarm.
 """
 import math
+import secrets
 import statistics
 from collections import deque
 
@@ -55,6 +57,10 @@ START_LIMIT_S = 10.0                # GUIDED, ARM and DISARM each
 TELEMETRY_LIMIT_S = 3.0             # silence once it is moving
 WAIT_LIMIT_S = 15.0                 # silence before it has started: waypoint_mission's own topics take a moment
 DIVE_STAGES = {'DESCEND', 'SPIN', 'SURFACE'}
+CHRIS_FORWARD_M = 1.0
+FORWARD_REACHED_M = 0.25
+FORWARD_LIMIT_S = 30.0
+RESOURCE_COLORS = {1: 'RED', 2: 'GREEN', 3: 'BLUE'}
 
 # Why a run ended early, small enough for the radio's status frame (status_codec.py carries it).
 NOTE_NONE, NOTE_OPERATOR, NOTE_PILOT, NOTE_SAFETY, NOTE_TIMEOUT, NOTE_TELEMETRY = range(6)
@@ -85,21 +91,43 @@ def dive_spin_plan(dive):
     return dict(kind='dive_spin', mode='surface', map='local', dive=dive_target(**dive))
 
 
+def random_resource_request(run_id, randbelow=None):
+    """Build the simulated RobotX two-colour request for Chris Simple Dive.
+
+    The sequence is resource colour first and delivery-circle colour second.
+    Both are independently RED, GREEN or BLUE.  A stable observation ID lets
+    the competition outbox deduplicate repeated terminal publications.
+    """
+    if not isinstance(run_id, str) or not run_id:
+        raise ValueError('Mission run ID required for the resource request')
+    choose = secrets.randbelow if randbelow is None else randbelow
+    colors = [choose(3) + 1, choose(3) + 1]
+    if any(type(value) is not int or value not in RESOURCE_COLORS for value in colors):
+        raise ValueError('Random colour source returned an invalid value')
+    return dict(observation_id=('chris-simple-dive:' + run_id)[:128],
+                resource_color=colors[0], delivery_circle_color=colors[1],
+                sequence=[RESOURCE_COLORS[value] for value in colors])
+
+
 def turn(a, b):
     """The signed angle from heading b to heading a, -pi to pi."""
     return (a - b + math.pi) % (2 * math.pi) - math.pi
 
 
 class DiveSpinRun(GuidedSurfaceRun):
-    moving = set(DIVE_STAGES)
+    moving = set(DIVE_STAGES) | {'FORWARD'}
 
     def __init__(self, plan, run_id, now):
         dive = dive_target(**plan['dive'])
         super().__init__(dict(lat=0., lon=0., map='geographic', mode='surface'), run_id, now)
         self.plan = dict(plan, dive=dive)
         self.dive = dive
+        self.forward_m = CHRIS_FORWARD_M if plan.get('operator_kind') == 'dive_here' else 0.0
+        self.resource_request = (random_resource_request(run_id)
+                                 if plan.get('operator_kind') == 'dive_here' else None)
         self.deepest = dive.get('depth_m', dive.get('max_depth_m'))     # below the start, at most
         self.limits = dict(GUIDED=START_LIMIT_S, ARM=START_LIMIT_S, DISARM=START_LIMIT_S,
+                           FORWARD=FORWARD_LIMIT_S,
                            DESCEND=15. + 15. * self.deepest, SURFACE=20. + 15. * self.deepest)
         self.has_vehicle = False        # the Cube confirmed GUIDED for this run
         self.hold = None                # (north, east, down) where the dive starts: the spot it keeps
@@ -111,6 +139,7 @@ class DiveSpinRun(GuidedSurfaceRun):
         self.silent_since = None
         self.note = NOTE_NONE
         self.kill_requested = False
+        self.forward_target = None
         self.reason = 'Waiting for the Cube and the kill switch'
 
     @property
@@ -181,6 +210,14 @@ class DiveSpinRun(GuidedSurfaceRun):
                 return self.command(now, 'arm')
             self.start, self.surface_down = local, local[2]
             return self.begin(now, o, local, yaw)
+        elif self.stage == 'FORWARD':
+            self.target = self.forward_target
+            if self.settled(now, math.dist(local, self.target) <= FORWARD_REACHED_M
+                            and o.get('speed', math.inf) <= .15):
+                return self.start_dive(now, self.forward_target, self.heading)
+            if late:
+                return self.fail(now, o, 'The 1 m forward leg did not finish in time', NOTE_TIMEOUT)
+            return self.command(now, 'guided_orient', (*self.target, self.heading), interval=.1)
         elif self.stage == 'DESCEND':
             down = self.descent_target(local, o.get('altitude'))
             if down is None:
@@ -225,7 +262,14 @@ class DiveSpinRun(GuidedSurfaceRun):
         return []
 
     def begin(self, now, o, local, yaw):
-        """Armed in GUIDED: dive right here."""
+        """Armed in GUIDED: Chris moves 1 m first; other dive variants dive here."""
+        if self.forward_m:
+            self.heading = yaw
+            self.forward_target = (local[0] + self.forward_m * math.cos(yaw),
+                                   local[1] + self.forward_m * math.sin(yaw), local[2])
+            self.target = self.forward_target
+            self.enter('FORWARD', now, 'Moving 1 m along the starting heading')
+            return self.command(now, 'guided_orient', (*self.target, self.heading), interval=.1)
         return self.start_dive(now, local, yaw)
 
     def start_dive(self, now, local, yaw):
@@ -266,6 +310,7 @@ class DiveSpinRun(GuidedSurfaceRun):
     def snapshot(self):
         s = super().snapshot()
         s.update(note=self.note, spin_step=self.spin_step, spin_steps=STEPS, headings_skipped=self.skipped,
-                 kill_requested=self.kill_requested, dive=self.dive)
+                 kill_requested=self.kill_requested, dive=self.dive,
+                 forward_m=self.forward_m, forward_target=self.forward_target)
         return s
 

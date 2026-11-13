@@ -23,6 +23,7 @@ from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
 import os
+import json
 
 PKG = 'robotx_graey_2026'
 RESPAWN = {'respawn': True, 'respawn_delay': 2.0}
@@ -46,6 +47,8 @@ def generate_launch_description():
             description='Enable supervisor after live Cube fusion and mission checks'),
         DeclareLaunchArgument('waypoint_enabled', default_value='0',
             description='Set 1 to expose live waypoint execution after commissioning; readiness gates still apply'),
+        DeclareLaunchArgument('rc_simple_dive_enabled',default_value='true',
+            description='Wait for an SE low-to-high edge, then run the adapted Chris Simple Dive onboard'),
         Node(package=PKG, executable='telemetry_gateway', name='telemetry_gateway', parameters=[config],output='screen', **RESPAWN),
         Node(package=PKG, executable='competition_link_node',name='competition_link_node',
              condition=IfCondition(LaunchConfiguration('communications_enabled')),
@@ -73,6 +76,18 @@ def generate_launch_description():
                  'vehicle_validation_complete': ParameterValue(LaunchConfiguration('mission_commissioned'), value_type=bool),
                  'continuous_fusion': ParameterValue(
                  LaunchConfiguration('continuous_fusion'), value_type=bool)}], output='screen', **RESPAWN),
+        # Adapted from prequal's SE gesture.  This is the production waypoint /
+        # DiveSpin executor: no Chris radio owner, component IDs or parallel stack.
+        # A held-high SE cannot start it; the process must observe low then high.
+        Node(package=PKG,executable='waypoint_mission',name='waypoint_mission',
+             condition=IfCondition(LaunchConfiguration('rc_simple_dive_enabled')),
+             parameters=[config,{
+                 'plan_json':json.dumps(dict(kind='dive_spin',operator_kind='dive_here',
+                     mode='surface',map='local',competition=True,
+                     dive=dict(altitude_m=3.5,max_depth_m=5.0))),
+                 'run_id':'','commissioned':True,'rc_start':True,
+                 'rc_start_channel':9,'rc_high':1700,
+             }],output='screen',**RESPAWN),
         Node(package=PKG,executable='gcs_bridge',name='gcs_bridge',
              condition=IfCondition(LaunchConfiguration('gcs_bridge_enabled')),
              arguments=['--port',LaunchConfiguration('gcs_port')],output='screen',**RESPAWN),

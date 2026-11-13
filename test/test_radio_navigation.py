@@ -1,9 +1,10 @@
 import ast
+import math
 import unittest
 from pathlib import Path
 
 from robotx_graey_2026.api.navigation.dive_spin import (
-    DiveSpinRun, NOTE_OPERATOR, NOTE_PILOT, dive_target)
+    DiveSpinRun, NOTE_OPERATOR, NOTE_PILOT, dive_target, random_resource_request)
 from robotx_graey_2026.api.navigation.radio_route import (
     RadioRouteRun, mission_plan, route_points)
 
@@ -16,7 +17,7 @@ def observation(**changes):
 
 
 class DiveSpinTests(unittest.TestCase):
-    def take_vehicle(self,run,o):
+    def take_vehicle(self,run,o,expected='DESCEND'):
         run.step(.1,o)
         self.assertEqual(run.stage,'GUIDED')
         self.assertEqual(run.step(.2,o)[0][0],'guided')
@@ -24,7 +25,7 @@ class DiveSpinTests(unittest.TestCase):
         self.assertEqual(run.stage,'ARM')
         self.assertEqual(run.step(.4,o)[0][0],'arm')
         o['armed']=True;run.step(.5,o)
-        self.assertEqual(run.stage,'DESCEND')
+        self.assertEqual(run.stage,expected)
 
     def test_pool_dive_takes_guided_then_arms_at_current_pose(self):
         run=DiveSpinRun(dict(kind='dive_spin',mode='surface',map='local',
@@ -35,6 +36,25 @@ class DiveSpinTests(unittest.TestCase):
         actions=run.step(.6,o)
         self.assertEqual(actions[0][0],'guided_orient')
         self.assertAlmostEqual(actions[0][1][2],1.4)
+
+    def test_chris_simple_dive_moves_one_metre_before_descending(self):
+        run=DiveSpinRun(dict(kind='dive_spin',operator_kind='dive_here',mode='surface',map='local',
+                             dive=dict(depth_m=1.)), 'chris',0.)
+        o=observation(local=(2.,3.,.4),yaw=math.pi/2)
+        self.take_vehicle(run,o,expected='FORWARD')
+        self.assertAlmostEqual(run.forward_target[0],2.)
+        self.assertAlmostEqual(run.forward_target[1],4.)
+        self.assertAlmostEqual(run.forward_target[2],.4)
+        o['local']=run.forward_target
+        run.step(.6,o);run.step(1.7,o)
+        self.assertEqual(run.stage,'DESCEND')
+        self.assertEqual(run.hold,run.forward_target)
+
+    def test_chris_resource_sequence_uses_robotx_two_color_order(self):
+        values=iter((2,0))
+        request=random_resource_request('run-7',lambda limit:next(values))
+        self.assertEqual(request,dict(observation_id='chris-simple-dive:run-7',
+            resource_color=3,delivery_circle_color=1,sequence=['BLUE','RED']))
 
     def test_dvl_target_is_bounded_and_near_floor_surfaces(self):
         run=DiveSpinRun(dict(kind='dive_spin',mode='surface',map='local',

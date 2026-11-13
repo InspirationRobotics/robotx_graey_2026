@@ -12,7 +12,8 @@ class ConnectionPolicyTests(unittest.TestCase):
         cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and
                    any(isinstance(m, ast.FunctionDef) and m.name == 'tick' for m in n.body))
         cls.bases = [ast.Name(id='object', ctx=ast.Load())]
-        cls.body = [m for m in cls.body if isinstance(m, ast.FunctionDef) and m.name in ('tick', 'autonomous')]
+        cls.body = [m for m in cls.body if isinstance(m, ast.FunctionDef)
+                    and m.name in ('tick', 'autonomous', 'onboard_claimed')]
         tree.body = [cls]
         ns = dict(AUTO_MODES={'GUIDED', 'AUTO', 'SURFACE'})
         exec(compile(ast.fix_missing_locations(tree), str(path), 'exec'), ns)
@@ -27,6 +28,9 @@ class ConnectionPolicyTests(unittest.TestCase):
         node.inhibit = None
         node.source = source
         node.mode = mode
+        node.onboard_run=None
+        node.onboard_until=0.
+        node.now=Mock(return_value=1.)
         return node
 
     def test_guided_survives_wifi_or_rf_loss(self):

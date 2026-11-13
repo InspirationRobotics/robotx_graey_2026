@@ -23,10 +23,44 @@ All mission types use the Missions page's same sequence:
 
 Retained mission types are Waypoints, plotted Pipeline Survey, Ruth Survey and 5–2–5. The Chris handoff concepts are registered as explicit additional mission types rather than replacing those semantics:
 
-- Dive Here: DVL altitude with pressure-depth limit, eight headings, surface, disarm and mission-done inhibit.
+- Chris Simple Dive (`dive_here` compatibility key): travel 1 m along the captured heading, DVL-altitude dive with a pressure-depth limit, eight headings (one full turn), surface, disarm and mission-done inhibit. A successful Competition run publishes one randomly generated two-color `ResourceDeliveryRequest` (resource first, delivery circle second) through the existing durable RoboCommand outbox. Practice runs display the generated result but do not report without a verified run.
 - Surface Route: up to 15 surfaced geographic legs.
 - Dock → Pipeline → Dock: outward surfaced route, bounded DVL dive/spin, reverse route and captured dock return.
 - Pool Dive Test: operator-entered pressure depth, eight headings, surface and disarm.
+
+### Headless SE / RoboCommand operation
+
+The production core launches one lightweight `waypoint_mission` instance for
+Chris Simple Dive. This is an adaptation of prequal's SE gesture into the
+production DiveSpin/waypoint executor; it does not run Chris's radio process,
+component IDs, GUI, or parallel transport stack.
+
+1. The process waits without claiming autonomy. SE must be observed low and
+   then high on RC channel 9, so booting with a held-high switch cannot start it.
+2. After the edge, the mission uses fresh Cube local position, velocity and
+   attitude directly. It does not require the GUI, Load/Prepare, RFD, GPS,
+   navigation-supervisor commissioning, laptop presence, or a healthy RF link.
+3. It selects GUIDED, arms and captures the current pose/heading, then enters a
+   real Cube POSHOLD. The existing competition heartbeat consequently reports
+   UUV1 as `STATE_AUTO` while it waits for the verified Wi-Fi RoboCommand
+   RunStart on `/graey/comms/status`.
+4. The exact matching RunStart switches the Cube back to GUIDED before the
+   adapted 1 m / dive / spin / surface executor advances. The explicit switch
+   avoids treating the intentional POSHOLD readiness state as pilot takeover.
+5. A fresh onboard-run lease tells the existing watchdog not to disarm solely
+   because RF disappears after SE. This exception cannot clear an existing
+   inhibit, grant arming/ESC power, bypass SA, hide FC/Cube telemetry loss, or
+   survive a dead mission process. SA/pilot takeover, Cube-control collapse,
+   bounded-stage timeout and ordinary mission completion retain their existing
+   behavior.
+6. After exit the core respawns a new waiting process. It again requires an SE
+   low-to-high edge before another run.
+
+The headless plan retains the current Chris defaults: 3.5 m DVL altitude above
+the floor with a 5.0 m maximum relative pressure-depth change. Missing bottom
+lock at that bound follows the existing safe behavior: surface without spinning.
+The mission start never depends on RFD; the normal team OCS/Wi-Fi path remains
+the sole RunStart and RoboCommand report path for this mode.
 
 The Cube remains the GUIDED/POSHOLD motion controller and MAVLink relay; the Jetson remains the mission executor. MAVProxy remains the sole Cube serial owner. The retired Chris component-199 GUI/protocol and duplicate recording owner are not revived.
 
