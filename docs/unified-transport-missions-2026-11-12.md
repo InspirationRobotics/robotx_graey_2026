@@ -56,11 +56,13 @@ component IDs, GUI, or parallel transport stack.
 6. After exit the core respawns a new waiting process. It again requires an SE
    low-to-high edge before another run.
 
-The headless plan retains the current Chris defaults: 3.5 m DVL altitude above
-the floor with a 5.0 m maximum relative pressure-depth change. Missing bottom
-lock at that bound follows the existing safe behavior: surface without spinning.
-The mission start never depends on RFD; the normal team OCS/Wi-Fi path remains
-the sole RunStart and RoboCommand report path for this mode.
+The headless plan uses one fixed onboard target: 4.0 m below the pressure depth
+captured during initialization. It never asks the operator for a depth and does
+not require DVL bottom lock to choose the target. This fixed value applies only
+to the SE-started headless Chris Simple Dive; the separately selected Pool Dive
+Test and pipeline missions retain their existing depth behavior. The mission
+start never depends on RFD; the normal team OCS/Wi-Fi path remains the sole
+RunStart and RoboCommand report path for this mode.
 
 The Cube remains the GUIDED/POSHOLD motion controller and MAVLink relay; the Jetson remains the mission executor. MAVProxy remains the sole Cube serial owner. The retired Chris component-199 GUI/protocol and duplicate recording owner are not revived.
 

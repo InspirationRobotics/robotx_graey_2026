@@ -84,7 +84,7 @@ def generate_launch_description():
              parameters=[config,{
                  'plan_json':json.dumps(dict(kind='dive_spin',operator_kind='dive_here',
                      mode='surface',map='local',competition=True,
-                     dive=dict(altitude_m=3.5,max_depth_m=5.0))),
+                     dive=dict(depth_m=4.0))),
                  'run_id':'','commissioned':True,'rc_start':True,
                  'rc_start_channel':9,'rc_high':1700,
              }],output='screen',**RESPAWN),

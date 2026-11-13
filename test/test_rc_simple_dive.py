@@ -35,6 +35,8 @@ class RcSimpleDiveLaunchTests(unittest.TestCase):
         self.assertIn("'rc_start_channel':9",source)
         self.assertIn("operator_kind='dive_here'",source)
         self.assertIn("competition=True",source)
+        self.assertIn("dive=dict(depth_m=4.0)",source)
+        self.assertNotIn("dive=dict(altitude_m=3.5,max_depth_m=5.0)",source)
         self.assertNotIn("executable='prequal_mission'",source)
         self.assertNotIn("executable='prequal_mission_cv'",source)
         self.assertTrue(any(isinstance(node,ast.FunctionDef)
