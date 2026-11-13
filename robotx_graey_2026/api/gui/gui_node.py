@@ -53,14 +53,10 @@ from robotx_graey_2026.api.pixhawk.mavlink import Link, mavutil
 from robotx_graey_2026.api.pixhawk.ros_link import SemanticMessage
 
 
-CAMERA = 'pole_tracker'
-
 GROUPS = {
     'led': ('LED stack', ['led_node', 'pixhawk_led_node']),
     'nav': ('Nav / EKF stack',
             ['dvl_node', 'vn100_node', 'fused_nav_bridge']),
-    'camera': ('Camera tracker', [CAMERA]),
-    'planner': ('Planner feed', ['pos_server']),
 }
 CORE_MANAGED_GROUPS = {'nav'}
 CORE_MANAGED_EXECUTABLES = frozenset(
@@ -138,29 +134,11 @@ LED_NAMES = {0: 'off', 1: 'RED', 2: 'YELLOW', 3: 'GREEN'}
 LED_DRIVER = 'led_node'
 LED_SOURCE = 'pixhawk_led_node'
 
-MISSION = 'prequal_mission_cv'
 MISSION_EXECUTABLES = (
     'north_maneuver',
     'waypoint_mission',
     'sitl_mission',
-    'prequal_mission',
-    'prequal_mission_cv',
-    'demo_mission',
 )
-MISSION_LOG = '/root/robotx_ws/logs/mission.log'
-MISSION_PARAMS = {
-    'depth': (0.0, 10.0),
-    'gate_forward': (0.0, 50.0),
-    'marker_forward': (-50.0, 50.0),
-    'marker_right': (-50.0, 50.0),
-    'orbit_radius': (0.25, 10.0),
-    'orbit_speed': (0.05, 2.0),
-    'reach_thresh': (0.05, 2.0),
-    'cv_blind': (0.0, 60.0),
-    'state_timeout': (5.0, 300.0),
-}
-# Preserve the repository's original orbit-speed limit.
-MISSION_PARAMS['orbit_speed'] = (0.05, 1.0)
 
 REQUESTS = {
     'shutdown': '/root/robotx_ws/logs/shutdown.request',
@@ -673,7 +651,7 @@ def status():
         'dvl_age': seen(tel['dvl_t']),
         'heading': tel['heading'],
         'hdg_age': seen(tel['hdg_t']),
-        'mission': bool(pids_for(MISSION)),
+        'mission': any_mission_running(),
     }
 
 
@@ -715,64 +693,6 @@ def led_blackout(on):
     return True, 'status LED off - the panel goes dark within a second'
 
 
-def mission_start(query):
-    if calibration_jobs is not None and calibration_jobs.snapshot().get('busy'):
-        return False, 'Finish or cancel calibration/preparation before starting a mission'
-    if any_mission_running():
-        return False, 'a mission is already running'
-
-    dry = query.get('dry', ['true'])[0] == 'true'
-    rc = query.get('rc_start', ['false'])[0] == 'true'
-    cv = query.get('use_cv', ['true'])[0] == 'true'
-
-    if not dry:
-        safety = control_bridge.snapshot()
-        if not safety.get('online'):
-            return False, 'safety node is unavailable'
-        if safety.get('inhibit') or safety.get('sa_active'):
-            return False, 'resolve the safety inhibit before starting a mission'
-        if not safety.get('vehicle_fresh'):
-            return False, 'Cube telemetry is stale'
-
-    cv_up = bool(pids_for(CAMERA))
-    if cv and not cv_up:
-        spawn(['ros2', 'run', 'robotx_graey_2026', CAMERA])
-        if not dry:
-            return False, (
-                CAMERA + ' was not running - started it. Wait for '
-                'the Camera tab to show video, then run again.'
-            )
-
-    argv = [
-        'ros2', 'run', 'robotx_graey_2026', MISSION, '--ros-args',
-        '-p', 'dry_run:=' + ('true' if dry else 'false'),
-        '-p', 'rc_start:=' + ('true' if rc else 'false'),
-        '-p', 'use_cv:=' + ('true' if cv else 'false'),
-    ]
-    for name, (lo, hi) in MISSION_PARAMS.items():
-        raw = query.get(name)
-        if not raw:
-            continue
-        try:
-            value = float(raw[0])
-        except ValueError:
-            return False, 'bad value for ' + name
-        value = max(lo, min(hi, value))
-        argv += ['-p', name + ':=' + str(value)]
-
-    os.makedirs(os.path.dirname(MISSION_LOG), exist_ok=True)
-    with open(MISSION_LOG, 'wb') as output:
-        spawn(argv, output)
-
-    if rc:
-        return True, 'armed and waiting - press SE on the transmitter to start'
-    if dry:
-        return True, 'dry run started' + (
-            '' if cv_up or not cv else ' - camera starting too'
-        )
-    return True, 'MISSION STARTED'
-
-
 def mission_stop():
     if survey.running():    # first: the survey aborts its own leg, or its transit surfaces
         survey.stop(survey.launch['run_id'])
@@ -792,14 +712,15 @@ def mission_stop():
     if link:
         link.disarm()
 
-    for pid in pids_for(MISSION):
+    stray = [pid for name in MISSION_EXECUTABLES for pid in pids_for(name)]
+    for pid in stray:
         try:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
 
     time.sleep(1.0)
-    survivors = pids_for(MISSION)
+    survivors = [pid for name in MISSION_EXECUTABLES for pid in pids_for(name)]
     for pid in survivors:
         try:
             os.kill(pid, signal.SIGKILL)
@@ -1121,21 +1042,9 @@ class Handler(BaseHTTPRequestHandler):
             self.reply_json(200 if ok else 409, {'ok': ok, 'msg': msg})
             return
 
-        if u.path == '/api/mission/log':
-            try:
-                with open(MISSION_LOG, 'rb') as f:
-                    body = b''.join(f.readlines()[-120:])
-            except OSError:
-                body = b'no mission has been run yet'
-            self.reply(200, body, 'text/plain')
-            return
-
-        if u.path in ('/api/mission/start', '/api/mission/stop'):
+        if u.path == '/api/mission/stop':
             with operation_lock:
-                if u.path.endswith('start'):
-                    ok, msg = mission_start(query)
-                else:
-                    ok, msg = mission_stop()
+                ok, msg = mission_stop()
             self.reply_json(200 if ok else 409, {'ok': ok, 'msg': msg})
             return
 

@@ -29,7 +29,7 @@ class PackagingTests(unittest.TestCase):
         ids = []
         for path in ('led/pixhawk_led_node.py', 'pixhawk/kill_switch.py',
                      'navigation/fused_nav_bridge.py',
-                     'gui/gui_node.py', 'navigation/pos_server.py'):
+                     'gui/gui_node.py'):
             tree = ast.parse((ROOT/'robotx_graey_2026/api'/path).read_text())
             calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
                      and isinstance(n.func, ast.Name) and n.func.id == 'Link']

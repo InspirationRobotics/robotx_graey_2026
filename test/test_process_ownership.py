@@ -81,7 +81,7 @@ class ProcessDisplayTests(unittest.TestCase):
                 with self.subTest(argv=argv), self.assertRaises(ValueError):
                     ns['spawn'](argv)
         process.Popen.assert_not_called()
-        ns['spawn'](['ros2', 'run', 'robotx_graey_2026', 'pole_tracker'])
+        ns['spawn'](['ros2', 'run', 'robotx_graey_2026', 'led_node'])
         process.Popen.assert_called_once()
 
     def test_wrappers_and_shell_strings_not_counted_as_nodes(self):
