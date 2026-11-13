@@ -13,7 +13,6 @@ import uuid
 from enum import Enum
 from unittest.mock import Mock
 from robotx_graey_2026.api.navigation.gps_quality import GPSQuality
-from robotx_graey_2026.api.navigation.bridge_identity import BridgeIdentity
 ROOT = Path(__file__).parents[1] / 'robotx_graey_2026/api/navigation'
 
 def load_callbacks(filename, classname):

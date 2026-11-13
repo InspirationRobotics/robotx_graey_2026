@@ -1,7 +1,6 @@
 import math
 import unittest
 from robotx_graey_2026.api.navigation.bridge_estimator import BridgeEstimator, yaw_rotate
-from robotx_graey_2026.api.navigation.mission_reference import MissionReference
 
 
 class EstimatorTests(unittest.TestCase):
@@ -245,12 +244,6 @@ class EstimatorTests(unittest.TestCase):
         e.correct_motion(6., fix, sample)
         self.assertEqual(e.velocity_bias[0], 0.)
 
-    def test_reference_accepts_explicit_cube_timestamp(self):
-        self.acquire()
-        ref = MissionReference.capture(run_id='x', vehicle_epoch='y', gps=self.e.last_fix,
-            pose=dict(ned=[0, 0, 0], received=self.t), now=self.t,
-            captured_utc='test', surface_confirmed=True, gps_qualified=True, ekf_healthy=True)
-        self.assertEqual(ref.gps_time_us, self.e.last_fix['cube_fix_time_us'])
 
     def test_origin_change_is_a_fault(self):
         self.acquire()

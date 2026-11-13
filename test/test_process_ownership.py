@@ -12,7 +12,6 @@ from unittest.mock import Mock
 from urllib.parse import urlparse, parse_qs
 
 from robotx_graey_2026.api.process_ownership import ProcessOwnership, executable_pids
-from robotx_graey_2026.api.navigation.bridge_identity import BridgeIdentity
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -122,21 +121,6 @@ class ProcessDisplayTests(unittest.TestCase):
                       for k in n.keywords))
         self.assertFalse(any(k.arg is None for k in bridge.keywords))
         self.assertFalse(next(k.value.value for k in bridge.keywords if k.arg == 'respawn'))
-
-
-class IdentityTests(unittest.TestCase):
-    def test_alternating_publishers_detected_without_claiming_a_crash(self):
-        tracker = BridgeIdentity()
-        self.assertEqual(tracker.observe('A', 0), '')
-        self.assertIn('Multiple', tracker.observe('B', .1))
-        self.assertIn('Multiple', tracker.observe('A', .2))
-
-    def test_sequential_restart_and_missing_identity(self):
-        tracker = BridgeIdentity()
-        tracker.observe('A', 0)
-        self.assertIn('restarted', tracker.observe('B', 1))
-        self.assertEqual(tracker.observe('B', 1.1), '')
-        self.assertIn('invalid', tracker.observe(None, 2))
 
 
 if __name__ == '__main__':

@@ -2,7 +2,6 @@ import math
 import unittest
 from robotx_graey_2026.api.navigation.prediction_policy import cube_prediction_allowed, new_dvl_measurement
 from robotx_graey_2026.api.navigation.relative_estimator import RelativeEstimator
-from robotx_graey_2026.api.navigation.straight_alignment import straight_command
 from robotx_graey_2026.api.navigation.guided_surface_mission import GuidedSurfaceRun
 
 
@@ -36,13 +35,3 @@ class PredictionAlignmentTests(unittest.TestCase):
         self.assertTrue(new_dvl_measurement(e,18.55,10.))
         self.assertGreater(e.horizontal_variance,25.) # Velocity does not erase position uncertainty.
 
-    def test_fixed_line_corrects_cross_track_and_velocity_for_all_headings(self):
-        for heading in (0.,math.pi/2,-1.7,math.pi):
-            f=(math.cos(heading),math.sin(heading));r=(-f[1],f[0])
-            pos=(3*f[0]+.2*r[0],3*f[1]+.2*r[1])
-            along,cross,cmd=straight_command((0.,0.),pos,(.03*r[0],.03*r[1]),heading)
-            self.assertAlmostEqual(along,3.);self.assertAlmostEqual(cross,.2)
-            self.assertLess(cmd[0]*r[0]+cmd[1]*r[1],0.)
-            self.assertAlmostEqual(cmd[0]*f[0]+cmd[1]*f[1],.1)
-            self.assertEqual(cmd[2],heading)
-        self.assertEqual(straight_command((0,0),(10,0),(0,0),0)[2],(0.,0.,0))

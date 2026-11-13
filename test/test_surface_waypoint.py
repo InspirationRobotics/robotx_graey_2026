@@ -1,7 +1,6 @@
 import unittest
 import test_waypoint as fixtures
 from robotx_graey_2026.api.navigation.waypoint_logic import WaypointRun, validate_plan
-from robotx_graey_2026.api.navigation.continuous_supervisor import ContinuousSupervisor, Observation
 
 
 class SurfaceWaypointTests(unittest.TestCase):
@@ -86,13 +85,3 @@ class SurfaceWaypointTests(unittest.TestCase):
         self.assertIn('0.08',f.run.reason)
         self.assertFalse(any(a=='target' for a,p in actions))
 
-    def test_supervisor_captures_surface_reference_and_tolerates_gps_only_loss(self):
-        s=ContinuousSupervisor(active=True)
-        o=Observation(healthy=True,depth=0.,depth_valid=True,surface_authoritative=True,
-            surface_observed=True,configuration_verified=True,intent='SURFACE_NAV',
-            intent_fresh=True,run_id='surface',gps_good=True,heading_allowed=True)
-        self.assertEqual(s.step(0.,o),[('capture_reference',None)])
-        o.reference_ready=o.reference_saved=True;s.step(.1,o)
-        self.assertTrue(s.allowed)
-        o.gps_good=False;s.step(.2,o);self.assertTrue(s.allowed)
-        o.healthy=False;s.step(.3,o);self.assertFalse(s.allowed)

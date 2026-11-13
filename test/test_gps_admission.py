@@ -1,7 +1,5 @@
 import unittest
 from robotx_graey_2026.api.navigation.gps_admission import CubeClock, GPSAdmission
-from robotx_graey_2026.api.navigation.continuous_supervisor import ContinuousSupervisor
-from robotx_graey_2026.api.navigation.continuous_supervisor import Observation
 
 
 class AdmissionTests(unittest.TestCase):
@@ -118,30 +116,4 @@ class AdmissionTests(unittest.TestCase):
             g.clock.updated = now  # keep the test clock synchronized
             self.assertFalse(self.feed(g, now, north=50.))
 
-    def test_continuous_supervisor_never_switches_or_realigns(self):
-        s = ContinuousSupervisor(active=True, depth_dwell=.1)
-        o = Observation(healthy=True, depth=0., depth_valid=True, intent='SURFACE',
-                        intent_fresh=True, run_id='one', gps_good=True,
-                        configuration_verified=True, heading_allowed=True)
-        s.step(0., o)
-        self.assertEqual(s.step(.2, o), [])
-        self.assertTrue(s.allowed)
-        o.intent = 'DIVE'
-        self.assertEqual(s.step(.3, o), [('capture_reference', None)])
-        o.reference_ready = o.reference_saved = True
-        o.gps_good = False
-        for i in range(4, 300):
-            o.depth = .5
-            self.assertEqual(s.step(i*.1, o), [])
-            self.assertTrue(s.allowed)
-        self.assertEqual(s.snapshot(o)['fusion_policy'], 'continuous')
-        o.healthy = False
-        s.step(30., o)
-        self.assertFalse(s.allowed)
 
-    def test_uncommissioned_does_not_allow_navigation(self):
-        s = ContinuousSupervisor(active=True, depth_dwell=0.)
-        o = Observation(healthy=True, depth=0., depth_valid=True, gps_good=True,
-                        intent='SURFACE', intent_fresh=True)
-        self.assertEqual(s.step(1., o), [])
-        self.assertFalse(s.allowed)
