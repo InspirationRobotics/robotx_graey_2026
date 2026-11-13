@@ -1,4 +1,7 @@
-# Shallow pool commissioning: cm/s, cm/s, cm/s². Does not tune EKF or PID gains.
-WPNAV_SPEED_DN 10
-WPNAV_SPEED_UP 15
-WPNAV_ACCEL_Z 50
+# Shallow pool commissioning limits, ArduSub 4.7 names and units (m/s, m/s, m/s^2):
+# 0.10 m/s down, 0.15 m/s up, 0.50 m/s^2 vertical acceleration. Same values as
+# api/navigation/odometry_profile.py SHALLOW_LIMITS. Does not tune EKF or PID gains.
+# (4.5 equivalents were WPNAV_SPEED_DN 10, WPNAV_SPEED_UP 15, WPNAV_ACCEL_Z 50 in cm/s.)
+WP_SPD_DN 0.10
+WP_SPD_UP 0.15
+WP_ACC_Z 0.50
