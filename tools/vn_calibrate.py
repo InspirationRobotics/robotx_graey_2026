@@ -6,20 +6,13 @@ The operator must maintain hardware kill while handling the assembled vehicle.
 """
 import argparse
 import json
-import math
 from pathlib import Path
 import time
 
 from robotx_graey_2026.api.process_ownership import ProcessOwnership
+from robotx_graey_2026.api.navigation.vn_calibration import gravity_face
 from robotx_graey_2026.api.navigation.vn_protocol import transact, relative_heading
 from robotx_graey_2026.api.pixhawk.identity import FCU_COMPONENT, FCU_SYSTEM
-
-
-def gravity_face(ypr):
-    _, pitch, roll = map(math.radians, ypr)
-    down = (-math.sin(pitch), math.sin(roll)*math.cos(pitch), math.cos(roll)*math.cos(pitch))
-    axis = max(range(3), key=lambda i: abs(down[i]))
-    return axis*2+int(down[axis] < 0) if abs(down[axis]) > .85 else None
 
 
 def main():

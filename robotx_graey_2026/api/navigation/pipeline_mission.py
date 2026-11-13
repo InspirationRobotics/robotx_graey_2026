@@ -3385,12 +3385,6 @@ class PipelineMission(MissionBase):
         self.get_logger().info(f'centring: the light-box model is loaded - {ms:.0f} ms a picture')
         return m
 
-    def box_where(self, dets):
-        """The repair's light box from the box model's finds in a picture: ((x, y) of the biggest box's middle
-        in 640x360 px, share), or None. Any class but a pipe end counts (the sim's model has colours)."""
-        b = led_boxes.biggest_light([d for d in dets if d['colour'] != 'pipe_end'])
-        return (((b['x'] + 1) * 320, (b['y'] + 1) * 180), b['share']) if b else None
-
     def centre_box(self, on):
         """The camera thread runs the light-box model on each picture while centring - and while following
         counts the boxes (unlit_is_green)."""

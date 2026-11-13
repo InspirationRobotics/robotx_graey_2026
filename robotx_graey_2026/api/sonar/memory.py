@@ -83,11 +83,6 @@ class Memory:
         """
         return _slope(self.offsets)
 
-    def span_slope(self):
-        """Degrees per sweep. A growing span corroborates a bend - the pipe is
-        becoming less parallel to you."""
-        return _slope(self.spans)
-
     def bend(self):
         """None, or "port" / "starboard" if the pipe is turning.
 

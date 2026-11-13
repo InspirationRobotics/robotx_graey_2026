@@ -224,17 +224,6 @@ class CrumbMap:
             return 0
         return self._add(angle_deg, row, metres_per_bin, pose)
 
-    def add_sweep(self, sweep, pose_at, max_range_m, turn_rate=None):
-        """A whole Sweep at once (replay). pose_at(t) and turn_rate(t) are the
-        DeadReckoner's."""
-        self.new_sweep()
-        for i, ang in enumerate(sweep.angles_deg):
-            t = sweep.ping_times[i] if sweep.ping_times else None
-            pose = pose_at(t) if t is not None else None
-            turn = turn_rate(t) if turn_rate and t is not None else None
-            self.add_ping(ang, sweep.image[i], sweep.metres_per_bin, pose,
-                          sweep.step_deg, max_range_m, turn)
-
     def crumbs(self):
         """Copies of every live crumb's fields. seen = 0 fresh, 1 half faded."""
         return {f: v.copy() for f, v in self._c.items()}
