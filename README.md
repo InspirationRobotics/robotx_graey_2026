@@ -101,18 +101,19 @@ docker/Dockerfile          container recipe (the environment)
 docs/host-setup.md         Jetson host setup not covered by the Dockerfile
 firmware/LED/LED.ino       Arduino sketch for the status LED strip
 launch/core.launch.py      always-on stack: LEDs, kill switch, navigation, GUI
-launch/prequal.launch.py   core stack plus the vision and position-server nodes
-models/                    YOLO weights
 params/                    saved Pixhawk parameter backups
 scripts/                   start_mavproxy.sh, run_container.sh
-tools/                     bench and diagnostic scripts; GUI and planner pages
+tools/                     GUI pages, camera/sonar launcher, survey run, cam_pair, sonar_map
+sitl/                      ArduSub SITL validation scripts
+archive/                   retired code kept for reference (not installed)
 robotx_graey_2026/api/
   gui/                     gui_node
   led/                     led_node, pixhawk_led_node
-  navigation/              dvl_node, vn100_node, fused_nav_bridge, pos_server,
-                           mission_base, frames, missions
+  navigation/              dvl_node, vn100_node, fused_nav_bridge, navigation_supervisor,
+                           waypoint_mission (Missions page), pipeline_mission (survey)
+  comms/, radio/           RoboCommand/OCS link, RFD mission and status relay
   pixhawk/                 mavlink.py (the Link class), kill_switch
-  vision/                  camera.py, pole_tracker
+  vision/                  camera.py, led_boxes, pipe_line, recorders
 ```
 
 ## Nodes
@@ -126,10 +127,6 @@ robotx_graey_2026/api/
 | `led_node` | status colour â†’ Arduino strip |
 | `pixhawk_led_node` | derives status (disarmed=red, manual=yellow, auto=green) |
 | `gui_node` | serves the control GUI on port 8090 |
-| `pos_server` | live position feed for the map planner |
-| `pole_tracker` | camera â†’ detected target bearing and range |
-| `prequal_mission`, `prequal_mission_cv` | prequalification state machines (kept as reference) |
-| `demo_mission` | instrumented GUIDED run for depth-hold diagnosis |
 
 Every node in `core.launch.py` respawns on crash, because `ros2 launch` does not
 restart a dead node on its own.
